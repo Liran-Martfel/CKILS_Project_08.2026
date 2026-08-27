@@ -11,7 +11,7 @@ for hkl in layouts:
 
 #HKL = handle to a keyboard layout
 English_HKL = 0x4090409
-Hebrew_HKL = 0x040d040d
+Hebrew_HKL = -0xfc2fbf3
 
 hwnd = win32gui.GetForegroundWindow()
 # This is the same message Windows sends itself when switching
