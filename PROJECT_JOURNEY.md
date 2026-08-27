@@ -155,6 +155,52 @@ pywin32-wrapped functions. Built and published all four Week 2 lessons in full t
 
 ---
 
+## 2026-08-27 — Lesson 2.2 debugging: three real bugs, one real finding
+
+**11:29** — Working through lesson 2.2 (rule engine) surfaced a genuinely productive debugging
+session:
+
+1. **Blocking import bug:** `from week1.focus_watcher import WinEventProcType` executed that
+   entire module on import — including its own blocking `PumpMessages()` call at the bottom — so
+   the script never reached its own hook registration. Fixed by removing the unused import.
+2. **Case-sensitivity bug:** `RULES` used lowercase keys (`'notepad.exe'`), but `psutil` reported
+   `'Notepad.exe'` (capital N) on this machine — an exact-match dict lookup silently failed every
+   time. Fixed with `RULES.get(exe_name.lower())`.
+3. **Real architecture finding, not a bug:** Windows 11's built-in Calculator doesn't run as
+   `calculator.exe` — its window belongs to `ApplicationFrameHost.exe`, a wrapper Windows puts
+   around modern Store-style apps. Worse, even after matching that process name, the actual
+   switch silently did nothing: `ApplicationFrameHost.exe` is only the title-bar/frame window: the
+   real app content (and the thread actually receiving keystrokes) lives in a separate child
+   window, usually owned by a different process. `PostMessage` succeeded but landed on the wrong
+   thread. Confirmed this isn't a one-off guess — the charter's own test matrix already separates
+   "Modern Windows (UWP)" as its own testbed category for exactly this reason. Decision: treat
+   proper UWP-app targeting as Week 3/4 "edge case" work, not something Week 2's simple rule engine
+   needs to solve — swapping the Hebrew test app to a classic (non-UWP) app instead to keep Week 2
+   moving.
+
+Also reconfirmed along the way: `-0xfc2fbf3` (Hebrew HKL from lesson 2.1) is correct — proven by
+the identical code path already working for English/Notepad.
+
+---
+
+## 2026-08-27 — Lesson 2.2 working end to end
+
+**11:38** — Confirmed working: Alt-Tabbing between two apps now visibly switches the keyboard
+language automatically. Two more fixes along the way, found independently:
+
+1. **Bad test app, not a bug:** confirmed Calculator (`ApplicationFrameHost.exe`) genuinely
+   doesn't work with this approach, as diagnosed earlier. Swapped the test pair to **Chrome and
+   Notepad** — both ordinary desktop apps — which resolved it immediately.
+2. **Duplicate Hebrew layout entries:** the machine has more than one installed layout matching
+   LCID `0x040D` (Hebrew) — an easy trap, since filtering by LCID alone doesn't guarantee a unique
+   match if more than one is registered. Confirmed by testing: **`-0xfc2fbf3` is the correct one**;
+   an earlier attempt used a different Hebrew-matching entry that didn't actually work.
+
+Lesson 2.2 (rule engine) is now genuinely complete and verified working, not just "no errors
+thrown." Next: 2.3 (override guard) and 2.4 (latency measurement).
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
