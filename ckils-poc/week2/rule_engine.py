@@ -5,7 +5,7 @@ English_HKL = 0x04090409
 Hebrew_HKL  = -0xfc2fbf3
 
 RULES = {'Notepad.exe' : English_HKL,
-          'Calculator.exe' : Hebrew_HKL}
+          'chrome.exe' : Hebrew_HKL}
 
 user32 = ctypes.windll.user32
 WinEventProcType = ctypes.WINFUNCTYPE(
