@@ -1,3 +1,11 @@
+import ctypes
+import ctypes.wintypes
+import win32api
+import win32con, win32gui, win32process, psutil
+
+from week1.focus_watcher import WinEventProcType, user32
+
+
 def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
     title = win32gui.GetWindowText(hwnd)
     # GetWindowThreadProcessId returns TWO values: (thread_id, process_id).
