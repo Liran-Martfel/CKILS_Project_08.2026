@@ -120,6 +120,20 @@ commits/pushes themselves going forward.
 
 ---
 
+## 2026-08-27 — Finding: Alt-Tab fires multiple foreground events
+
+**09:55** — Running `focus_watcher.py`, noticed `Focus changed!` prints multiple times per single
+Alt-Tab switch. Confirmed this is real Windows behavior, not a bug: Alt-Tab shows a temporary
+switcher overlay before landing on the target window, and that overlay itself briefly takes
+foreground, firing its own `EVENT_SYSTEM_FOREGROUND` — so one Alt-Tab can fire 2-3 events.
+
+Noted as a real design constraint for Week 2's rule engine: it can't react blindly to every event
+fired and will need to check whether the window/process actually changed from the last one it
+acted on before applying a language switch, to avoid redundant/flickery switching from event
+bursts like this.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)

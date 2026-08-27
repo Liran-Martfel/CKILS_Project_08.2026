@@ -1,6 +1,6 @@
 import ctypes
 import ctypes.wintypes
-import win32con, win32gui
+import win32con, win32gui, win32process, psutil
 
 user32 = ctypes.windll.user32  ## direct access to Windows' user32.dll — this is where
 ## SetWinEventHook actually lives, since pywin32 doesn't wrap it
@@ -19,8 +19,16 @@ WinEventProcType = ctypes.WINFUNCTYPE(
 )
 
 def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
-    ## this function recognizes in real time when the focused window is being changed
-    print("Focus changed!")
+    title = win32gui.GetWindowText(hwnd)
+    # GetWindowThreadProcessId returns TWO values: (thread_id, process_id).
+    # We only need the second one — the underscore is a Python convention
+    # meaning "I'm intentionally throwing this value away."
+
+    pid = win32process.GetWindowThreadProcessId(hwnd)
+    # Now that we have the process ID, psutil can look up its .exe name.
+    exe_name = psutil.Process(pid).name()
+
+    print(f'Switched to: {title!r} ({exe_name})')
 
 ## Wrap our plain Python function in that exact shape. Keep this variable alive —
 ## if it gets garbage collected while the hook is active, Windows will crash.
