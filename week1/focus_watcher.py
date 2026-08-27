@@ -24,7 +24,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     # We only need the second one — the underscore is a Python convention
     # meaning "I'm intentionally throwing this value away."
 
-    pid = win32process.GetWindowThreadProcessId(hwnd)
+    _, pid = win32process.GetWindowThreadProcessId(hwnd)
     # Now that we have the process ID, psutil can look up its .exe name.
     exe_name = psutil.Process(pid).name()
 

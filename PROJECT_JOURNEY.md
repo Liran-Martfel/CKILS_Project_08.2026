@@ -134,6 +134,27 @@ bursts like this.
 
 ---
 
+## 2026-08-27 — Week 1 complete; Week 2 lessons built
+
+**10:23** — Week 1 finished: `hello_win32.py` (1.1), `focus_watcher.py` (1.2, fixed and confirmed
+working), and lesson 1.3 (process identification, fixed a tuple-unpacking bug independently along
+the way) all working. Along the way, confirmed a real OS finding: Alt-Tab fires multiple
+`EVENT_SYSTEM_FOREGROUND` events per switch (its overlay briefly takes foreground itself) — noted
+as a constraint for Week 2's rule engine. Also clarified that tab-level detection (switching Gmail
+↔ Google Search in one browser window) is out of scope for Week 1 by design — no focus event fires
+for tab switches at all, since the window itself never loses focus; that's Week 3 territory
+(matches the charter's own TC-02 test case).
+
+User asked whether leaving Week 2 as an outline meant self-directed research was expected — clarified
+that was never the intent; per the plan, later weeks were deliberately left light only until Week 1
+was actually finished. Verified the Week 2 Win32 mechanics properly this time before writing
+anything (learned from the Week 1 `SetWinEventHook` mistake): confirmed `win32api.GetKeyboardLayoutList()`,
+`win32api.GetKeyboardLayout(thread_id)`, and `win32con.WM_INPUTLANGCHANGEREQUEST` are all real,
+pywin32-wrapped functions. Built and published all four Week 2 lessons in full teaching style
+(2.1 force-switch by hand, 2.2 rule engine, 2.3 override guard, 2.4 latency measurement).
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
