@@ -348,6 +348,24 @@ Updated `C:\Users\liran\.claude\plans\hi-i-want-to-scalable-book.md`:
 
 ---
 
+## 2026-08-30 — Every lesson now shows the complete file, not just a snippet
+
+**19:40** — Motivated by a real confusion on lesson 2.4: its instructions said to add timing
+"right before the PostMessage call," but the lesson only showed a short fragment with no visible
+PostMessage call nearby, and the reference solution (2.3) used "..." elisions ("same imports as
+2.2, plus:") instead of a complete file. That ambiguity led to code being added in the wrong place
+in the actual function — before the rule lookup and override guard even ran, effectively bypassing
+both.
+
+Added a collapsible **"Full file, exactly as it should look after this lesson"** block to every
+lesson (1.1 through 2.4) on the training platform — always the complete, standalone,
+copy/paste-ready file(s) for that checkpoint, no ellipses. For 1.1–1.3, 2.1, and 2.2 this reuses
+what was already complete in those lessons; 2.3 and 2.4 (previously incomplete) are now written
+out in full, matching the actual reviewed/merged design (previous_hwnd-based override reset,
+`perf_counter`-timed switch). Verified the underlying JS still parses cleanly before republishing.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
