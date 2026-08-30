@@ -309,6 +309,21 @@ done) and filled in the "how to build/run" section, which had been a placeholder
 
 ---
 
+## 2026-08-30 — Master goal set: the project must finish AI-driven
+
+**18:30** — Clarified the project's actual finish line: it must end up related to AI, not stop at
+the rule-based tiers. The mandatory end state — CKILS recognizes the screen (image/vision) and how
+the user is typing, and *decides* the right language autonomously from that understanding, instead
+of relying on a fixed per-app rule map. This promotes the theory doc's "Tier 3, content-aware"
+layer from an optional stretch goal to the required final phase.
+
+Weeks 1-2 (focus detection, Tier 1 rule engine, override guard) are unchanged — they're still the
+learning foundation this builds on top of, not replaced by it. Updated `Welcome_page_explaining.md`
+with a new "The master goal" section near the top and a "Where this is headed" note before the
+status section, and updated the training platform with the same framing so the two stay in sync.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)

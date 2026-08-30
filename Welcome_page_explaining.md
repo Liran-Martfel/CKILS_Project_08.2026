@@ -12,6 +12,15 @@ type a full sentence of gibberish before noticing. Then you delete it, switch la
 retype. It happens constantly — in chats, documents, search bars, work tools — and it adds up to
 real lost time and real mistakes (imagine this happening in an official document or a form).
 
+## The master goal
+
+This POC's finish line is **AI-driven, not rule-driven**. The rule-based tiers below (Tier 1/2)
+are the learning foundation, not the end state. The project is done when CKILS can look at the
+screen (image/vision recognition) and how the user is typing, and *decide* the right language to
+switch to from that understanding directly — no per-app rule map required at that point. This is
+what the theory doc's optional "Tier 3, content-aware" layer grows into: not a stretch goal, but
+the mandatory final phase.
+
 ## The core idea (the hypothesis this project tests)
 
 > Can a small background service watch what you're doing on Windows — which app, which window —
@@ -59,6 +68,12 @@ must-hit ones: switching takes under 150ms (so it feels instant), it correctly i
 app 100% of the time in testing, it never needs administrator permissions, and it never reads
 anything from a password field. The full list lives in the theory document
 (`POC - Proof Of Concept - theory.docx`).
+
+## Where this is headed
+
+Once the rule-based tiers (Tier 1/2) are solid, the project moves toward the master goal above:
+an autonomous, AI-driven system that recognizes the screen and the user's typing itself, instead
+of being told per-app what to do.
 
 ## Where the project stands right now
 
