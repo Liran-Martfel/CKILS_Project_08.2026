@@ -201,6 +201,114 @@ thrown." Next: 2.3 (override guard) and 2.4 (latency measurement).
 
 ---
 
+## 2026-08-30 — "My code disappeared" — a stale-path bug in the lessons
+
+**14:23** — User reported all Week 2 code missing from PyCharm. Investigated: nothing was
+actually lost — `week2/list_layouts.py` and `week2/rule_engine.py` were sitting safely committed
+in git, just nested under `ckils-poc/week2/` instead of the expected flat `week2/` (matching
+`week1/`). Root cause: the training platform's Week 2 lesson instructions still said
+`"Create ckils-poc/week1/..."` / `"ckils-poc/week2/..."` — leftover paths from before the project
+was consolidated onto `Personal_Project` directly, never updated after that move. The user
+followed the (wrong) instructions correctly; this was a lesson-content bug, not user error, same
+category as the earlier `SetWinEventHook` mistake.
+
+Fixed properly: moved both files from `ckils-poc/week2/` to `week2/` via `git mv` (preserving
+history, staged but left uncommitted per the user's own commit workflow), removed the now-empty
+`ckils-poc/` folder, and stripped every stale `ckils-poc/` prefix from all six affected lesson
+instructions (1.1, 1.2, 1.3, 2.1, 2.2, 2.3) on the training platform so future lessons don't repeat
+this.
+
+---
+
+## 2026-08-30 — One code folder: `week1/` and `week2/` moved under `ckils/`
+
+**14:26** — At the user's request, tidied the project structure: both `week1/` and `week2/` now
+live under a single parent folder, `ckils/` (`ckils/week1/`, `ckils/week2/`), instead of sitting
+loose at the project root. Moved via `git mv` (staged, uncommitted — left to the user). Updated
+every affected lesson path on the training platform to match (`ckils/week1/...`,
+`ckils/week2/...`), so future weeks (3, 4, ...) land in the right place from the start instead of
+repeating the stale-path issue from earlier today.
+
+---
+
+## 2026-08-30 — The "stuck on Hebrew" mystery: a deep multi-stage investigation
+
+**17:25** — Long debugging session on lesson 2.3 (override guard), worth recording in full since it
+took several rounds of hypothesis-and-test to actually nail down.
+
+**Symptom:** switching Chrome → Notepad almost always failed to visibly switch to English;
+waiting didn't help; Notepad → Chrome and a fresh cold-start on Notepad both worked fine. Ruled
+out several plausible causes in order, each with concrete evidence:
+
+1. *Windows' "different input method for each app window" setting* — a real Windows 11 feature
+   that independently remembers/restores per-app language, which would explain this exact pattern.
+   Ruled out: the user confirmed the setting was already off.
+2. Added a debug print of `actual_hkl` vs `target_hkl` on every event — showed everything matching
+   correctly at the moment of focus, no anomaly visible yet.
+3. Added delayed re-checks (via background threads, since a `SetWinEventHook` callback can't safely
+   `sleep()` without stalling the whole hook) peeking at the layout again +0.5s and +1.5s after each
+   focus event. **This caught it directly:** Notepad's layout was correct (English) at the moment
+   of focus, then flipped to Hebrew on its own about half a second later — with nothing in
+   `rule_engine.py` ever telling it to do that (`RULES` only ever maps Notepad to English). This is
+   also what was triggering false "manual override detected" messages on the next visit — the
+   guard correctly detected a divergence, but had no way to know it wasn't the user causing it.
+
+**Ruled out (4):** a stray duplicate `python.exe` process — checked `tasklist` while
+`rule_engine.py` was actively running: exactly one process, no duplicates.
+
+**Root cause, confirmed (5):** swapped the English test target from Notepad to **Visual Studio
+Code** (`Code.exe`), keeping Chrome unchanged. VS Code stayed perfectly stable across every check
+(focus time, +0.5s, +1.5s), zero reversions, over many repeated switches. This isolates the bug
+entirely to **Notepad itself** — most likely modern Windows 11 Notepad's own internal text-service
+behavior (it's been substantially rebuilt in recent years, unlike the old immutable version)
+reasserting its own remembered state shortly after gaining focus. Not a flaw in CKILS's mechanism
+(`ctypes` + `SetWinEventHook` + `PostMessage`/`WM_INPUTLANGCHANGEREQUEST` + the override guard all
+verified working correctly against VS Code) — an app-specific quirk, in the same spirit as the
+Calculator/UWP finding from lesson 2.2. Test apps going forward: prefer VS Code (or another
+confirmed-stable app) over Notepad for the English side.
+
+---
+
+## 2026-08-30 — A second scare that turned out to be correct behavior
+
+**17:39** — After the Notepad finding above, swapped the Hebrew test app to Zoom (`Zoom.exe`,
+Code.exe still English) and saw what looked like a second mystery: both Zoom and VS Code triggered
+"manual override detected." This time it wasn't a bug — confirmed the user had pressed their usual
+manual-switch hotkey out of habit during the test, without intending to. The override guard
+correctly detected it, backed off for both windows, and resumed normally afterward. A useful
+reminder: not every unexpected override-detection is a bug — sometimes it's genuinely the feature
+working, especially given the user's own lifelong habit of manually switching layouts is exactly
+what this project exists to reduce. Lesson 2.3 is now fully confirmed working end to end.
+
+---
+
+## 2026-08-30 — Override guard redesigned: no timer, fully automatic
+
+**18:11** — At the user's request, redesigned the override guard from lesson 2.3 to drop the
+15-second cooldown timer entirely (`OVERRIDE_COOLDOWN`/`suppressed_until` removed) — it was making
+manual testing fragile and timing-dependent, and the user specifically wanted no visible mechanism
+at all (no button, no wait, invisible to the end user).
+
+**New design:** once a manual override is detected on a window, CKILS leaves it alone indefinitely
+— tracked via a new `overridden` set. The reset trigger is now purely event-based, not
+time-based: the instant focus moves to a *different* window, whichever window was just left gets
+its override memory wiped (`overridden.discard(...)`, `last_set.pop(...)`) via a new
+`previous_hwnd` tracker at the top of `on_focus_change`. Its next visit is then treated as
+completely fresh, rule re-applied automatically. Confirmed this requires no special handling for
+"closing the app" — the reset only needs a switch to another window, which the user confirmed is
+the actual desired trigger. The grace-period fix (`SWITCH_GRACE`/`last_switch_time`, from earlier)
+is unrelated and was left untouched. Applied directly to `ckils/week2/rule_engine.py`, and updated
+Lesson 2.3 on the training platform to teach this exact design instead of the old timer-based one.
+
+**Decided for the final phase (not yet started):** debug `print()` output stays as-is until the
+project is otherwise complete. At that point, logging moves from console prints to an external
+database — **Neon Console** (Postgres) — instead. Captured here so it isn't lost before then.
+
+Also updated `Welcome_page_explaining.md` with the current real status (Week 1 done, Week 2 nearly
+done) and filled in the "how to build/run" section, which had been a placeholder since the start.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
@@ -208,4 +316,4 @@ thrown." Next: 2.3 (override guard) and 2.4 (latency measurement).
 - **Welcome page:** `Welcome_page_explaining.md`
 - **Execution plan:** `C:\Users\liran\.claude\plans\hi-i-want-to-scalable-book.md`
 - **Training platform (Track A):** https://claude.ai/code/artifact/f6d5d3c8-41c7-467e-b4d6-16313baaa78c
-- **Code (Track B):** `week1/`, `week2/`, etc.
+- **Code (Track B):** `ckils/week1/`, `ckils/week2/`, etc.

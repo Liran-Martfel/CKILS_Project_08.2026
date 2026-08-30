@@ -37,7 +37,10 @@ Underneath, three mechanisms make this possible:
 - **Noticing you switched apps or windows** (a Windows "focus changed" event).
 - **Actually changing the keyboard layout** for that specific window, programmatically.
 - **A manual override** — if you switch the language yourself, the tool respects that immediately
-  and steps back for a while, so it never fights you over control of your own keyboard.
+  and leaves that window alone, with no timer and no button. It quietly forgets the override the
+  moment you switch to a different window, so the next time you come back, it's automatically back
+  to normal — never fighting you over control of your own keyboard, and never needing you to notice
+  anything happened at all.
 
 ## What this POC covers — and what it deliberately doesn't
 
@@ -61,9 +64,18 @@ anything from a password field. The full list lives in the theory document
 
 This is a **learning project** — it's being built from scratch in Python, one weekly milestone at
 a time, as a hands-on way to learn both coding and how a real Windows system-level tool comes
-together. It's currently at the very start: environment setup and the first working piece
-(noticing when you switch windows).
+together. Week 1 (noticing focus changes, identifying which app you're in) is complete. Week 2 is
+nearly done: CKILS can already watch two rule-configured apps, automatically switch each one's
+keyboard layout, and correctly leave a window alone if you override it by hand — resuming
+automatically the moment you move on to something else. All of it verified through real,
+hands-on debugging, including a few genuine surprises about how Windows itself behaves (some apps,
+like Calculator and Notepad, turned out to have their own quirks worth knowing about).
 
 ## How to build/run
 
-Coming soon — this section fills in once the first working code exists (end of Week 1).
+- Requirements: Windows 10/11, Python 3.10+, with `pywin32` and `psutil` installed
+  (`pip install pywin32 psutil`) inside a virtual environment.
+- The working code lives under `ckils/week1/` and `ckils/week2/`, one file per lesson.
+- To try the current rule-based auto-switcher: edit the `RULES` dictionary near the top of
+  `ckils/week2/rule_engine.py` to match two apps you actually have open, then run it
+  (`python ckils/week2/rule_engine.py`) and Alt-Tab between them.
