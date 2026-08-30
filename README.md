@@ -28,8 +28,9 @@ map required at that point.
 ## Project status
 
 - **Week 1 — done.** Focus-change detection, resolving the focused window to its process.
-- **Week 2 — nearly done.** Rule-based auto-switching plus the manual-override guard, both
-  verified working end to end.
+- **Week 2 — done.** Rule-based auto-switching, the manual-override guard, and switch-latency
+  measurement (well under 1ms per switch, charter target is under 150ms) — all verified working
+  end to end.
 - **Weeks 3+ — ahead.** Broader app/browser-tab compatibility, then the master goal above:
   replacing the rule table with real AI-driven understanding.
 

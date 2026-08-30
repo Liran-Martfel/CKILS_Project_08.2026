@@ -79,12 +79,13 @@ of being told per-app what to do.
 
 This is a **learning project** — it's being built from scratch in Python, one weekly milestone at
 a time, as a hands-on way to learn both coding and how a real Windows system-level tool comes
-together. Week 1 (noticing focus changes, identifying which app you're in) is complete. Week 2 is
-nearly done: CKILS can already watch two rule-configured apps, automatically switch each one's
-keyboard layout, and correctly leave a window alone if you override it by hand — resuming
-automatically the moment you move on to something else. All of it verified through real,
-hands-on debugging, including a few genuine surprises about how Windows itself behaves (some apps,
-like Calculator and Notepad, turned out to have their own quirks worth knowing about).
+together. **Week 1 and Week 2 are both complete.** CKILS watches two rule-configured apps,
+automatically switches each one's keyboard layout, correctly leaves a window alone if you override
+it by hand — resuming automatically the moment you move on to something else — and measured
+switch latency comes in at well under 1ms per switch (charter target: under 150ms). All of it
+verified through real, hands-on debugging, including a few genuine surprises about how Windows
+itself behaves (some apps, like Calculator and Notepad, turned out to have their own quirks worth
+knowing about). Week 3 (broader app/browser-tab compatibility) is next.
 
 ## How to build/run
 
