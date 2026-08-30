@@ -396,6 +396,20 @@ investigation earlier today — functionally inert, optional cleanup only, not b
 
 ---
 
+## 2026-08-30 — Docs synced to "Week 2 complete"; 2.4 gets a proper test procedure
+
+**20:20** — Cleanup pass after Lesson 2.4's completion:
+
+- Training platform's Lesson 2.4 "Type it and run it" section replaced with a proper **"How to
+  test it"** step-by-step (open both apps, run it, Alt-Tab and read the numbers, check against
+  SC-02, note that a single higher first reading is normal warm-up — and explicitly re-run 2.3's
+  override check on the same file, since an edit here could silently break the previous lesson's
+  guard without it being obvious).
+- `Welcome_page_explaining.md` and `README.md` both updated from "Week 2 nearly done" to **Week 2
+  done**, with the measured latency result (well under 1ms per switch) called out specifically.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
