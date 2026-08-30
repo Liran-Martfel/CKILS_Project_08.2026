@@ -324,6 +324,30 @@ status section, and updated the training platform with the same framing so the t
 
 ---
 
+## 2026-08-30 — Plan revised: two new mandatory weeks for the AI phase
+
+**19:15** — Asked whether the current path was still correct given the master goal, then asked to
+update the plan and timeline. Confirmed the architecture already supports it cleanly: Weeks 1-2's
+mechanism (focus detection, `PostMessage` switching, the override guard) is fully decoupled from
+*how* the target language gets decided — right now a `RULES` dict lookup, later a drop-in AI call.
+Nothing already built needs to change; Week 4's old "optional stretch" framing was the only thing
+that no longer fit, since a real screen-recognition + typing-intent decision engine is a much
+bigger problem than the one-line `langdetect` idea originally sketched there.
+
+Updated `C:\Users\liran\.claude\plans\hi-i-want-to-scalable-book.md`:
+- Timeline revised from "up to 4 weeks" to **up to 6 weeks total**, while noting actual pace has
+  run well ahead of one-milestone-per-week so far.
+- Added a **Master goal** section documenting Tier 3 as mandatory, not optional.
+- Week 4 keeps its original scope (test matrix + findings on the rule-based system) but is now a
+  real standalone checkpoint, not a stepping stone with a stretch goal bolted on.
+- Added **Week 5** (research/prototype the AI decision engine offline, against recorded examples —
+  correctness first, no latency budget yet) and **Week 6** (integrate it as the `RULES.get(...)`
+  replacement, re-measure SC-02 latency, re-run the TC-01…TC-05 test matrix against the AI-driven
+  version, decide explicitly whether the <150ms target needs relaxing for the decision step vs. the
+  switch-execution step).
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
