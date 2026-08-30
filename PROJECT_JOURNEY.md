@@ -366,6 +366,36 @@ out in full, matching the actual reviewed/merged design (previous_hwnd-based ove
 
 ---
 
+## 2026-08-30 — Lesson 2.4 complete: latency measured, SC-02 passes
+
+**20:05** — Working through 2.4 (latency measurement) surfaced a genuinely useful string of small,
+repeated typos — good practice reading error messages carefully:
+
+1. `time.pref_counter()` / `time.pred_counter()` → `time.perf_counter()` (typo'd twice, two
+   different ways).
+2. `{elapsed_ms.f1}` → tried as `{elapsed_ms:.f1}` next → finally correct as `{elapsed_ms:.1f}` —
+   an f-string format spec (`:.1f`, one decimal place) is easy to garble character-by-character.
+3. Placement bug: the timing block was first added at the very top of `on_focus_change`, before
+   `exe_name`/`target_hkl` existed yet, with its own extra `PostMessage` call — which would have
+   bypassed the rule lookup and the override guard entirely, forcing a switch on every focus event
+   regardless of overrides. Corrected placement: wrap the one real, guarded `PostMessage` call
+   near the bottom of the function instead — never add a second call.
+4. A leftover duplicate `print(...)` (the pre-2.4 version, without timing) stuck around for a
+   couple of rounds after the timed one was added — removed once flagged.
+
+**Result, confirmed by the user:** switches print consistently at ≤0.5ms, one cold-start outlier
+at 3.1ms (expected — first-call OS/Python warm-up, not a real number to worry about). Comfortably
+passes the charter's SC-02 target (<150ms). Re-ran the override-guard sequence on this same edited
+file afterward — manual override still detected and respected, and still resumes automatically
+after switching to a different window and back. **Week 2 is now fully complete**: rule engine,
+override guard, and latency measurement, all verified working end to end.
+
+Merged `ckils/week2/rule_engine.py` as-is (a few harmless leftovers remain — the unused
+`check_layout_later`/`threading` import and some commented-out debug lines from the override-guard
+investigation earlier today — functionally inert, optional cleanup only, not blocking).
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
