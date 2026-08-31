@@ -2,6 +2,51 @@ import ctypes, ctypes.wintypes
 import win32api, win32con, win32gui, win32process, psutil
 import time
 import threading
+# ================================================================================
+# CKILS rule_engine.py — Legend (short)
+# ================================================================================
+#
+# hwnd        "Handle to a WiNDow" — an ID number, not the window itself.
+# hkl         "Handle to a Keyboard Layout" — an ID for one installed layout.
+# pid         "Process ID" — a number identifying one running program.
+# thread_id   Layout is tracked PER THREAD, not per window — why some calls
+#             need this instead of an hwnd.
+#
+# user32      user32.dll — the core Windows file handling windows/input/
+#             keyboard layouts. Used via ctypes here specifically because
+#             SetWinEventHook has no pywin32 wrapper — ctypes calls straight
+#             into the DLL for just that one function.
+#
+# ctypes            Python's bridge to raw Windows DLL functions.
+# WinEventProcType  Describes your callback's exact shape (# of args, types)
+#                   so Windows (written in C) knows how to call it.
+# callback          on_focus_change, wrapped in that shape. Kept in a
+#                   variable so it isn't garbage-collected while active.
+# hook              Your active SetWinEventHook registration.
+#
+# RULES             exe_name -> either a plain hkl (simple app) or a list of
+#                   (keyword, hkl) tuples (multi-window app, matched by title).
+# resolve_target()  Decides the hkl for the focused window, or None.
+# exe_name          Focused app's file name — the RULES dict key.
+# title             Focused window's title-bar text — tells apart windows
+#                   sharing the same exe_name.
+# target_hkl        What resolve_target() says this window SHOULD be.
+# actual_hkl        What the layout ACTUALLY is right now — compared against
+#                   last_set to catch a manual override.
+#
+# last_set          {hwnd: hkl} — what we last set (or the user last chose).
+# last_switch_time  {hwnd: time} — when we last switched, for the grace check.
+# SWITCH_GRACE      Brief window after our own switch where a mismatch is
+#                   ignored (our own change may not have propagated yet).
+# overridden        Set of hwnds currently in "leave it alone" mode.
+# previous_hwnd     Window focused just before this event — used to detect
+#                   "focus just left a window," which resets its override.
+# elapsed_ms        How long PostMessage took, via time.perf_counter().
+#
+# EVENT_SYSTEM_FOREGROUND    "A different window just got focus."
+# WM_INPUTLANGCHANGEREQUEST  Same message Windows sends on Alt+Shift.
+# WINEVENT_OUTOFCONTEXT      Run the callback safely in our own process.
+# ================================================================================
 
 def check_layout_later(exe_name, thread_id, delay):
     # runs on its own, separate from the main program, so it can sleep
@@ -15,7 +60,8 @@ English_HKL = 0x04090409
 Hebrew_HKL  = -0xfc2fbf3
 
 RULES = {'Code.exe' : English_HKL,
-          'Zoom.exe' : Hebrew_HKL}
+          'chrome.exe' : [('Gmail',Hebrew_HKL),('Google Docs',English_HKL),],} #multi-windows within chrome
+
 last_set = {}          # hwnd -> HKL we last set (or the user's manual choice) for that window
 last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
 overridden = set()     # hwnd the user manually overrode, not yet reset
@@ -29,9 +75,26 @@ WinEventProcType = ctypes.WINFUNCTYPE(
     None, ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD, ctypes.wintypes.HWND,
     ctypes.wintypes.LONG, ctypes.wintypes.LONG, ctypes.wintypes.DWORD, ctypes.wintypes.DWORD)
 
+def resolve_target(exe_name,title):
+    """
+    if it's none, nothing happened.
+    rule = RULES.get(exe_name) means look up what is stored in RULES
+    and check, is that a value a number? if that so, return the rule.
+    if it's not a number, check if the keyword or hkl is anywhere inside this title text, if so return the hkl
+    """
+    rule = RULES.get(exe_name)
+    if rule is None:
+        return None
+    if isinstance(rule, int): #a simple app, the title doesn't matter, just the rule.
+        return rule
+    for keyword, hkl in rule: #relevent in multi-window app - first matching to the title wins.
+        if keyword in title:
+            return hkl
+    return None # none of the known titles matched — leave it alone
+
+
 def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
     global previous_hwnd
-
     # The instant focus leaves a window we were overriding, forget it ever happened —
     # its next visit starts completely fresh, rule applied automatically, nothing to see.
     if previous_hwnd is not None and previous_hwnd != hwnd and previous_hwnd in overridden:
@@ -40,13 +103,15 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     previous_hwnd = hwnd
 
     _, pid = win32process.GetWindowThreadProcessId(hwnd)
+    title = win32gui.GetWindowText(hwnd)
     exe_name = psutil.Process(pid).name()
-    target_hkl = RULES.get(exe_name)
+    target_hkl = resolve_target(exe_name, title)
     if target_hkl is None:
         return
 
     actual_hkl = win32api.GetKeyboardLayout(thread_id)
-#print(f"  [debug] {exe_name}: actual={hex(actual_hkl)}  target={hex(target_hkl)}")
+    print(f"  [debug] {exe_name} hwnd={hwnd} thread={thread_id} actual={hex(actual_hkl)} last={hex(last_set.get(hwnd, -1))}")
+    #print(f"  [debug] {exe_name}: actual={hex(actual_hkl)}  target={hex(target_hkl)}")
     # ignore mismatches caused by our own switch not having propagated yet
     just_switched = time.time() - last_switch_time.get(hwnd, 0) < SWITCH_GRACE
     if hwnd in last_set and actual_hkl != last_set[hwnd] and not just_switched:
@@ -61,13 +126,6 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
     elapsed_ms = (time.perf_counter() - start) * 1000
     print(f'{exe_name}: switched to {hex(target_hkl)} in {elapsed_ms:.1f} ms')
-#
-# # spin up two background helpers to peek again shortly after, without blocking this callback
-# threading.Thread(target=check_layout_later, args=(exe_name, thread_id, 0.5), daemon=True).start()
-# threading.Thread(target=check_layout_later, args=(exe_name, thread_id, 1.5), daemon=True).start()
-#
-#
-# win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
 
     last_set[hwnd] = target_hkl
     last_switch_time[hwnd] = time.time()
