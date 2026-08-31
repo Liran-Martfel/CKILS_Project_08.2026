@@ -410,6 +410,35 @@ investigation earlier today — functionally inert, optional cleanup only, not b
 
 ---
 
+## 2026-08-31 — Week 3 built out in full on the training platform
+
+**09:15** — Built and published all three Week 3 lessons, replacing the old outline placeholder:
+
+- **3.1 — Rules that check the title too (Tier 2).** `RULES` now accepts either a plain HKL
+  (simple, always-one-language apps) or a list of `(title keyword, HKL)` pairs, resolved by a new
+  `resolve_target(exe_name, title)` helper — needed because one process (e.g. `chrome.exe`) can
+  host completely different windows (Gmail vs. an English site) that a process-only rule can't
+  tell apart.
+- **3.2 — Catch a tab switch without ever leaving the window.** The real gap Tier 2 alone doesn't
+  close: switching *tabs* inside one window never fires `EVENT_SYSTEM_FOREGROUND` at all, since the
+  window itself never loses focus — the charter's own TC-02 case, and something every mechanism
+  built since Week 1 is blind to. Researched and verified (not assumed) a second Win32 event,
+  `EVENT_OBJECT_NAMECHANGE`, which fires when a window's title text changes even without a focus
+  change — confirmed via Microsoft's own engineering blog (Raymond Chen, "The Old New Thing") and
+  double-checked directly against this project's own venv that pywin32 already wraps all three
+  constants needed (`EVENT_OBJECT_NAMECHANGE`, `OBJID_WINDOW`, `CHILDID_SELF` — no `ctypes` gap
+  this time, unlike `SetWinEventHook` itself back in Week 1). Registers a second hook pointed at
+  the same callback, filtered to just the currently-focused window's own title changing.
+- **3.3 — Test it against real apps.** Deliberately open-ended, no new code: extend `RULES` to
+  Edge/Firefox (expected to behave like Chrome) and go find out — genuinely untested here, not
+  assumed — whether Slack/Teams change their window title per-channel the way browsers do per-tab.
+
+Verified before publishing: the JS still parses cleanly, and both full-file code listings (3.1,
+3.2) were extracted and byte-compiled with the project's own Python (`py_compile`) to confirm they
+run, not just read correctly.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
