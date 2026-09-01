@@ -62,7 +62,9 @@ English_HKL = 0x04090409
 Hebrew_HKL  = -0xfc2fbf3
 
 RULES = {'Code.exe' : English_HKL,
-          'chrome.exe' : [('Gmail',Hebrew_HKL),('Google Docs',English_HKL),],} #multi-windows within chrome
+         'chrome.exe' : [('Gmail',Hebrew_HKL),('Google Docs',English_HKL),
+                         ('WhatsApp Business',Hebrew_HKL)],
+         'msedge.exe' : Hebrew_HKL,}
 
 last_set = {}          # hwnd -> HKL we last set (or the user's manual choice) for that window
 last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
@@ -105,7 +107,6 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             return
         if hwnd != win32gui.GetForegroundWindow():
             return
-    previous_thread = thread_id
     if previous_thread is not None and previous_thread != thread_id and previous_thread in overridden:
         overridden.discard(previous_thread)
         last_set.pop(previous_thread, None)
@@ -114,6 +115,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     _, pid = win32process.GetWindowThreadProcessId(hwnd)
     title = win32gui.GetWindowText(hwnd)
     exe_name = psutil.Process(pid).name()
+    print(f"  [debug] exe_name = {exe_name!r}")   # add this line temporarily
     target_hkl = resolve_target(exe_name, title)
     if target_hkl is None:
         return
@@ -147,4 +149,9 @@ hook = user32.SetWinEventHook(
 name_hook = user32.SetWinEventHook(win32con.EVENT_OBJECT_NAMECHANGE,
     win32con.EVENT_OBJECT_NAMECHANGE,0,callback,0,0,win32con.WINEVENT_OUTOFCONTEXT)
 print("CKILS is watching. Alt-Tab between your two configured apps. Ctrl+C to stop.")
+# Exception ignored while calling ctypes callback function <function on_focus_change at 0x00000202CF8EAAE0>:
+# Traceback (most recent call last):
+#   File "C:\Users\liran\Personal_Project\ckils\week2\rule_engine.py", line 100, in on_focus_change
+#     def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
+# KeyboardInterrupt: expected error when stopping the program the first time
 win32gui.PumpMessages()
