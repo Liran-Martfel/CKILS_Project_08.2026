@@ -542,6 +542,26 @@ Built and published all three Week 4 lessons, replacing the outline placeholder:
 
 ---
 
+## 2026-09-01 — Lesson 4.1 done: all five test cases pass
+
+**12:40** — Ran all five of the charter's test cases against `rule_engine.py`:
+
+- **TC-01 (Rapid Focus Switching):** 5 switch-then-type attempts, **0 wrong first characters**.
+  Small sample — the charter's own <3% target is easier to trust with 10+ runs, so this is a good
+  early signal rather than a fully confident number; worth noting honestly as such in 4.2 rather
+  than treating 5/5 as proof.
+- **TC-02 (Tab Context):** already satisfied by 3.2 — no new run needed.
+- **TC-03 (Fallback Handling):** confirmed — an app with no `RULES` entry is left completely
+  alone, no output, no switch attempt.
+- **TC-04 (User Override):** already satisfied by 2.3/3.1 — no new run needed.
+- **TC-05 (Security Sandbox):** confirmed — clicking into a real password field is a non-event for
+  CKILS; it only ever reads window title and process name, never field content.
+
+**Lesson 4.1 is done.** Next: 4.2 (remaining success criteria), which uses this TC-01 data
+directly for SC-04.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
