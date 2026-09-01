@@ -495,6 +495,23 @@ Edge/Firefox/Slack/Teams) remains open.
 
 ---
 
+## 2026-09-01 — Lesson 3.3 done; Week 3 complete
+
+**11:20** — Tested Edge against 3.1 and 3.2: confirmed working exactly like Chrome (title-based
+rules and tab-switching both fine — expected, since Edge is Chromium-based). Firefox and
+Slack/Teams were **not tested** — the user doesn't have them installed, not a failure or an
+assumption either way. Recorded honestly rather than guessed at: Edge is genuine, independent
+confirmation only insofar as it's a second Chromium-family browser; real cross-engine (Firefox)
+and non-browser (Slack/Teams title-per-channel) confirmation remains open for whenever those apps
+are available to test.
+
+**Week 3 is complete** — 3.1 (title-based Tier 2 rules), 3.2 (tab-switch detection via
+`EVENT_OBJECT_NAMECHANGE`), and 3.3 (real-app testbed check) all done and verified. Next up per
+the plan: Week 4 (the charter's TC-01…TC-05 test matrix, remaining success criteria, and a
+Go/Go-with-Conditions/No-Go decision on the rule-based system as it stands).
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)

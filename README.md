@@ -31,8 +31,11 @@ map required at that point.
 - **Week 2 — done.** Rule-based auto-switching, the manual-override guard, and switch-latency
   measurement (well under 1ms per switch, charter target is under 150ms) — all verified working
   end to end.
-- **Weeks 3+ — ahead.** Broader app/browser-tab compatibility, then the master goal above:
-  replacing the rule table with real AI-driven understanding.
+- **Week 3 — done.** Title-based rules for multi-window apps (Tier 2), catching browser tab
+  switches with no focus change at all (via `EVENT_OBJECT_NAMECHANGE`), and a real-app check
+  (confirmed on Chrome and Edge; Firefox/Slack/Teams untested — not available to test with).
+- **Week 4+ — ahead.** The charter's formal test matrix and Go/No-Go decision, then the master
+  goal above: replacing the rule table with real AI-driven understanding.
 
 ## Repo layout
 
