@@ -62,7 +62,22 @@ English_HKL = 0x04090409
 Hebrew_HKL  = -0xfc2fbf3
 
 RULES = {'Code.exe' : English_HKL,
-         'chrome.exe' : [('Gmail',Hebrew_HKL),('Google Docs',English_HKL),('WhatsApp Business',Hebrew_HKL)],
+         'chrome.exe' : [
+                        ('Gmail', Hebrew_HKL),
+                        ('Gemini', Hebrew_HKL),
+                        ('Google Docs', English_HKL),
+                        ('WhatsApp Business', Hebrew_HKL),
+                        ('Jupyter', English_HKL),
+                        ('Linear Regression', Hebrew_HKL),
+                        ('Polynomial Regression', English_HKL),
+                        ('K-Nearest Neighbors', Hebrew_HKL),
+                        ('Support Vector Machines', English_HKL),
+                        ('Decision Trees', Hebrew_HKL),
+                        ('Random Forest', English_HKL),
+                        ('Cross-Validation', Hebrew_HKL),
+                        ('Grid Search', English_HKL),
+                        ('K-Means', Hebrew_HKL),
+                        ('PCA', English_HKL),],
          'msedge.exe' : Hebrew_HKL,
          'WindowsTerminal.exe' : English_HKL,
          'firefox.exe' : [('Gmail',Hebrew_HKL),('Google Docs',English_HKL)],
