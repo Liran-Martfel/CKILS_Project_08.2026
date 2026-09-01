@@ -62,9 +62,12 @@ English_HKL = 0x04090409
 Hebrew_HKL  = -0xfc2fbf3
 
 RULES = {'Code.exe' : English_HKL,
-         'chrome.exe' : [('Gmail',Hebrew_HKL),('Google Docs',English_HKL),
-                         ('WhatsApp Business',Hebrew_HKL)],
-         'msedge.exe' : Hebrew_HKL,}
+         'chrome.exe' : [('Gmail',Hebrew_HKL),('Google Docs',English_HKL),('WhatsApp Business',Hebrew_HKL)],
+         'msedge.exe' : Hebrew_HKL,
+         'WindowsTerminal.exe' : English_HKL,
+         'firefox.exe' : [('Gmail',Hebrew_HKL),('Google Docs',English_HKL)],
+         'ms-teams.exe' : English_HKL,
+         'pycharm64.exe' : English_HKL,}
 
 last_set = {}          # hwnd -> HKL we last set (or the user's manual choice) for that window
 last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
