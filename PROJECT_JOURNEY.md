@@ -586,6 +586,25 @@ remain untested.
 
 ---
 
+## 2026-09-01 — Word confirmed working for SC-01; tally now 5/10
+
+**13:20** — Tested Word (`WINWORD.EXE`) despite not having an active Office subscription — Word's
+own nag/activation screen blocks normal document editing, so instead of typing, the OS-level
+taskbar language indicator was checked directly (keyboard layout is tracked by Windows, not by
+Word itself, so this works regardless of subscription state). **Confirmed working** on the first
+attempt — the indicator switched correctly the instant Word gained focus. A second attempt was
+blocked by the nag screen retaking focus before a repeat test could run; one confirmed switch is
+sufficient evidence here (SC-01 isn't the criterion asking for repeated reps — that's SC-03's
+separate 100-transition measurement, which isn't required per individual app).
+
+**Updated SC-01 tally**, against the charter's 10-app testbed: **working** — Chrome, Edge, Google
+Docs/Gmail (web), Windows Terminal, Word (**5/10, 50%**). **Confirmed incompatible** — Calculator,
+Settings. **Quirky/unreliable** — Notepad. **Untested** — Firefox, Slack/Teams. Getting closer to
+the charter's 70% target; two apps remain untested (Slack/Teams may stay permanently untested —
+not installed on this machine).
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
