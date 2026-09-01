@@ -477,6 +477,24 @@ specifically.
 
 ---
 
+## 2026-09-01 — Lesson 3.2 confirmed working
+
+**11:05** — Added the `EVENT_OBJECT_NAMECHANGE` filter and second hook to `rule_engine.py`. Two
+small typos caught along the way: `if event = win32con...` (assignment `=` instead of comparison
+`==`, which is what PyCharm's `':' expected` error was actually pointing at) and
+`EVENT_OBJECT_NAMECHANGED` (extra trailing "D" — the real constant has none).
+
+Tested with `Ctrl+Tab` switching between a Gmail tab and a Google Docs tab, never leaving the
+window: confirmed via the debug print that `hwnd=264214` stayed identical across the entire
+sequence (proving no focus/window change ever happened), while the language still correctly
+flipped Hebrew ↔ English on every tab switch. **Lesson 3.2 is done** — CKILS now reacts to tab
+switches, something no mechanism before this lesson could see at all.
+
+Week 3's core mechanism (3.1 + 3.2) is now fully built and verified. 3.3 (testing against
+Edge/Firefox/Slack/Teams) remains open.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
