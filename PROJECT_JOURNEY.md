@@ -605,6 +605,27 @@ not installed on this machine).
 
 ---
 
+## 2026-09-01 — SC-01 hits the charter's 70% target: Firefox and Teams both confirmed
+
+**13:50** — Tested the last two apps on the charter's SC-01 testbed:
+
+- **Firefox — confirmed working, fully.** Real exe name confirmed via debug print
+  (`firefox.exe`) rather than guessed — one early attempt (`'firefox.exe.EXE'`) didn't match for
+  exactly that reason. Once fixed, both mechanisms tested independently of Chromium: 3.1's
+  title-based window rules and 3.2's tab-switch detection (`EVENT_OBJECT_NAMECHANGE`) both work
+  correctly on Firefox's Gecko engine — real, independent confirmation that neither mechanism was
+  quietly Chromium-specific.
+- **Teams — confirmed working**, via a simple process-level rule.
+
+**SC-01 now stands at 7/10 (70%)** against the charter's own representative testbed — **hitting
+the Must-criterion target exactly**: Chrome, Edge, Firefox, Word, Windows Terminal, Google
+Docs/Gmail (web), and Teams all confirmed working. Calculator and Settings remain confirmed
+incompatible (both `ApplicationFrameHost.exe`-wrapped UWP apps — an architectural limit, not a
+CKILS bug); Notepad remains quirky/unreliable. This is a real pass on one of the charter's Must
+criteria, not a rounding-up — first genuine data point toward Week 4's Go/No-Go decision in 4.3.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
