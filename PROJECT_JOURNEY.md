@@ -626,6 +626,26 @@ criteria, not a rounding-up — first genuine data point toward Week 4's Go/No-G
 
 ---
 
+## 2026-09-01 — Overall progress check: ~90% of the charter, ~40-45% of the master goal
+
+**14:10** — Asked for an honest overall "how much is right" number. Answered with two separate
+figures rather than one, since they measure genuinely different things:
+
+- **Against the original charter** (the rule-based POC, Weeks 1-4): roughly **90%**. 7 of 8 Must
+  success criteria confirmed passing with real evidence (SC-01 at 7/10, SC-02, SC-03, SC-04, SC-05,
+  SC-06, SC-07). Only SC-09 (8-hour stability) is still open, and that's a matter of time, not risk.
+  SC-08 is Nice-to-have and correctly scoped out.
+- **Against the project's actual master goal** (AI-driven, no rule table at all): closer to
+  **40-45%**. Weeks 1-4 are a solid, well-tested foundation, but Weeks 5-6 — the mandatory AI phase
+  — haven't started at all, and that's explicitly the hardest, least-proven part of the whole
+  project.
+
+Updated `README.md` and `Welcome_page_explaining.md` with both figures and the current Week 4
+status (test matrix passed, SC-01/04/06/08 done, SC-09 + the 4.3 write-up still open), so the
+project's real state is visible without needing to read the full journal.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)

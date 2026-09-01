@@ -79,15 +79,27 @@ of being told per-app what to do.
 
 This is a **learning project** — it's being built from scratch in Python, one weekly milestone at
 a time, as a hands-on way to learn both coding and how a real Windows system-level tool comes
-together. **Weeks 1 through 3 are all complete.** CKILS watches rule-configured apps, automatically
-switches each one's keyboard layout (down to the level of individual windows and even browser
-tabs), correctly leaves a window alone if you override it by hand — resuming automatically the
-moment you move on to something else — and measured switch latency comes in at well under 1ms per
-switch (charter target: under 150ms). All of it verified through real, hands-on debugging,
-including several genuine surprises about how Windows itself behaves: Calculator and Notepad's own
-quirks (Week 2), and — the biggest one yet — Chrome's separate windows silently sharing one OS
-thread, which broke the override guard's assumptions until it was re-keyed to match reality. Week 4
-(the charter's formal test matrix and Go/No-Go decision) is next.
+together. **Weeks 1 through 3 are all complete**, and **Week 4 is nearly done.** CKILS watches
+rule-configured apps, automatically switches each one's keyboard layout (down to the level of
+individual windows and even browser tabs), correctly leaves a window alone if you override it by
+hand — resuming automatically the moment you move on to something else — and measured switch
+latency comes in at well under 1ms per switch (charter target: under 150ms). All of it verified
+through real, hands-on debugging, including several genuine surprises about how Windows itself
+behaves: Calculator and Notepad's own quirks (Week 2), Chrome's separate windows silently sharing
+one OS thread (which broke the override guard's assumptions until it was re-keyed to match
+reality), and Windows Settings turning out to share Calculator's exact same
+`ApplicationFrameHost.exe` limitation.
+
+Week 4's formal charter checks are mostly done: all five test cases (TC-01–TC-05) pass, and of the
+remaining success criteria, **SC-01 (environment coverage) passes at 7/10 (70%)** against the
+charter's own testbed — confirmed working on Chrome, Edge, Firefox, Word, Windows Terminal, Google
+Docs/Gmail, and Teams. Only SC-09 (an 8-hour stability run) and writing up the final Go/No-Go
+decision (4.3) remain before Week 4 is fully closed out.
+
+**Honest overall progress:** against the original charter (the rule-based POC), this is roughly
+**90%** done. Against the project's actual **master goal** (AI-driven, no rule table needed at
+all), it's closer to **40-45%** — the foundation is solid, but the mandatory AI phase (Weeks 5-6)
+hasn't started yet, and that's the harder, less-proven half of the project.
 
 ## How to build/run
 
