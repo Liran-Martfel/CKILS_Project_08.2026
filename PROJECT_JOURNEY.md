@@ -439,6 +439,40 @@ run, not just read correctly.
 
 ---
 
+## 2026-09-01 — Real finding: Chrome's multi-window shared thread broke the override guard
+
+**09:40** — Testing 3.1 for real (two separate Chrome windows, Gmail + Google Docs) surfaced
+repeated false <code>"manual override detected"</code> messages without ever touching the keyboard
+manually. Investigated with evidence rather than guessing: added a debug print of `hwnd` and
+`thread_id` together, Alt-Tabbed (and minimized) between the two Chrome windows, and confirmed
+directly from the output — both windows reported the exact same `thread_id` (`18984`), despite
+being two different `hwnd`s.
+
+**Root cause:** keyboard layout is a per-*thread* OS property (established back in 2.1), not
+per-window. Chrome's separate top-level windows commonly share one underlying UI thread, so
+switching one window's layout silently changes it for every other window on that same thread.
+2.3's override guard assumed `hwnd`-keyed bookkeeping told it about one window's independent true
+state — an assumption that's simply false once two windows share a thread. The user's own
+"it happens when I minimize" observation turned out to be a red herring pointing at the right
+culprit: minimizing one Chrome window just happened to hand focus to its same-thread sibling,
+triggering the same collision as any other switch between them.
+
+**Fix:** re-keyed the guard's bookkeeping — `last_set`, `last_switch_time`, `overridden`, and the
+reset trigger (`previous_hwnd` renamed `previous_thread`) — from `hwnd` to `thread_id` throughout.
+`resolve_target`'s per-window title decision was untouched (it was never the problem). This costs
+nothing for single-window apps like VS Code (one window, one thread — identical behavior either
+way) and fixes the false positives for Chrome. Applied to `ckils/week2/rule_engine.py` and folded
+directly into Lesson 3.1 (as the corrected, canonical version — not a bolted-on patch) and 3.2 on
+the training platform, same pattern as the 2.3 override-guard rewrite. Test in progress as of this
+entry; not yet confirmed by the user.
+
+Also broadened the standing "keep the journal updated" practice at the user's explicit request:
+going forward, a real finding like this one gets the training platform's lesson content corrected
+automatically too, not just a journal entry — without needing to be asked for the website update
+specifically.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
