@@ -1,4 +1,6 @@
 import ctypes, ctypes.wintypes
+
+import win32.lib.win32con
 import win32api, win32con, win32gui, win32process, psutil
 import time
 import threading
@@ -10,9 +12,9 @@ import threading
 # hkl         "Handle to a Keyboard Layout" — an ID for one installed layout.
 # pid         "Process ID" — a number identifying one running program.
 # thread_id   Layout is tracked PER THREAD, not per window — why some calls
-#             need this instead of an hwnd.
+#             need this instead of a hwnd, identifies one thread of execution inside a process.
 #
-# user32      user32.dll — the core Windows file handling windows/input/
+# user32.dll — the core Windows file handling windows/input/
 #             keyboard layouts. Used via ctypes here specifically because
 #             SetWinEventHook has no pywin32 wrapper — ctypes calls straight
 #             into the DLL for just that one function.
@@ -67,7 +69,7 @@ last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
 overridden = set()     # hwnd the user manually overrode, not yet reset
 SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 
-previous_hwnd = None   # whichever window was focused just before the current event
+previous_thread = None   # whichever thread window was focused just before the current event
 
 
 user32 = ctypes.windll.user32
@@ -94,13 +96,20 @@ def resolve_target(exe_name,title):
 
 
 def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
-    global previous_hwnd
+    global previous_thread
     # The instant focus leaves a window we were overriding, forget it ever happened —
     # its next visit starts completely fresh, rule applied automatically, nothing to see.
-    if previous_hwnd is not None and previous_hwnd != hwnd and previous_hwnd in overridden:
-        overridden.discard(previous_hwnd)
-        last_set.pop(previous_hwnd, None)
-    previous_hwnd = hwnd
+
+    if event == win32con.EVENT_OBJECT_NAMECHANGED:
+        if id_object != win32.lib.win32con.OBJID_WINDOW or id_child != win32.lib.win32con.CHILDID_SELF:
+            return
+        if hwnd != win32gui.GetForegroundWindow():
+            return
+    previous_thread = thread_id
+    if previous_thread is not None and previous_thread != thread_id and previous_thread in overridden:
+        overridden.discard(previous_thread)
+        last_set.pop(previous_thread, None)
+    previous_thread = thread_id
 
     _, pid = win32process.GetWindowThreadProcessId(hwnd)
     title = win32gui.GetWindowText(hwnd)
@@ -110,13 +119,13 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         return
 
     actual_hkl = win32api.GetKeyboardLayout(thread_id)
-    print(f"  [debug] {exe_name} hwnd={hwnd} thread={thread_id} actual={hex(actual_hkl)} last={hex(last_set.get(hwnd, -1))}")
+    print(f"  [debug] {exe_name} hwnd={hwnd} thread={thread_id} actual={hex(actual_hkl)} last={hex(last_set.get(thread_id, -1))}")
     #print(f"  [debug] {exe_name}: actual={hex(actual_hkl)}  target={hex(target_hkl)}")
     # ignore mismatches caused by our own switch not having propagated yet
-    just_switched = time.time() - last_switch_time.get(hwnd, 0) < SWITCH_GRACE
-    if hwnd in last_set and actual_hkl != last_set[hwnd] and not just_switched:
-        overridden.add(hwnd)
-        last_set[hwnd] = actual_hkl  # treat the user's manual choice as the new "last known" state
+    just_switched = time.time() - last_switch_time.get(thread_id, 0) < SWITCH_GRACE
+    if thread_id in last_set and actual_hkl != last_set[thread_id] and not just_switched:
+        overridden.add(thread_id)
+        last_set[thread_id] = actual_hkl  # treat the user's manual choice as the new "last known" state
         print(f"{exe_name}: manual override detected, leaving it alone")
         return
 
@@ -127,14 +136,15 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     elapsed_ms = (time.perf_counter() - start) * 1000
     print(f'{exe_name}: switched to {hex(target_hkl)} in {elapsed_ms:.1f} ms')
 
-    last_set[hwnd] = target_hkl
-    last_switch_time[hwnd] = time.time()
+    last_set[thread_id] = target_hkl
+    last_switch_time[thread_id] = time.time()
 
 callback = WinEventProcType(on_focus_change)
 hook = user32.SetWinEventHook(
     win32con.EVENT_SYSTEM_FOREGROUND, win32con.EVENT_SYSTEM_FOREGROUND,
-    0, callback, 0, 0, win32con.WINEVENT_OUTOFCONTEXT
-)
+    0, callback, 0, 0, win32con.WINEVENT_OUTOFCONTEXT)
 
+name_hook = user32.SetWinEventHook(win32con.EVENT_OBJECT_NAMECHANGE,
+    win32con.EVENT_OBJECT_NAMECHANGE,0,callback,0,0,win32con.WINEVENT_OUTOFCONTEXT)
 print("CKILS is watching. Alt-Tab between your two configured apps. Ctrl+C to stop.")
 win32gui.PumpMessages()
