@@ -646,6 +646,16 @@ project's real state is visible without needing to read the full journal.
 
 ---
 
+## 2026-09-01 — Week 4's real results folded into the training platform
+
+**14:25** — Added "Results, tested for real" sections to Lessons 4.1 and 4.2 on the training
+platform, so the actual outcomes (not just instructions on how to test) are visible there too:
+TC-01's 5/5 result, TC-03/TC-05 confirmations, and the full SC-01 breakdown — 7/10 passing, the
+Calculator/Settings `ApplicationFrameHost.exe` connection, and the Windows Terminal
+(`WindowsTerminal.exe`, not `cmd.exe`) trap. SC-09 marked as not yet run.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
