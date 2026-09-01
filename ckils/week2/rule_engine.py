@@ -100,7 +100,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     # The instant focus leaves a window we were overriding, forget it ever happened —
     # its next visit starts completely fresh, rule applied automatically, nothing to see.
 
-    if event == win32con.EVENT_OBJECT_NAMECHANGED:
+    if event == win32con.EVENT_OBJECT_NAMECHANGE:
         if id_object != win32.lib.win32con.OBJID_WINDOW or id_child != win32.lib.win32con.CHILDID_SELF:
             return
         if hwnd != win32gui.GetForegroundWindow():
