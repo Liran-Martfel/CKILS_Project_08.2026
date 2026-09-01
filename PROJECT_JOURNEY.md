@@ -463,8 +463,12 @@ reset trigger (`previous_hwnd` renamed `previous_thread`) — from `hwnd` to `th
 nothing for single-window apps like VS Code (one window, one thread — identical behavior either
 way) and fixes the false positives for Chrome. Applied to `ckils/week2/rule_engine.py` and folded
 directly into Lesson 3.1 (as the corrected, canonical version — not a bolted-on patch) and 3.2 on
-the training platform, same pattern as the 2.3 override-guard rewrite. Test in progress as of this
-entry; not yet confirmed by the user.
+the training platform, same pattern as the 2.3 override-guard rewrite.
+
+**Confirmed fixed** — re-ran the same Gmail/Docs/minimize sequence with a debug print of
+`hwnd`/`thread_id`/`actual`/`last` on every event: zero false "manual override detected" messages,
+every `actual` reading matched `last` before each switch. 3.1 is genuinely done, not just
+"no errors thrown."
 
 Also broadened the standing "keep the journal updated" practice at the user's explicit request:
 going forward, a real finding like this one gets the training platform's lesson content corrected
