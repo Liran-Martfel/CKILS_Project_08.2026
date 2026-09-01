@@ -562,6 +562,30 @@ directly for SC-04.
 
 ---
 
+## 2026-09-01 — SC-01 progress: Windows Terminal works, Settings confirmed incompatible
+
+**13:05** — Testing two more apps from the charter's SC-01 testbed:
+
+- **Windows Terminal — confirmed working.** First guess (`'cmd.exe'`) was wrong: modern Windows
+  Terminal's window belongs to `WindowsTerminal.exe`, not the shell process running inside it.
+  Fixed via a temporary `exe_name` debug print rather than guessing further. Confirmed switching
+  correctly, consistently, once `RULES` used the right key.
+- **Windows Settings — confirmed incompatible, same root cause as Calculator.** Its window also
+  reports `ApplicationFrameHost.exe` (the same generic UWP wrapper Calculator uses — meaning the
+  two can't even be told apart by exe name alone). The switch *looked* successful in the debug
+  print (`actual` matched `target` right after "switched"), but nothing changed on screen — the
+  wrapper's own thread state can shift while the real Settings content, owned by a separate
+  child window/thread, never receives the message. Removed the `RULES` entry entirely rather than
+  leave a misleading always-"succeeds" print for something that doesn't actually work.
+
+**Running SC-01 tally**, against the charter's 10-app testbed: **working** — Chrome, Edge, Google
+Docs/Gmail (web), Windows Terminal (4/10, 40%). **Confirmed incompatible** — Calculator, Settings
+(both `ApplicationFrameHost.exe`-wrapped UWP apps). **Quirky/unreliable** — Notepad. **Untested** —
+Firefox, Word, Slack/Teams. Still below the charter's 70% target as of this entry; three apps
+remain untested.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
