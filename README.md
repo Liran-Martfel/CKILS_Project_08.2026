@@ -32,10 +32,24 @@ map required at that point.
   measurement (well under 1ms per switch, charter target is under 150ms) — all verified working
   end to end.
 - **Week 3 — done.** Title-based rules for multi-window apps (Tier 2), catching browser tab
-  switches with no focus change at all (via `EVENT_OBJECT_NAMECHANGE`), and a real-app check
-  (confirmed on Chrome and Edge; Firefox/Slack/Teams untested — not available to test with).
-- **Week 4+ — ahead.** The charter's formal test matrix and Go/No-Go decision, then the master
-  goal above: replacing the rule table with real AI-driven understanding.
+  switches with no focus change at all (via `EVENT_OBJECT_NAMECHANGE`), and a real-app check —
+  confirmed on Chrome, Edge, and Firefox (independent of browser engine).
+- **Week 4 — nearly done.** All five of the charter's test cases (TC-01–TC-05) pass. Of the
+  remaining success criteria: **SC-01 (environment coverage) passes at 7/10 (70%)** — Chrome, Edge,
+  Firefox, Word, Windows Terminal, Google Docs/Gmail, and Teams all confirmed working; Calculator
+  and Windows Settings are confirmed *incompatible* (both wrapped by `ApplicationFrameHost.exe` —
+  an architectural limit, not a CKILS bug), and Notepad remains quirky. SC-04 (first-character
+  accuracy) and SC-06 (password-field protection) both pass. SC-08 is correctly scoped out
+  (Nice-to-have, needs a 5-user study). Only **SC-09 (8-hour stability)** and the final
+  Go/No-Go write-up (4.3) are still open.
+- **Week 5+ — ahead.** The master goal above: replacing the rule table with real AI-driven
+  understanding.
+
+**Overall progress, honestly:** against the original charter (the rule-based POC, Weeks 1-4),
+this is roughly **90%** done — 7 of 8 Must criteria confirmed passing, with only the 8-hour
+stability run left. Against the project's actual **master goal** (AI-driven, no rule table at
+all), it's closer to **40-45%** — Weeks 1-4 are the solid foundation, but Weeks 5-6 (the mandatory
+AI phase) haven't started, and that's the hardest, least-proven part of the whole project.
 
 ## Repo layout
 
