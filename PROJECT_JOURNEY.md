@@ -512,6 +512,36 @@ Go/Go-with-Conditions/No-Go decision on the rule-based system as it stands).
 
 ---
 
+## 2026-09-01 — Week 4 built out in full on the training platform
+
+**12:10** — Re-extracted the actual theory doc text directly (the earlier read was Hebrew,
+mojibake'd in the terminal on first attempt — re-ran it writing straight to a UTF-8 file instead
+of printing through the console, since the console's codepage was garbling multi-byte characters)
+to get the charter's real SC/TC definitions verbatim rather than working from memory, matching this
+project's own "verify before teaching" rule.
+
+Built and published all three Week 4 lessons, replacing the outline placeholder:
+
+- **4.1 — Run the test matrix (TC-01–TC-05).** Two of five already genuinely satisfied by earlier
+  work (TC-02 by 3.2's tab test, TC-04 by 2.3/3.1's override testing) — the lesson connects those
+  dots rather than re-running them. Three are new: TC-01 (type immediately after switching,
+  count first-character errors — different from 2.4's raw switch-speed measurement), TC-03 (an
+  unconfigured app must be left completely alone), TC-05 (a password field's window still
+  switches normally, without CKILS ever touching the field's content — architecturally guaranteed,
+  verified behaviorally once).
+- **4.2 — Check the remaining success criteria.** SC-01 (honest tally against the charter's own
+  10-app testbed), SC-04 (first-character error rate, fed by 4.1's TC-01 data), SC-06 (password
+  protection, both architectural — no code path reads field content at all — and behavioral),
+  SC-08 (explicitly marked out of scope: it's Nice-to-have and its own measurement method needs a
+  5-user study, genuinely not applicable to a solo learning POC), SC-09 (a real 8-hour background
+  run, no shortcuts).
+- **4.3 — Write the findings + decision.** Teaches the charter's own three-way framework verbatim
+  (Go / Go with Conditions / No-Go) and asks for the SC/TC evidence to drive the verdict, rather
+  than asserting one — deliberately left as the user's own conclusion to write, not pre-decided
+  here.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
