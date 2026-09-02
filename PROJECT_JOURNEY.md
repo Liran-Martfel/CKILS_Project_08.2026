@@ -673,6 +673,31 @@ architectural.
 
 ---
 
+## 2026-09-02 — Reliability regression traced to long uptime, not a logic bug
+
+**08:45** — After SC-09's long run, switch reliability had degraded badly (~20% success, affecting
+Chrome *and* non-Chrome apps like `Code.exe` — the console printed "switched" but the layout
+often didn't visibly change). Investigated by comparing behavior on a fresh restart of the exact
+same code, with an upgraded debug line (`title` added alongside `hwnd`/`thread_id`/`actual`/`last`)
+rather than guessing at a cause.
+
+**Result: a fresh process was reliable again**, close to 100% across Code.exe, pycharm64.exe,
+WindowsTerminal.exe, and multiple Chrome/Gemini tabs. Exactly one "manual override detected" fired
+in the whole test — traced through the logic and confirmed it was the override-reset mechanism
+working correctly (override detected on Gemini → cleared automatically the moment focus moved to
+a different thread → resolved cleanly on the next visit), not a new bug.
+
+**Conclusion:** the reliability collapse was caused by something accumulating over many continuous
+hours of runtime (likely message-queue pressure or general resource buildup), not a flaw in the
+switching logic itself. Documented as a real, honest finding rather than chased down to its exact
+root cause, which is out of scope for this POC: **CKILS is reliable under normal use; very long
+continuous uptime (8+ hours) can degrade switch reliability over time, and a fresh restart fully
+restores it.** This nuances SC-09's pass — the *process* survives 8+ hours without crashing
+(confirmed), but *switch reliability* under that same long uptime is a separate, now-documented
+caveat worth carrying into 4.3's findings.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
