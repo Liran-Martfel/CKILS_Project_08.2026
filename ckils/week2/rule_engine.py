@@ -113,11 +113,14 @@ def decide_with_content(fallback_hkl):
         return fallback_hkl
 
     if not text.strip():
+        print("  [content] empty field, nothing to read")
         return fallback_hkl
 
     label, proba = predict_language(text)
     confidence = proba[label]
+    print(f"  [content] read {text[:60]!r} -> {label} ({confidence:.2f} confidence)")
     if confidence < CONTENT_CONFIDENCE_THRESHOLD:
+        print(f"  [content] confidence below {CONTENT_CONFIDENCE_THRESHOLD} threshold, trusting the rule")
         return fallback_hkl
 
     return LANGUAGE_TO_HKL[label]
