@@ -1084,6 +1084,37 @@ installing Python — not started yet.
 
 ---
 
+## 2026-09-02 — First working standalone CKILS.exe
+
+**00:20** — Installed PyInstaller and built a real one-file `CKILS.exe` bundling `rule_engine.py`
+plus every Python dependency (`pywin32`, `psutil`, `uiautomation`, `pytesseract`, `Pillow`,
+`scikit-learn`/`joblib`), the trained `language_model.joblib`, the `tessdata` folder, and
+`rules_config.example.json`. Build command:
+
+```
+pyinstaller --onefile --console --name CKILS --add-data "language_model.joblib;." --add-data "tessdata;tessdata" --add-data "rules_config.example.json;." rule_engine.py
+```
+
+Two DLL warnings during build (`UIAutomationClient_VC140_X86/X64.dll not found`) — not yet
+confirmed whether these matter in practice. **Verified directly:** the built exe launches and runs
+as a genuine, stable Windows process for several seconds with no crash and normal CPU/memory —
+strong evidence the bundling itself works (an import or missing-DLL failure would have exited
+immediately). Did not yet confirm full behavior (does switching/OCR actually work from inside the
+bundle) — that needs a real hands-on test, same limitation as every OCR-dependent script so far.
+
+**Deliberately not yet bundled: Tesseract itself.** It's a separate program with its own DLL
+dependency tree (not a Python package), and reliably embedding that inside a PyInstaller bundle is
+a materially harder, higher-risk task than bundling Python libraries. For now, Tesseract remains a
+documented one-time prerequisite install (the same `winget install --id UB-Mannheim.TesseractOCR -e`
+command used in Lesson 5.2) rather than silently assumed to be bundled.
+
+`build/`, `dist/`, and the generated `.spec` file added to `.gitignore` — these are rebuildable
+outputs, not source. The actual `CKILS.exe` itself is not committed to the repo (32MB binary,
+plus tied to this specific machine's Tesseract path); if real distribution is wanted later, the
+standard approach is attaching it to a GitHub Release, not committing it to source control.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
