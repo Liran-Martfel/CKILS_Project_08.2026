@@ -1,5 +1,4 @@
 import ctypes, ctypes.wintypes
-
 import win32.lib.win32con
 import win32api, win32con, win32gui, win32process, psutil
 import time
@@ -82,7 +81,8 @@ RULES = {'Code.exe' : English_HKL,
          'WindowsTerminal.exe' : English_HKL,
          'firefox.exe' : [('Gmail',Hebrew_HKL),('Google Docs',English_HKL)],
          'ms-teams.exe' : English_HKL,
-         'pycharm64.exe' : English_HKL,}
+         'pycharm64.exe' : English_HKL,
+         'Zoom.exe' : Hebrew_HKL}
 
 last_set = {}          # hwnd -> HKL we last set (or the user's manual choice) for that window
 last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
@@ -139,7 +139,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         return
 
     actual_hkl = win32api.GetKeyboardLayout(thread_id)
-    print(f"  [debug] {exe_name} hwnd={hwnd} thread={thread_id} actual={hex(actual_hkl)} last={hex(last_set.get(thread_id, -1))}")
+    print(f"  [debug] {exe_name} hwnd={hwnd} thread={thread_id} title={title!r} actual={hex(actual_hkl)} last={hex(last_set.get(thread_id, -1))}")
     #print(f"  [debug] {exe_name}: actual={hex(actual_hkl)}  target={hex(target_hkl)}")
     # ignore mismatches caused by our own switch not having propagated yet
     just_switched = time.time() - last_switch_time.get(thread_id, 0) < SWITCH_GRACE
