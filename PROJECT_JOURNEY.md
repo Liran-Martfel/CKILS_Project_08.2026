@@ -1154,6 +1154,43 @@ just the OCR portion — releasing it too early would have left the exact same r
 part that actually mutates shared state. Rebuilt and smoke-tested (launches, no crash); the user's
 next real test is what actually confirms this fixes the observed symptom.
 
+**01:20** — Fourth real bug, and an important one: user correctly noticed the rule table still
+seemed to "win" even after Tier 3 made a confident correction. Traced through the log and found it:
+the fast path re-applies `resolve_target()`'s raw answer on **every single event**, with no memory
+that Tier 3 already decided this window moments ago. Confirmed directly in the log — a correction
+to Hebrew, immediately undone by the very next title-change event re-asserting the rule's English
+answer, for a window the user never even left. Since events (especially repeated title-changes)
+fire far more often than corrections arrive, the rule was effectively always winning the tug-of-war.
+
+**Fixed with `content_decision`**, a thread_id → HKL map: once Tier 3 makes a confident call for a
+window, that decision now sticks as what the fast path applies for the rest of that visit, instead
+of the raw rule reasserting itself every event. Resets to rule-first the moment the user actually
+leaves that window (added to the existing `previous_thread` reset logic, unconditional on thread
+change now, not just when overridden). This directly reflects what the user asked for: the trained
+model should decide the language for a window with real content, with the rule only mattering as
+the very first guess before real content is available — not a design change that was quietly
+already true, but one this bug had been silently working against.
+
+**Two more real findings from the same test session, not yet acted on:**
+- **UI Automation's `GetFocusedControl()` is unreliable for complex web apps.** On this Google Docs
+  page specifically, it frequently returned either an empty region or — more concerning — text from
+  an unrelated part of the page entirely (OCR reads like `'771" אנרגיה עוד +'`, matching news-feed
+  or ad content, not the actual document). Native apps (VS Code, PyCharm) consistently read the
+  right thing; complex browser-rendered editors do not. This is a known, industry-wide
+  accessibility weak point of rich web editors, not obviously fixable with a quick patch — worth
+  investigating whether UI Automation's TextPattern (real accessible text, no OCR/pixels at all)
+  is more reliable for at least some apps, as a separate follow-up.
+- Also fixed in this pass: `decide_with_content()`'s call to `predict_language()` now has the same
+  try/except protection the OCR call already had (this is literally why the earlier `sklearn`/path
+  bugs surfaced as raw tracebacks instead of graceful fallbacks — any *future* error in that
+  pipeline would have done the same). And `on_focus_change()`'s process/window lookup is now
+  wrapped too — a window or process that vanishes between the event firing and this lookup (short-
+  lived popups, permission-restricted elevated windows) now skips that one event instead of
+  potentially crashing the Windows event callback itself.
+
+Rebuilt and smoke-tested. The user's next real test is what confirms whether the sticky-decision
+fix actually resolves the "rule keeps winning" symptom in practice.
+
 ---
 
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
