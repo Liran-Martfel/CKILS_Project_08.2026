@@ -3,6 +3,9 @@ import win32.lib.win32con
 import win32api, win32con, win32gui, win32process, psutil
 import time
 import threading
+import uiautomation as auto
+from ocr_reader import read_region
+from predict_language import predict_language
 # ================================================================================
 # CKILS rule_engine.py — Legend (short)
 # ================================================================================
@@ -89,6 +92,36 @@ last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
 overridden = set()     # hwnd the user manually overrode, not yet reset
 SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 
+# Tier 3 (Week 5): refines — or, for an unruled app, supplies — the switch decision
+# using the actual on-screen text, via UI Automation + OCR + the model trained in 5.4.
+CONTENT_CONFIDENCE_THRESHOLD = 0.65
+LANGUAGE_TO_HKL = {"english": English_HKL, "hebrew": Hebrew_HKL}
+
+
+def decide_with_content(fallback_hkl):
+    """
+    Falls back to fallback_hkl (Tier 1/2's answer, possibly None) on an empty
+    field, low model confidence, or any failure in this layer — Tier 1/2 stays
+    the proven base (Week 4: "Go with Conditions"), this only adds to it.
+    """
+    try:
+        control = auto.GetFocusedControl()
+        rect = control.BoundingRectangle
+        text = read_region(rect.left, rect.top, rect.right, rect.bottom)
+    except Exception as e:
+        print(f"  [content] skipped ({e})")
+        return fallback_hkl
+
+    if not text.strip():
+        return fallback_hkl
+
+    label, proba = predict_language(text)
+    confidence = proba[label]
+    if confidence < CONTENT_CONFIDENCE_THRESHOLD:
+        return fallback_hkl
+
+    return LANGUAGE_TO_HKL[label]
+
 previous_thread = None   # whichever thread window was focused just before the current event
 
 
@@ -134,7 +167,16 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     title = win32gui.GetWindowText(hwnd)
     exe_name = psutil.Process(pid).name()
     print(f"  [debug] exe_name = {exe_name!r}")   # add this line temporarily
-    target_hkl = resolve_target(exe_name, title)
+    rule_hkl = resolve_target(exe_name, title)
+
+    content_start = time.perf_counter()
+    target_hkl = decide_with_content(rule_hkl)
+    content_ms = (time.perf_counter() - content_start) * 1000
+    if target_hkl != rule_hkl:
+        print(f"  [content] overrode rule -> {hex(target_hkl)} ({content_ms:.1f} ms)")
+    else:
+        print(f"  [content] no change ({content_ms:.1f} ms)")
+
     if target_hkl is None:
         return
 
@@ -166,6 +208,7 @@ hook = user32.SetWinEventHook(
 
 name_hook = user32.SetWinEventHook(win32con.EVENT_OBJECT_NAMECHANGE,
     win32con.EVENT_OBJECT_NAMECHANGE,0,callback,0,0,win32con.WINEVENT_OUTOFCONTEXT)
+auto.InitializeUIAutomationInCurrentThread()  # once, before the message loop — needed by decide_with_content()
 print("CKILS is watching. Alt-Tab between your two configured apps. Ctrl+C to stop.")
 # Exception ignored while calling ctypes callback function <function on_focus_change at 0x00000202CF8EAAE0>:
 # Traceback (most recent call last):

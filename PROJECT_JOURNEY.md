@@ -940,6 +940,38 @@ but worth knowing going in rather than being surprised by it during 5.5 testing.
 
 ---
 
+## 2026-09-02 — Lesson 5.5: wired the trained model into rule_engine.py for real
+
+**22:10** — At the user's explicit request, wired Tier 3 directly into the live `rule_engine.py`
+(not just a standalone reference file this time). Changes: three new imports (`uiautomation`,
+`ocr_reader.read_region`, `predict_language.predict_language`), a new `decide_with_content()`
+function next to `resolve_target()`, one change to how `target_hkl` gets its value inside
+`on_focus_change()`, and one `InitializeUIAutomationInCurrentThread()` call added before the
+message loop starts. Uses the project's real `English_HKL` / `Hebrew_HKL` constants throughout,
+not placeholders. Verified to compile cleanly; not yet run live (needs the user's real UI
+interaction to test, same limitation as every OCR-dependent script this week).
+
+**One deliberate design change from the original 5.5 outline, made during real wiring:** the
+handler no longer bails out immediately when `resolve_target()` returns `None` (an app with no
+rule at all) — it now lets the content layer attempt a decision from the real on-screen text first.
+This means Tier 3 can now make switching decisions for entirely unconfigured apps, not just refine
+already-ruled ones — a genuine capability improvement over the original design, matching the
+master goal more directly (less dependence on a maintained rule table over time).
+
+**A new, honest risk surfaced specifically by wiring this into the real event flow (not
+theoretical — a direct consequence of how this file already works):** `on_focus_change()` also
+fires on every `EVENT_OBJECT_NAMECHANGE` (the Week 3 browser-tab mechanism), and some apps fire
+that repeatedly for the same window — e.g. while a page title is still loading, or possibly while
+typing in an address bar. Each such event now triggers a full OCR read. Logged `content_ms` on
+every single check specifically so this can be measured with real numbers rather than guessed at.
+If it turns out to cause noticeable lag in practice, the likely fix is restricting
+`decide_with_content()` to genuine focus changes only — but that's a decision for real testing to
+make, not something to pre-optimize away without evidence.
+
+**Lesson 5.5 is wired in.** Not yet tested live — that's the next step.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,

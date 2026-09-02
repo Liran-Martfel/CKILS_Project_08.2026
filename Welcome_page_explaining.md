@@ -108,12 +108,14 @@ forward into Weeks 5-6.
 
 **Honest overall progress:** against the original charter (the rule-based POC), this is roughly
 **90%** done. Against the project's actual **master goal** (AI-driven, no rule table needed at
-all), it's closer to **40-45%** — the foundation is solid, and Week 5 (the AI phase) is now
-underway: UI Automation pinpoints the exact focused control (5.1, confirmed working), Windows' own
-local/free OCR reads the text inside it (5.2), a real labeled dataset gets built from the user's own
-usage (5.3), a small classifier trained from scratch on that dataset decides Hebrew or English (5.4),
-and that decision refines — not replaces — the proven rule table from Weeks 1-4 (5.5). Lessons 5.2
-through 5.5 are written and published; the user building and testing that code is the next milestone.
+all), it's closer to **65-70%** — Week 5 (the AI phase) is now fully wired end to end: UI
+Automation pinpoints the exact focused control (5.1), local OCR reads the text inside it (5.2 —
+built on Tesseract, not Windows' own OCR, after discovering Windows has no Hebrew OCR support at
+all), a real 228-row labeled dataset built from the user's own usage (5.3), a classifier trained
+from scratch on that dataset (5.4, 100% held-out accuracy), and that decision is now live inside
+`rule_engine.py` itself (5.5) — refining the rule table's answer, and able to decide for apps with
+no rule configured at all. What's left: real-world testing of accuracy and latency, since this new
+path hasn't been run against actual daily use yet.
 
 ## How to build/run
 
