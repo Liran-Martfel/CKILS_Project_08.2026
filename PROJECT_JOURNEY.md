@@ -843,6 +843,9 @@ catch — the code was "correct" by the lesson as originally written, and only b
 user's actual hardware setup (multiple monitors), which no amount of single-monitor testing on the
 dev side would have caught on its own.
 
+**16:20** — Fix confirmed working: with `all_screens=True` added to `ocr_reader.py`, OCR correctly
+read real English text off the second monitor. **Lesson 5.2 is done.**
+
 ---
 
 ## Reference
