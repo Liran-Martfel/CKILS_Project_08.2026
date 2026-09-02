@@ -889,6 +889,10 @@ the two downstream lessons (5.3, 5.5) whose code called the old async/two-engine
 `read_region()`. Not yet confirmed: the user re-testing the new Tesseract-based `ocr_reader.py` for
 real on their machine — that's the next step.
 
+**19:30** — Confirmed working on the user's machine: the Tesseract-based `ocr_reader.py` correctly
+reads real English and Hebrew text. **Lesson 5.2 is genuinely done now**, on real infrastructure
+that actually supports both languages CKILS needs.
+
 ---
 
 ## Reference
