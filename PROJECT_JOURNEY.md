@@ -848,6 +848,49 @@ read real English text off the second monitor. **Lesson 5.2 is done.**
 
 ---
 
+## 2026-09-02 — Bigger finding: Windows' built-in OCR doesn't support Hebrew at all
+
+**19:00** — Testing the Hebrew half of 5.2 (garbled output, `?1Dbw nn`) led to a much bigger finding
+than expected. Root-caused with debug output showing `engines available: ['en']` — no `'he'` engine
+ever got built. Checked directly on the machine with
+`Get-WindowsCapability -Online | Where-Object { $_.Name -like "Language.OCR*" }`: over two dozen
+languages listed (Arabic, Japanese, Korean, Chinese, most of Europe), every single one either
+`Installed` or `NotPresent` (installable) — **no Hebrew entry at all**. Not "not installed yet" —
+Microsoft's own OCR simply has no Hebrew model to offer. Confirmed with a second source too
+(Microsoft Q&A acknowledging Hebrew as a known gap elsewhere in their OCR/Form Recognizer products).
+
+Since reading Hebrew text is half of what CKILS's whole content-aware phase needs to do, this
+wasn't a patchable bug — the OCR engine itself had to change project-wide, not just this one lesson.
+
+**Switched to Tesseract** (free, open-source, Apache 2.0 — no restriction on commercial use or
+patent filing, which matters given the stated goal to sell this and potentially patent it).
+Installed for real (`winget install --id UB-Mannheim.TesseractOCR -e`), confirmed its installer only
+ships English data, downloaded Hebrew's `heb.traineddata` from Tesseract's official repository, and
+ran a real combined Hebrew+English recognition test before touching any lesson content.
+
+**Two more real findings along the way:**
+1. Tesseract's install folder is under Program Files, which needs admin rights to write to — so
+   adding the downloaded Hebrew data there directly isn't possible without elevation. Fix: a
+   project-local `tessdata` folder (with a copy of `eng.traineddata` plus the downloaded
+   `heb.traineddata`), pointed at directly via `--tessdata-dir` — no admin rights needed anywhere.
+2. The first real Hebrew OCR test looked like a total failure — a wall of `□□□□` boxes printed to
+   the terminal. It wasn't: writing the result to a file and checking the actual Unicode character
+   codes showed Tesseract had read every Hebrew letter correctly (`U+05E9`, `U+05DC`, ... — real,
+   correct Hebrew codepoints). The boxes were only the Windows terminal failing to display Hebrew
+   glyphs, not an OCR error. A genuinely easy trap to fall into without checking the real bytes.
+
+**Bonus, not just a fix:** Tesseract can take `lang="eng+heb"` and read both scripts in one call,
+directly handling a field with mixed Hebrew/English content — better than the old two-engine "race"
+approach, and a direct, working answer to the "how does it handle mixed languages in one field"
+question from the original design discussion.
+
+Rewrote the user's live `ocr_reader.py` and Lesson 5.2 on the training platform to match, and fixed
+the two downstream lessons (5.3, 5.5) whose code called the old async/two-engine version of
+`read_region()`. Not yet confirmed: the user re-testing the new Tesseract-based `ocr_reader.py` for
+real on their machine — that's the next step.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
