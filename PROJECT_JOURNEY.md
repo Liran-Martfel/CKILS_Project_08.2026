@@ -1062,6 +1062,28 @@ entire document.
 
 ---
 
+## 2026-09-02 — Cleanup: RULES moved out of the code, dead code removed
+
+**00:10** — Started preparing the project to actually be shared/downloaded, not just run from this
+dev machine. First step: the hardcoded `RULES` dictionary (Liran's personal apps and ML-course-topic
+keywords baked directly into the code) moved out into `rules_config.json` — a plain JSON file,
+gitignored, that a real user edits themselves without touching any Python. A clean,
+generic `rules_config.example.json` (committed to git) ships instead, auto-copied into place on
+first run if no personal config exists yet — verified both the real-config-parsing path and the
+fresh-install auto-copy path directly before committing.
+
+Also removed dead code found during cleanup: `check_layout_later()` (an old debug helper, confirmed
+via search to be called nowhere in the actual program), a stale leftover comment block documenting
+an old expected `KeyboardInterrupt` traceback, and added a `DEBUG` flag gating the verbose
+`[debug]`/`[content]` diagnostic prints — on for now (still actively testing), meant to be `False`
+for a real end-user-facing run. Meaningful status lines (switches, overrides, corrections) stay
+visible either way.
+
+Next: packaging this into a standalone Windows `.exe` so it can be downloaded and run without
+installing Python — not started yet.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
