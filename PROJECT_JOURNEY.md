@@ -1131,6 +1131,29 @@ exists and a real prediction still works, then rebuilt the exe. Quick relaunch c
 starts cleanly. Not yet confirmed whether this specific fix resolves the issue for the user's next
 real test — that's next.
 
+**00:40** — Second exe bug, also real: `ModuleNotFoundError: No module named 'sklearn'`.
+`sklearn` is never directly `import`ed in `rule_engine.py` — it's only needed indirectly when
+`joblib` unpickles the saved model — so PyInstaller's static import scan never detected it as a
+dependency at all. Fixed by rebuilding with `--collect-all sklearn` explicitly. Exe size jumped
+32MB → 79MB, confirming it's actually bundled this time.
+
+**01:00** — Third bug, and the most serious one: user reported the model correctly reading Hebrew
+but never actually switching. Traced through the real log and found the true cause — **not** a
+model or confidence problem. A Chrome window that fires `EVENT_OBJECT_NAMECHANGE` repeatedly in
+quick succession was spawning **multiple concurrent background correction threads for the same
+window**, all racing to update the same shared `last_set` state with no coordination. One thread's
+result landing after another's made the OS's real keyboard layout disagree with what `last_set`
+believed had been applied — which the override-guard then misread as "the user must have changed
+this by hand," permanently blocking every future correction for that window. This is the exact
+theoretical race flagged (but not yet fixed) back when Tier 3 was first wired in.
+
+**Fixed** with a `content_check_in_progress` set: only one correction can be in flight per window
+at a time; a new `NAMECHANGE` event while one is already running simply skips spawning a redundant,
+racing one. The guard covers the whole `apply_content_correction()` function via `try/finally`, not
+just the OCR portion — releasing it too early would have left the exact same race open around the
+part that actually mutates shared state. Rebuilt and smoke-tested (launches, no crash); the user's
+next real test is what actually confirms this fixes the observed symptom.
+
 ---
 
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
