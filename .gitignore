@@ -8,3 +8,8 @@ ckils/week2/rules_config.json
 
 # Runtime log the uiautomation library writes automatically on errors
 @AutomationLog.txt
+
+# PyInstaller build output - rebuild with the command in PROJECT_JOURNEY.md
+ckils/week2/build/
+ckils/week2/dist/
+ckils/week2/*.spec
