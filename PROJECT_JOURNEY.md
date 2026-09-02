@@ -1115,6 +1115,24 @@ standard approach is attaching it to a GitHub Release, not committing it to sour
 
 ---
 
+## 2026-09-02 — Real bug from the user's first exe test: bare relative model path
+
+**00:35** — User ran the actual packaged `CKILS.exe` (not my own smoke test) and hit a real crash
+in the background thread on every content check: `FileNotFoundError: language_model.joblib`.
+Root cause: `predict_language.py` looked up the model with a bare relative filename
+(`"language_model.joblib"`), which only ever worked by coincidence when running
+`python rule_engine.py` from inside its own folder — the current working directory happened to
+match. Packaged into the standalone exe, bundled data files extract to a different location
+entirely, so the bare filename resolved nowhere.
+
+**Fixed** using the same pattern already verified working in `ocr_reader.py` for `tessdata`
+(`os.path.join(os.path.dirname(os.path.abspath(__file__)), ...)`), confirmed the resolved path
+exists and a real prediction still works, then rebuilt the exe. Quick relaunch confirmed it still
+starts cleanly. Not yet confirmed whether this specific fix resolves the issue for the user's next
+real test — that's next.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
