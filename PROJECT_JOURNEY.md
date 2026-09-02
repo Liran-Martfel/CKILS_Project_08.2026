@@ -698,6 +698,56 @@ caveat worth carrying into 4.3's findings.
 
 ---
 
+## 2026-09-02 — Week 4 findings + decision: Go with Conditions
+
+**09:30** — Before writing this up, worth recording why this matters beyond the coursework: this
+project isn't just a school exercise — the goal is to actually fix one of the most persistently
+annoying parts of using a computer in two languages, switching keyboard layout on every window or
+tab, for real, for good. That's the bar this decision is measured against, not just "did the demo
+work."
+
+**All results gathered, from 4.1/4.2:**
+- TC-01–TC-05: all five pass (TC-01: 5/5 switch-then-type attempts correct, small sample).
+- SC-01 (environment coverage): **70% (7/10)** — Chrome, Edge, Firefox, Word, Windows Terminal,
+  Google Docs/Gmail, Teams confirmed working; Calculator and Settings confirmed incompatible
+  (`ApplicationFrameHost.exe`); Notepad quirky.
+- SC-02 (latency), SC-03 (process attribution), SC-05 (no admin), SC-07 (override): pass, proven
+  across Weeks 2-3.
+- SC-04 (first-character accuracy): pass (0/5 errors, small sample).
+- SC-06 (password fields): pass, architecturally and behaviorally.
+- SC-08: correctly out of scope (Nice-to-have, needs a 5-user study).
+- SC-09 (8-hour stability): **pass** — no crash across an extended real run, including 8 hours
+  with zero interaction.
+
+**Two real findings from actually living with it, beyond the formal checklist:**
+
+1. **Local-app workflows expose a real limitation of pure rule-based switching.** Workflows that
+   bounce through a terminal window just to launch or restart something local (e.g. starting
+   Jupyter) force that terminal's own language rule every time it's focused — even when you're not
+   really "working" there, just passing through. A per-window rule has no way to distinguish
+   "briefly passing through" from "about to actually type here." This is a genuine, lived case
+   *for* the master goal: only real content/context awareness (Tier 3) can make that judgment —
+   rules alone can't. Flagged as something to address, not urgently blocking, but real.
+2. **Switch reliability degrades over very long continuous uptime** — already root-caused
+   separately (see the 2026-09-02 08:45 entry): confidence going into this testing round was
+   roughly **90%**; after living with the long SC-09 run, actual observed reliability felt closer
+   to **20-30%**. A fresh restart of the identical code restored near-100% reliability immediately,
+   confirming this is an accumulation-over-uptime issue, not a fundamental flaw — but it's a real,
+   felt gap between "passes the test" and "trustworthy all day, every day," worth continued
+   attention. Not yet confirmed whether this connects to the local-app/terminal friction above or
+   is fully separate — flagged as something to keep testing.
+
+**Decision, applying the charter's own framework:** despite the confidence drop during real
+testing, the underlying mechanism has real, demonstrated potential — process/window-level
+switching (Tiers 1-2) is fast, accurate, and survives extended real use; the gaps found are about
+polish and long-run robustness, not a broken foundation, and a plain restart already proves it can
+return to ~90%+ reliability. There is no content/context understanding (Tier 3) at all yet, which
+is exactly what the charter's "Go with Conditions" language describes. **Decision: Go with
+Conditions** — window/app-level switching ships as the proven foundation; the two findings above,
+plus Tier 3 itself, are the specific conditions to work through next, in Weeks 5-6.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
