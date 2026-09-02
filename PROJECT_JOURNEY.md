@@ -818,6 +818,33 @@ themselves and Claude reviewing it — that's the next real milestone for Week 5
 
 ---
 
+## 2026-09-02 — Real bug found testing 5.2: multi-monitor screenshots came back black
+
+**16:00** — User wrote `ocr_reader.py` correctly (matched the lesson exactly, no typos) and tested
+it on Notepad with real English text, but got an empty result every time. Root-caused with a debug
+script rather than guessing: it printed the focused control's rectangle as
+`left=-695 top=289 right=-209 bottom=662` — negative coordinates, meaning Notepad was on a *second*
+monitor positioned to the left of the primary one in Windows' virtual desktop layout. Saved and
+inspected the actual captured image directly — solid black.
+
+**Confirmed the cause and the fix directly** (not guessed): `PIL.ImageGrab.grab(bbox=...)` on
+Windows only captures the primary monitor unless `all_screens=True` is passed — for a rectangle on
+any other monitor, it silently returns black instead of raising an error. Verified on the user's
+actual machine: the exact same rectangle came back as solid black (`getextrema() == (0, 0)`)
+without the flag, and showed real on-screen text once `all_screens=True` was added.
+
+**Fixed in both places**, per standing instruction — a genuine finding, not a typo:
+- Lesson 5.2 on the training platform: the `ImageGrab.grab()` line now includes `all_screens=True`
+  by default, with the reasoning and the finding documented directly in the lesson.
+- The user applies the same one-line fix to their own `ocr_reader.py`.
+
+This is a real example of exactly the kind of gap this project's testing approach is meant to
+catch — the code was "correct" by the lesson as originally written, and only broke because of the
+user's actual hardware setup (multiple monitors), which no amount of single-monitor testing on the
+dev side would have caught on its own.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
