@@ -748,6 +748,30 @@ plus Tier 3 itself, are the specific conditions to work through next, in Weeks 5
 
 ---
 
+## 2026-09-02 — Week 5 begins: direction chosen, Lesson 5.1 built
+
+**10:30** — Worked through the real design decision for the AI phase: a fully local, free,
+trained-by-the-user model (not calling an existing pretrained model, and not a cloud API), given
+the goal of eventually selling this and potentially patenting it. Landed on: **UI Automation
+finds the exact focused control's screen region → Windows' own built-in OCR reads the text inside
+it → a small, custom-trained model (built and trained by the user, not an existing one) decides
+Hebrew or English from that text.** Chosen over an end-to-end raw-pixel model (skip OCR entirely)
+after walking through real numbers: the text-based route is buildable in roughly 1-2 weeks with no
+GPU needed, versus 4-8+ weeks and a real risk of needing more data/hardware than available for a
+raw-pixel version. Flagged clearly (twice) that OCR-licensing-for-commercial-use and patent
+eligibility are real legal questions for an actual attorney, not something to treat as settled
+here — the one concrete, non-legal-opinion fact worth acting on: most patent systems (US included)
+have a limited window after first public disclosure/sale before the right to patent is lost, so
+that conversation should happen before showing this publicly, not after.
+
+**Lesson 5.1 built and verified**: UI Automation's `GetFocusedControl()` and
+`.BoundingRectangle` — confirmed against the actual `uiautomation` library source (not guessed),
+then installed into the project's venv and run for real, returning genuine data with no errors.
+This is the first building block Week 5's OCR/model steps will target instead of reading the whole
+screen indiscriminately.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
