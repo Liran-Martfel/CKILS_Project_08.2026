@@ -98,6 +98,14 @@ CONTENT_CONFIDENCE_THRESHOLD = 0.65
 LANGUAGE_TO_HKL = {"english": English_HKL, "hebrew": Hebrew_HKL}
 
 
+# Latency scales with how much text there is to recognize, not raw pixel area —
+# measured 6805ms on a full 1920x1080 dense pane vs 523ms capped to 300x100.
+# Capping keeps this closer to Tesseract's own ~500-650ms floor instead of scaling
+# unboundedly with a large code editor or webpage.
+MAX_OCR_WIDTH = 400
+MAX_OCR_HEIGHT = 150
+
+
 def decide_with_content(fallback_hkl):
     """
     Falls back to fallback_hkl (Tier 1/2's answer, possibly None) on an empty
@@ -107,7 +115,9 @@ def decide_with_content(fallback_hkl):
     try:
         control = auto.GetFocusedControl()
         rect = control.BoundingRectangle
-        text = read_region(rect.left, rect.top, rect.right, rect.bottom)
+        right = min(rect.right, rect.left + MAX_OCR_WIDTH)
+        bottom = min(rect.bottom, rect.top + MAX_OCR_HEIGHT)
+        text = read_region(rect.left, rect.top, right, bottom)
     except Exception as e:
         print(f"  [content] skipped ({e})")
         return fallback_hkl
