@@ -99,6 +99,13 @@ last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
 overridden = set()     # hwnd the user manually overrode, not yet reset
 SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 
+# Real bug found live: once Tier 3 corrected a window's language, the very next
+# focus/title event for that SAME window re-applied the raw rule and undid the
+# correction — the fast path had no memory that content already decided this
+# window. This makes a confident content decision "stick" for as long as you
+# stay in that window; it resets to rule-first the moment you leave and return.
+content_decision = {}  # thread_id -> the last confident Tier 3 decision, if any
+
 # Real bug found live: some apps fire EVENT_OBJECT_NAMECHANGE repeatedly for the
 # same window in quick succession (e.g. while a page is still loading). Each one
 # used to spawn its own background correction thread, and multiple could race on
@@ -144,7 +151,14 @@ def decide_with_content(fallback_hkl):
             print("  [content] empty field, nothing to read")
         return fallback_hkl
 
-    label, proba = predict_language(text)
+    try:
+        label, proba = predict_language(text)
+    except Exception as e:
+        # Any future error in the model/prediction pipeline (not just the ones
+        # already found and fixed) falls back gracefully here now, same as OCR.
+        if DEBUG:
+            print(f"  [content] skipped ({e})")
+        return fallback_hkl
     confidence = proba[label]
     if DEBUG:
         print(f"  [content] read {text[:60]!r} -> {label} ({confidence:.2f} confidence)")
@@ -191,17 +205,30 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             return
         if hwnd != win32gui.GetForegroundWindow():
             return
-    if previous_thread is not None and previous_thread != thread_id and previous_thread in overridden:
-        overridden.discard(previous_thread)
-        last_set.pop(previous_thread, None)
+    if previous_thread is not None and previous_thread != thread_id:
+        if previous_thread in overridden:
+            overridden.discard(previous_thread)
+            last_set.pop(previous_thread, None)
+        content_decision.pop(previous_thread, None)  # fresh window = rule-first again
     previous_thread = thread_id
 
-    _, pid = win32process.GetWindowThreadProcessId(hwnd)
-    title = win32gui.GetWindowText(hwnd)
-    exe_name = psutil.Process(pid).name()
+    try:
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        title = win32gui.GetWindowText(hwnd)
+        exe_name = psutil.Process(pid).name()
+    except Exception as e:
+        # A window/process can vanish between the event firing and this lookup
+        # (short-lived popups, permission-restricted elevated windows) — skip
+        # this one event rather than crash the whole hook callback over it.
+        if DEBUG:
+            print(f"  [debug] could not resolve window info, skipping ({e})")
+        return
+
     if DEBUG:
         print(f"  [debug] exe_name = {exe_name!r}")
-    target_hkl = resolve_target(exe_name, title)
+    # Once Tier 3 has made a confident call for this window, trust that over the
+    # raw rule for the rest of this visit — see content_decision above for why.
+    target_hkl = content_decision.get(thread_id, resolve_target(exe_name, title))
 
     if target_hkl is not None:
         actual_hkl = win32api.GetKeyboardLayout(thread_id)
@@ -269,6 +296,7 @@ def apply_content_correction(hwnd, thread_id, exe_name, rule_hkl):
         win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, corrected_hkl)
         last_set[thread_id] = corrected_hkl
         last_switch_time[thread_id] = time.time()
+        content_decision[thread_id] = corrected_hkl  # sticks for the rest of this visit
         print(f"{exe_name}: content-aware correction to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
     finally:
         content_check_in_progress.discard(thread_id)
