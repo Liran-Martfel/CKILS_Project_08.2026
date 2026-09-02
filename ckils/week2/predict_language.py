@@ -1,6 +1,11 @@
+import os
 import joblib
 
-MODEL_FILE = "language_model.joblib"
+# A bare relative filename only worked by coincidence when running "python
+# rule_engine.py" from inside this folder. Packaged into the standalone exe,
+# bundled files extract elsewhere - this resolves correctly either way, same
+# pattern already used in ocr_reader.py for tessdata (verified working there).
+MODEL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "language_model.joblib")
 
 
 def load_model():
