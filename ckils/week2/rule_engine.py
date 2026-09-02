@@ -3,9 +3,16 @@ import win32.lib.win32con
 import win32api, win32con, win32gui, win32process, psutil
 import time
 import threading
+import json
+import os
+import shutil
 import uiautomation as auto
 from ocr_reader import read_region
 from predict_language import predict_language
+
+# Set to False for a quiet, end-user-facing run — True prints a line for every
+# focus change and every content-layer check, useful while developing/debugging.
+DEBUG = True
 # ================================================================================
 # CKILS rule_engine.py — Legend (short)
 # ================================================================================
@@ -52,40 +59,40 @@ from predict_language import predict_language
 # WINEVENT_OUTOFCONTEXT      Run the callback safely in our own process.
 # ================================================================================
 
-def check_layout_later(exe_name, thread_id, delay):
-    # runs on its own, separate from the main program, so it can sleep
-    # without freezing the hook/message loop
-    time.sleep(delay)
-    later_hkl = win32api.GetKeyboardLayout(thread_id)
-    print(f"    [debug +{delay}s] {exe_name}: layout is now {hex(later_hkl)}")
-
-
 English_HKL = 0x04090409
 Hebrew_HKL  = -0xfc2fbf3
+LANGUAGE_NAME_TO_HKL = {"english": English_HKL, "hebrew": Hebrew_HKL}
 
-RULES = {'Code.exe' : English_HKL,
-         'chrome.exe' : [
-                        ('Gmail', Hebrew_HKL),
-                        ('Gemini', Hebrew_HKL),
-                        ('Google Docs', English_HKL),
-                        ('WhatsApp Business', Hebrew_HKL),
-                        ('Jupyter', English_HKL),
-                        ('Linear Regression', Hebrew_HKL),
-                        ('Polynomial Regression', English_HKL),
-                        ('K-Nearest Neighbors', Hebrew_HKL),
-                        ('Support Vector Machines', English_HKL),
-                        ('Decision Trees', Hebrew_HKL),
-                        ('Random Forest', English_HKL),
-                        ('Cross-Validation', Hebrew_HKL),
-                        ('Grid Search', English_HKL),
-                        ('K-Means', Hebrew_HKL),
-                        ('PCA', English_HKL),],
-         'msedge.exe' : Hebrew_HKL,
-         'WindowsTerminal.exe' : English_HKL,
-         'firefox.exe' : [('Gmail',Hebrew_HKL),('Google Docs',English_HKL)],
-         'ms-teams.exe' : English_HKL,
-         'pycharm64.exe' : English_HKL,
-         'Zoom.exe' : Hebrew_HKL}
+# Your own app -> language rules live in rules_config.json, not hardcoded here —
+# that file is personal/local (gitignored), so this code stays clean and generic
+# for anyone else who downloads it. See rules_config.example.json for the format.
+RULES_DIR = os.path.dirname(os.path.abspath(__file__))
+RULES_CONFIG_FILE = os.path.join(RULES_DIR, "rules_config.json")
+RULES_EXAMPLE_FILE = os.path.join(RULES_DIR, "rules_config.example.json")
+
+
+def load_rules():
+    if not os.path.exists(RULES_CONFIG_FILE):
+        if os.path.exists(RULES_EXAMPLE_FILE):
+            shutil.copy(RULES_EXAMPLE_FILE, RULES_CONFIG_FILE)
+        else:
+            return {}
+
+    with open(RULES_CONFIG_FILE, encoding="utf-8") as f:
+        raw = json.load(f)
+
+    rules = {}
+    for exe_name, value in raw.items():
+        if exe_name.startswith("_"):  # e.g. "_comment" — documentation, not a rule
+            continue
+        if isinstance(value, str):
+            rules[exe_name] = LANGUAGE_NAME_TO_HKL[value]
+        else:
+            rules[exe_name] = [(keyword, LANGUAGE_NAME_TO_HKL[lang]) for keyword, lang in value.items()]
+    return rules
+
+
+RULES = load_rules()
 
 last_set = {}          # hwnd -> HKL we last set (or the user's manual choice) for that window
 last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
@@ -119,18 +126,22 @@ def decide_with_content(fallback_hkl):
         bottom = min(rect.bottom, rect.top + MAX_OCR_HEIGHT)
         text = read_region(rect.left, rect.top, right, bottom)
     except Exception as e:
-        print(f"  [content] skipped ({e})")
+        if DEBUG:
+            print(f"  [content] skipped ({e})")
         return fallback_hkl
 
     if not text.strip():
-        print("  [content] empty field, nothing to read")
+        if DEBUG:
+            print("  [content] empty field, nothing to read")
         return fallback_hkl
 
     label, proba = predict_language(text)
     confidence = proba[label]
-    print(f"  [content] read {text[:60]!r} -> {label} ({confidence:.2f} confidence)")
+    if DEBUG:
+        print(f"  [content] read {text[:60]!r} -> {label} ({confidence:.2f} confidence)")
     if confidence < CONTENT_CONFIDENCE_THRESHOLD:
-        print(f"  [content] confidence below {CONTENT_CONFIDENCE_THRESHOLD} threshold, trusting the rule")
+        if DEBUG:
+            print(f"  [content] confidence below {CONTENT_CONFIDENCE_THRESHOLD} threshold, trusting the rule")
         return fallback_hkl
 
     return LANGUAGE_TO_HKL[label]
@@ -179,12 +190,14 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     _, pid = win32process.GetWindowThreadProcessId(hwnd)
     title = win32gui.GetWindowText(hwnd)
     exe_name = psutil.Process(pid).name()
-    print(f"  [debug] exe_name = {exe_name!r}")   # add this line temporarily
+    if DEBUG:
+        print(f"  [debug] exe_name = {exe_name!r}")
     target_hkl = resolve_target(exe_name, title)
 
     if target_hkl is not None:
         actual_hkl = win32api.GetKeyboardLayout(thread_id)
-        print(f"  [debug] {exe_name} hwnd={hwnd} thread={thread_id} title={title!r} actual={hex(actual_hkl)} last={hex(last_set.get(thread_id, -1))}")
+        if DEBUG:
+            print(f"  [debug] {exe_name} hwnd={hwnd} thread={thread_id} title={title!r} actual={hex(actual_hkl)} last={hex(last_set.get(thread_id, -1))}")
         # ignore mismatches caused by our own switch not having propagated yet
         just_switched = time.time() - last_switch_time.get(thread_id, 0) < SWITCH_GRACE
         if thread_id in last_set and actual_hkl != last_set[thread_id] and not just_switched:
@@ -225,19 +238,22 @@ def apply_content_correction(hwnd, thread_id, exe_name, rule_hkl):
     elapsed_ms = (time.perf_counter() - start) * 1000
 
     if corrected_hkl == rule_hkl or corrected_hkl is None:
-        print(f"  [content] {exe_name}: no change ({elapsed_ms:.0f} ms)")
+        if DEBUG:
+            print(f"  [content] {exe_name}: no change ({elapsed_ms:.0f} ms)")
         return
     if win32gui.GetForegroundWindow() != hwnd:
-        print(f"  [content] {exe_name}: decision arrived too late, focus moved on ({elapsed_ms:.0f} ms)")
+        if DEBUG:
+            print(f"  [content] {exe_name}: decision arrived too late, focus moved on ({elapsed_ms:.0f} ms)")
         return
     if thread_id in overridden:
-        print(f"  [content] {exe_name}: user has manually overridden this window, leaving it alone ({elapsed_ms:.0f} ms)")
+        if DEBUG:
+            print(f"  [content] {exe_name}: user has manually overridden this window, leaving it alone ({elapsed_ms:.0f} ms)")
         return
 
     win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, corrected_hkl)
     last_set[thread_id] = corrected_hkl
     last_switch_time[thread_id] = time.time()
-    print(f"  [content] {exe_name}: corrected to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
+    print(f"{exe_name}: content-aware correction to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
 
 callback = WinEventProcType(on_focus_change)
 hook = user32.SetWinEventHook(
@@ -247,10 +263,5 @@ hook = user32.SetWinEventHook(
 name_hook = user32.SetWinEventHook(win32con.EVENT_OBJECT_NAMECHANGE,
     win32con.EVENT_OBJECT_NAMECHANGE,0,callback,0,0,win32con.WINEVENT_OUTOFCONTEXT)
 auto.InitializeUIAutomationInCurrentThread()  # once, before the message loop — needed by decide_with_content()
-print("CKILS is watching. Alt-Tab between your two configured apps. Ctrl+C to stop.")
-# Exception ignored while calling ctypes callback function <function on_focus_change at 0x00000202CF8EAAE0>:
-# Traceback (most recent call last):
-#   File "C:\Users\liran\Personal_Project\ckils\week2\rule_engine.py", line 100, in on_focus_change
-#     def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
-# KeyboardInterrupt: expected error when stopping the program the first time
+print("CKILS is watching in the background. Press Ctrl+C in this window to stop.")
 win32gui.PumpMessages()

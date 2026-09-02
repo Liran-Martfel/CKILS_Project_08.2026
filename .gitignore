@@ -2,3 +2,9 @@
 __pycache__/
 *.pyc
 *.egg-info/
+
+# Personal rules config - copy rules_config.example.json to create your own
+ckils/week2/rules_config.json
+
+# Runtime log the uiautomation library writes automatically on errors
+@AutomationLog.txt
