@@ -1,23 +1,4 @@
 text,label
-"אישמלד
-
-thanks
-
-5 Thought for 5
-
-@ Looks like that was typed with the keyboard still set to Hebrew — decodes back to
-“thabks"" (typo for “thanks"") on an English layout. Fittingly, exactly the problem this
-whole project exists to fix.
-
-You're welcome! Whenever you're ready, go ahead and run collect _data.py -- 6
-into a real field during the 3-second window, confirm/correct the guessed label, and
-repeat that across a bunch of different fields to build up training data.csv . Let me
-know how the first run goes.
-
-@ You're welcome! Whenever you've run collect 0813 ‏עק.‎ a few times and built up
-some rows in training data.csv , let me know how it went -- or if anything looks
-off, paste what it printed and we'll sort it out before moving on to 5.4 (training the
-actual model).",english
 claude.ai/code/artifact/féd5d3c8-4 1c7-467e-b4d6-163 13baaa78c?org=8fd66d49-6f2b-4e50-8,english
 "ktrl esc to focus or unfocus Claude
 

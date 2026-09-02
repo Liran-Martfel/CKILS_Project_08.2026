@@ -895,6 +895,27 @@ that actually supports both languages CKILS needs.
 
 ---
 
+## 2026-09-02 — Lesson 5.3 done: 82 real, balanced training rows collected
+
+**21:00** — User ran `collect_data.py` repeatedly across real usage — websites, chat apps, code
+editors, news sites, social media, financial tools — building `training_data.csv` up to 83 rows,
+nicely balanced between Hebrew (42) and English (41). One notable real bug hit along the way, worth
+recording: OCR can only read what's inside a genuinely *focused, editable* control — static chat
+response text (e.g. a generated list of example sentences) isn't focusable at all, so
+`GetFocusedControl()` kept returning whatever real input box still had focus instead. Fixed
+practically by pasting that kind of content into Notepad first, which *is* a real focusable control.
+
+**Reviewed the dataset before moving to training** (per the "verify before teaching" habit, applied
+here to reviewing data quality rather than a new API): found and removed one contaminated row that
+had accidentally captured text from this very chat conversation (the earlier "thabks" keyboard-typo
+tangent) rather than real language content — 82 clean rows remain, balance essentially unchanged.
+The rest of the dataset is genuinely useful, real-world-messy OCR text, exactly the kind of noise
+5.4's model needs to learn to handle rather than a clean, artificial dataset would.
+
+**Lesson 5.3 is done.** Next: 5.4, training the actual classifier on this data.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
