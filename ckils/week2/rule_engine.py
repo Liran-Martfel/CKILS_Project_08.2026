@@ -167,39 +167,59 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     title = win32gui.GetWindowText(hwnd)
     exe_name = psutil.Process(pid).name()
     print(f"  [debug] exe_name = {exe_name!r}")   # add this line temporarily
-    rule_hkl = resolve_target(exe_name, title)
+    target_hkl = resolve_target(exe_name, title)
 
-    content_start = time.perf_counter()
-    target_hkl = decide_with_content(rule_hkl)
-    content_ms = (time.perf_counter() - content_start) * 1000
-    if target_hkl != rule_hkl:
-        print(f"  [content] overrode rule -> {hex(target_hkl)} ({content_ms:.1f} ms)")
-    else:
-        print(f"  [content] no change ({content_ms:.1f} ms)")
+    if target_hkl is not None:
+        actual_hkl = win32api.GetKeyboardLayout(thread_id)
+        print(f"  [debug] {exe_name} hwnd={hwnd} thread={thread_id} title={title!r} actual={hex(actual_hkl)} last={hex(last_set.get(thread_id, -1))}")
+        # ignore mismatches caused by our own switch not having propagated yet
+        just_switched = time.time() - last_switch_time.get(thread_id, 0) < SWITCH_GRACE
+        if thread_id in last_set and actual_hkl != last_set[thread_id] and not just_switched:
+            overridden.add(thread_id)
+            last_set[thread_id] = actual_hkl  # treat the user's manual choice as the new "last known" state
+            print(f"{exe_name}: manual override detected, leaving it alone")
+        else:
+            # This is the fast path — unchanged from Weeks 2-4, still sub-millisecond.
+            # Tier 3 (below) never blocks this; it only corrects it afterward if needed.
+            start = time.perf_counter()
+            win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            print(f'{exe_name}: switched to {hex(target_hkl)} in {elapsed_ms:.1f} ms')
+            last_set[thread_id] = target_hkl
+            last_switch_time[thread_id] = time.time()
 
-    if target_hkl is None:
-        return
+    # Tier 3 (Week 5) runs in a background thread: real testing showed OCR alone
+    # costs 500ms+ even on a tiny, near-empty region (Tesseract reloads its language
+    # models from scratch every call) plus a few more ms per character recognized —
+    # both far past SC-02's 150ms target. Rather than block the proven fast path
+    # above on that, it runs after the fact and only corrects the switch if it
+    # disagrees, is confident, and the user hasn't already moved on or overridden it.
+    threading.Thread(
+        target=apply_content_correction,
+        args=(hwnd, thread_id, exe_name, target_hkl),
+        daemon=True
+    ).start()
 
-    actual_hkl = win32api.GetKeyboardLayout(thread_id)
-    print(f"  [debug] {exe_name} hwnd={hwnd} thread={thread_id} title={title!r} actual={hex(actual_hkl)} last={hex(last_set.get(thread_id, -1))}")
-    #print(f"  [debug] {exe_name}: actual={hex(actual_hkl)}  target={hex(target_hkl)}")
-    # ignore mismatches caused by our own switch not having propagated yet
-    just_switched = time.time() - last_switch_time.get(thread_id, 0) < SWITCH_GRACE
-    if thread_id in last_set and actual_hkl != last_set[thread_id] and not just_switched:
-        overridden.add(thread_id)
-        last_set[thread_id] = actual_hkl  # treat the user's manual choice as the new "last known" state
-        print(f"{exe_name}: manual override detected, leaving it alone")
-        return
 
-    # This is the ONLY PostMessage call in the whole file — time exactly this one,
-    # right where the actual switch happens, after the rule lookup and override guard.
+def apply_content_correction(hwnd, thread_id, exe_name, rule_hkl):
     start = time.perf_counter()
-    win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
+    corrected_hkl = decide_with_content(rule_hkl)
     elapsed_ms = (time.perf_counter() - start) * 1000
-    print(f'{exe_name}: switched to {hex(target_hkl)} in {elapsed_ms:.1f} ms')
 
-    last_set[thread_id] = target_hkl
+    if corrected_hkl == rule_hkl or corrected_hkl is None:
+        print(f"  [content] {exe_name}: no change ({elapsed_ms:.0f} ms)")
+        return
+    if win32gui.GetForegroundWindow() != hwnd:
+        print(f"  [content] {exe_name}: decision arrived too late, focus moved on ({elapsed_ms:.0f} ms)")
+        return
+    if thread_id in overridden:
+        print(f"  [content] {exe_name}: user has manually overridden this window, leaving it alone ({elapsed_ms:.0f} ms)")
+        return
+
+    win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, corrected_hkl)
+    last_set[thread_id] = corrected_hkl
     last_switch_time[thread_id] = time.time()
+    print(f"  [content] {exe_name}: corrected to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
 
 callback = WinEventProcType(on_focus_change)
 hook = user32.SetWinEventHook(

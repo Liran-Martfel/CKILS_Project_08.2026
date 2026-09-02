@@ -972,6 +972,49 @@ make, not something to pre-optimize away without evidence.
 
 ---
 
+## 2026-09-02 — Real live test of 5.5 found a severe latency bug, root-caused and fixed
+
+**22:40** — First live run of the wired-in Tier 3 immediately surfaced a serious problem: logged
+`content_ms` values of **1,000-15,296 ms** per check — 7 to over 100 times past SC-02's 150ms
+target, not just "somewhat slower." The switch itself was waiting on this before happening at all,
+making every focus change feel broken/unresponsive regardless of whether the eventual decision was
+even correct.
+
+**Root-caused with two direct benchmarks before touching any fix** (same rule as every other
+finding this project):
+1. Latency scales with the *amount of text* Tesseract has to recognize — roughly 3-4ms per
+   character, confirmed across four image sizes (40k px → 1,335ms/304 chars; 3.6M px →
+   43,959ms/9,918 chars). A dense code editor or browser pane can easily have thousands of visible
+   characters, explaining the worst numbers directly.
+2. Even a **nearly-empty tiny image** ("hi", 100x30px) still took 530-656ms — a large *fixed* cost
+   independent of content, because `pytesseract` spawns a fresh `tesseract.exe` process and reloads
+   its language model files from scratch on every single call.
+
+Combined, this means the current OCR approach cannot hit 150ms even in the best case, and gets far
+worse with real content-dense windows — an architectural mismatch, not a tunable parameter.
+
+**Fix: decoupled Tier 3 from the blocking switch entirely.** `on_focus_change()` now performs the
+rule-based switch exactly as it always has since Week 2 (unchanged, sub-millisecond, immediate) —
+Tier 3 runs afterward in a background thread (`apply_content_correction()`), and only issues a
+*second*, corrective switch if it disagrees, is confident, the window is still actually focused
+(checked via `GetForegroundWindow()`, since the user may have moved on during the multi-second OCR
+delay), and the user hasn't manually overridden that window in the meantime. This directly follows
+what the original 6-week plan itself anticipated for exactly this scenario: "keep the rule table as
+an instant fallback while the model result is still pending," rather than forcing an artificial
+speed-up of Tesseract itself.
+
+**Known, accepted limitation, not yet addressed:** the background thread and the main message-loop
+thread now both touch shared state (`last_set`, `last_switch_time`, `overridden`) without a lock.
+Python's GIL prevents low-level corruption, but logical races (a stale read/write ordering) are
+possible in principle. Not fixed yet — flagged honestly rather than silently left unmentioned;
+worth adding a `threading.Lock()` if real testing surfaces an actual symptom from this.
+
+Verified to compile; **not yet re-tested live** with this fix — that's the immediate next step,
+along with a separate, still-open question from the user about specific cases where the model
+"didn't recognize" expected content, not yet diagnosed with a concrete example.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
