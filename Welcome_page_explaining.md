@@ -108,8 +108,12 @@ forward into Weeks 5-6.
 
 **Honest overall progress:** against the original charter (the rule-based POC), this is roughly
 **90%** done. Against the project's actual **master goal** (AI-driven, no rule table needed at
-all), it's closer to **40-45%** — the foundation is solid, but the mandatory AI phase (Weeks 5-6)
-hasn't started yet, and that's the harder, less-proven half of the project.
+all), it's closer to **40-45%** — the foundation is solid, and Week 5 (the AI phase) is now
+underway: UI Automation pinpoints the exact focused control (5.1, confirmed working), Windows' own
+local/free OCR reads the text inside it (5.2), a real labeled dataset gets built from the user's own
+usage (5.3), a small classifier trained from scratch on that dataset decides Hebrew or English (5.4),
+and that decision refines — not replaces — the proven rule table from Weeks 1-4 (5.5). Lessons 5.2
+through 5.5 are written and published; the user building and testing that code is the next milestone.
 
 ## How to build/run
 
