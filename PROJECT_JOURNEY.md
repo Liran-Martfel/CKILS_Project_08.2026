@@ -1036,6 +1036,32 @@ actually running it. Verified to compile; **still not yet confirmed working live
 
 ---
 
+## 2026-09-02 — Tier 3 confirmed working live, plus a latency optimization
+
+**23:40** — After the COM fix, added debug logging to `decide_with_content()` (the actual OCR'd
+text, predicted label, and confidence for every check, since "no change" was ambiguous between an
+empty field, low confidence, or genuine agreement). Re-tested live: **Tier 3 genuinely works.** Real
+examples from the log: a real Hebrew news site (ynet) correctly triggered a Hebrew correction at
+0.94 confidence; an English-language Gemini conversation correctly triggered an English correction;
+low-confidence Zoom caption text (0.63-0.74) correctly deferred to the rule table instead of
+guessing. Two minor errors also surfaced (`cannot write empty image`, one COM event-subscriber
+hiccup) — both caught safely by the existing try/except, no crash, just a graceful "no change."
+
+**User asked to reduce the latency further.** Tried `tesserocr` (keeps one Tesseract engine loaded
+in memory instead of respawning a process per call — would directly target the ~500-650ms floor
+cost found earlier) — not viable right now: needs Tesseract's native dev libraries to compile
+against, not set up on this machine, and no pre-built wheel exists for this Python version.
+
+**Verified a simpler, already-available fix instead:** latency scales with how much text there is
+to recognize, not raw pixel area — measured 6,805ms OCRing a dense 1920x1080 pane versus 523ms on
+the same content cropped to 300x100. Capped the OCR region to a fixed 400x150 maximum in
+`decide_with_content()`. Real tradeoff, accepted deliberately: a huge focused pane (a whole code
+editor, a whole webpage) now only gets read from its top-left corner, not read in full — reasonable
+given Tier 3 was always meant for judging a small field you're about to type into, not OCRing an
+entire document.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
