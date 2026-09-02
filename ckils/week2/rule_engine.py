@@ -202,6 +202,11 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
 
 
 def apply_content_correction(hwnd, thread_id, exe_name, rule_hkl):
+    # COM (which UI Automation needs) is initialized per THREAD, not once for the
+    # whole process — this function runs in a new background thread every time,
+    # so it needs its own init call here, separate from the one before PumpMessages().
+    auto.InitializeUIAutomationInCurrentThread()
+
     start = time.perf_counter()
     corrected_hkl = decide_with_content(rule_hkl)
     elapsed_ms = (time.perf_counter() - start) * 1000

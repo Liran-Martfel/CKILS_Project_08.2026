@@ -1015,6 +1015,27 @@ along with a separate, still-open question from the user about specific cases wh
 
 ---
 
+## 2026-09-02 — Second real bug, found on the very next live test: COM needs per-thread init
+
+**23:10** — User re-tested and, correctly, suspected something was wrong ("maybe override, or the
+rule is set and that's it") — real evidence confirmed it immediately: every single `[content]` line
+printed `skipped ([WinError -2147221008] CoInitialize has not been called)`. Tier 3 had been
+silently failing on every check since the background-thread fix, always falling back to the rule
+table — exactly matching the user's own description of what they were observing.
+
+**Root cause:** COM, which `uiautomation` is built on, initializes per *thread*, not once for the
+whole process. `InitializeUIAutomationInCurrentThread()` was called once in the main thread before
+`PumpMessages()` starts — correct for the main thread, but the previous fix (running Tier 3 in a
+background thread) means a brand new thread gets spawned for every single focus change, and none of
+those ever received that initialization. **Fix:** call it again at the top of
+`apply_content_correction()` itself, since that's what actually executes inside each new thread.
+
+This is now the second real, live-testing-only bug found in the Tier 3 wiring (the first being the
+latency issue) — both were invisible from code review or `py_compile` alone, both only surfaced by
+actually running it. Verified to compile; **still not yet confirmed working live** — that's next.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
