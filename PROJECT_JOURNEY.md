@@ -940,6 +940,23 @@ but worth knowing going in rather than being surprised by it during 5.5 testing.
 
 ---
 
+## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
+
+**21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
+deliberately targeting the weak spot: short phrases and single words in both languages (`"ok"`,
+`"בסדר"`, `"thanks"`, `"תודה"`, etc.), plus more medium-length casual sentences. Unlike the 5.3
+rows, these are clean, directly-labeled text (no OCR step) — a different, synthetic source, added
+transparently as a supplement to the real OCR-collected data, not a replacement for it. Balance held
+at essentially 50/50 (150 rows total: 76 Hebrew / 74 English).
+
+Retrained on the larger dataset: held-out accuracy still 100%, and re-ran the same tricky test cases
+from the earlier 5.4 finding — confidence improved across the board (`"ok"` 53.6% → 65.2%,
+`"Good morning..."` 66% → 75%, `"תודה"` 65% → 73%). The two cases that stayed near 50%
+(`"123456"` and mixed `"שלום Hello"`) are supposed to stay near 50% — they're genuinely ambiguous,
+so low confidence there is correct behavior, not a remaining gap.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
