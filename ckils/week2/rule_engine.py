@@ -99,6 +99,15 @@ last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
 overridden = set()     # hwnd the user manually overrode, not yet reset
 SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 
+# Real bug found live: some apps fire EVENT_OBJECT_NAMECHANGE repeatedly for the
+# same window in quick succession (e.g. while a page is still loading). Each one
+# used to spawn its own background correction thread, and multiple could race on
+# the same thread_id's last_set — one thread's stale result landing after
+# another's made it look like a manual override that never actually happened.
+# This tracks which thread_ids already have a correction in flight, so a new
+# NAMECHANGE event skips spawning a redundant, racing one.
+content_check_in_progress = set()
+
 # Tier 3 (Week 5): refines — or, for an unruled app, supplies — the switch decision
 # using the actual on-screen text, via UI Automation + OCR + the model trained in 5.4.
 CONTENT_CONFIDENCE_THRESHOLD = 0.65
@@ -220,40 +229,49 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     # both far past SC-02's 150ms target. Rather than block the proven fast path
     # above on that, it runs after the fact and only corrects the switch if it
     # disagrees, is confident, and the user hasn't already moved on or overridden it.
-    threading.Thread(
-        target=apply_content_correction,
-        args=(hwnd, thread_id, exe_name, target_hkl),
-        daemon=True
-    ).start()
+    # Skip spawning one if this same window already has a correction in flight —
+    # see content_check_in_progress above for why that matters.
+    if thread_id not in content_check_in_progress:
+        content_check_in_progress.add(thread_id)
+        threading.Thread(
+            target=apply_content_correction,
+            args=(hwnd, thread_id, exe_name, target_hkl),
+            daemon=True
+        ).start()
 
 
 def apply_content_correction(hwnd, thread_id, exe_name, rule_hkl):
-    # COM (which UI Automation needs) is initialized per THREAD, not once for the
-    # whole process — this function runs in a new background thread every time,
-    # so it needs its own init call here, separate from the one before PumpMessages().
-    auto.InitializeUIAutomationInCurrentThread()
+    # Held for the whole function, not just the OCR part — this is what actually
+    # stops two corrections for the same window from racing on last_set/overridden.
+    try:
+        # COM (which UI Automation needs) is initialized per THREAD, not once for the
+        # whole process — this function runs in a new background thread every time,
+        # so it needs its own init call here, separate from the one before PumpMessages().
+        auto.InitializeUIAutomationInCurrentThread()
 
-    start = time.perf_counter()
-    corrected_hkl = decide_with_content(rule_hkl)
-    elapsed_ms = (time.perf_counter() - start) * 1000
+        start = time.perf_counter()
+        corrected_hkl = decide_with_content(rule_hkl)
+        elapsed_ms = (time.perf_counter() - start) * 1000
 
-    if corrected_hkl == rule_hkl or corrected_hkl is None:
-        if DEBUG:
-            print(f"  [content] {exe_name}: no change ({elapsed_ms:.0f} ms)")
-        return
-    if win32gui.GetForegroundWindow() != hwnd:
-        if DEBUG:
-            print(f"  [content] {exe_name}: decision arrived too late, focus moved on ({elapsed_ms:.0f} ms)")
-        return
-    if thread_id in overridden:
-        if DEBUG:
-            print(f"  [content] {exe_name}: user has manually overridden this window, leaving it alone ({elapsed_ms:.0f} ms)")
-        return
+        if corrected_hkl == rule_hkl or corrected_hkl is None:
+            if DEBUG:
+                print(f"  [content] {exe_name}: no change ({elapsed_ms:.0f} ms)")
+            return
+        if win32gui.GetForegroundWindow() != hwnd:
+            if DEBUG:
+                print(f"  [content] {exe_name}: decision arrived too late, focus moved on ({elapsed_ms:.0f} ms)")
+            return
+        if thread_id in overridden:
+            if DEBUG:
+                print(f"  [content] {exe_name}: user has manually overridden this window, leaving it alone ({elapsed_ms:.0f} ms)")
+            return
 
-    win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, corrected_hkl)
-    last_set[thread_id] = corrected_hkl
-    last_switch_time[thread_id] = time.time()
-    print(f"{exe_name}: content-aware correction to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
+        win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, corrected_hkl)
+        last_set[thread_id] = corrected_hkl
+        last_switch_time[thread_id] = time.time()
+        print(f"{exe_name}: content-aware correction to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
+    finally:
+        content_check_in_progress.discard(thread_id)
 
 callback = WinEventProcType(on_focus_change)
 hook = user32.SetWinEventHook(
