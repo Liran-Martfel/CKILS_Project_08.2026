@@ -46,14 +46,22 @@ map required at that point.
   applying the charter's own framework: Go with Conditions** — window/app-level switching is the
   proven foundation; those two findings plus Tier 3 itself are the conditions carried into
   Weeks 5-6.
-- **Week 5+ — ahead.** The master goal above: replacing the rule table with real AI-driven
-  understanding.
+- **Week 5 — in progress.** The master goal above, underway: **5.1** (UI Automation pinpoints the
+  exact focused control, not just the window) is built and confirmed working. **5.2** (Windows'
+  own local/free OCR reads the text inside that control — real finding: Hebrew OCR isn't installed
+  by default and needs a separate Windows language feature turned on), **5.3** (build a real labeled
+  dataset from the user's own OCR captures), **5.4** (train a small classifier from scratch —
+  TF-IDF character n-grams + logistic regression, verified end to end — that decides Hebrew or
+  English from that text), and **5.5** (wire that decision in as a refinement over the existing rule
+  table, not a replacement — an empty field or a low-confidence read still falls back to Tiers 1-2)
+  are all written and published to the training platform, ready for the user to build and test.
 
 **Overall progress, honestly:** against the original charter (the rule-based POC, Weeks 1-4),
 this is roughly **90%** done — 7 of 8 Must criteria confirmed passing, with only the 8-hour
 stability run left. Against the project's actual **master goal** (AI-driven, no rule table at
-all), it's closer to **40-45%** — Weeks 1-4 are the solid foundation, but Weeks 5-6 (the mandatory
-AI phase) haven't started, and that's the hardest, least-proven part of the whole project.
+all), it's closer to **45-50%** — Weeks 1-4 are the solid foundation, and Week 5's full lesson
+path now exists and is verified; what's left is the user actually building it and the real-world
+latency/accuracy testing that follows.
 
 ## Repo layout
 

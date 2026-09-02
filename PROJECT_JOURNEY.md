@@ -770,6 +770,52 @@ then installed into the project's venv and run for real, returning genuine data 
 This is the first building block Week 5's OCR/model steps will target instead of reading the whole
 screen indiscriminately.
 
+**14:00** — Lesson 5.1 confirmed working end to end: after fixing an early testing-methodology gap
+(the script was reading its own PyCharm window because it checked focus instantly at launch, before
+there was time to Alt-Tab elsewhere — fixed by adding a 3-second pause before `GetFocusedControl()`
+runs), it correctly reported different, precise rectangles for different real controls.
+
+---
+
+## 2026-09-02 — Lessons 5.2 through 5.5 written and published
+
+**14:30** — Authored all four remaining Week 5 lessons on the training platform, each verified for
+real before being written (same rule as every lesson so far), not assumed from documentation:
+
+- **5.2 — Read it (OCR).** Installed the actual `winrt` OCR packages plus `pillow` into the
+  project's venv and ran real OCR against a live screen region before writing anything. **Real
+  finding:** Hebrew OCR is *not* installed by default — `OcrEngine.try_create_from_language` for
+  `"he"` returned `None` on this machine even though the Hebrew keyboard layout has worked since
+  Week 1; the Hebrew *language pack's OCR feature* is a separate install (Settings → Language &
+  region → Hebrew → enable "Optical character recognition"), confirmed via Microsoft's own docs.
+  Also confirmed OCR isn't perfect — real misreads on real on-screen code (`sleep` → `steep`) — so
+  the lesson explicitly teaches that noise as expected, not a bug to chase. The code runs both the
+  English and Hebrew engines and keeps whichever recognized more text, since a single engine can't
+  read a script it wasn't built for. Only the English half could be verified end-to-end on this dev
+  machine (no Hebrew OCR installed here) — the user needs to confirm the Hebrew half after
+  installing that language feature.
+- **5.3 — Collect real examples.** A dataset-building script that reads whatever's focused (reusing
+  5.2), guesses a label from Unicode script range, and asks the user to confirm/correct it into
+  `training_data.csv` — deliberately built from real OCR captures of the user's own usage rather
+  than a downloaded corpus, both to match real OCR noise and for originality given the stated
+  patent interest.
+- **5.4 — Train your own model.** Installed `scikit-learn` into the venv and ran the exact intended
+  pipeline (TF-IDF over character n-grams → `LogisticRegression` → `joblib` save/reload) end to end
+  against a stand-in dataset before writing the lesson. Chosen specifically because it matches every
+  answer from the earlier 8-question elicitation quiz: lightweight/fast on an i5 laptop, simple to
+  explain, and fully inspectable ("see exact info it used") — unlike a black-box neural net.
+- **5.5 — Wire it into CKILS.** A `decide_hkl()` function that only *refines* the existing `RULES`
+  lookup — falling back to it whenever OCR finds no text (an empty field) or the model's confidence
+  is below a threshold — rather than replacing Tier 1/2 outright. This is a direct, literal
+  application of the Week 4 "Go with Conditions" decision: rule-based switching stays the proven
+  foundation, content-awareness sits on top of it. Flagged explicitly as untested for latency
+  against the charter's <150ms target (SC-02) — that's the first thing to measure once this is
+  actually wired into the user's live `rule_engine.py`.
+
+All four lessons show complete, runnable code (no fill-in-the-blank hints, per standing instruction)
+and are published to the training platform. Not yet done: the user writing/running this code
+themselves and Claude reviewing it — that's the next real milestone for Week 5.
+
 ---
 
 ## Reference
