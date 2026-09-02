@@ -916,6 +916,30 @@ The rest of the dataset is genuinely useful, real-world-messy OCR text, exactly 
 
 ---
 
+## 2026-09-02 — Lesson 5.4 done: trained the classifier, one honest calibration finding
+
+**21:20** — Trained the real classifier (TF-IDF over character n-grams + logistic regression) on
+the actual 82-row dataset from 5.3. Held-out test accuracy: 100% (8/8 English, 9/9 Hebrew) — expected
+at this stage, since Hebrew and English use entirely different character sets, so this mainly proves
+the model learned that basic separation correctly, not much more.
+
+**Tested it against genuinely new text it never saw**, including deliberately tricky cases: clean
+English sentences, clean Hebrew sentences, a mixed Hebrew+English string, pure digits with no
+language content at all, and short one-word inputs. Every prediction was directionally correct.
+
+**One real, honest finding:** confidence is often weak — some clearly-correct predictions barely
+clear 50% (`"ok"` → english at 53.6%, `"123456"` → hebrew at 51.2%, essentially a coin flip, which
+is arguably the *right* uncertainty for text with no real language signal). Likely just a function
+of only having 82 training rows — more data (going back to 5.3) should sharpen this over time. This
+matters directly for 5.5: the planned 0.65 confidence threshold will cause the model to defer to the
+rule-table fallback for a fair number of real, correctly-guessed-but-low-confidence cases — which is
+actually safe, conservative behavior (better to defer than overrule a working rule on a weak guess),
+but worth knowing going in rather than being surprised by it during 5.5 testing.
+
+**Lesson 5.4 is done.** Next: 5.5, wiring this into the actual switching decision.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
