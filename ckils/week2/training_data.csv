@@ -1,0 +1,2211 @@
+text,label
+"אישמלד
+
+thanks
+
+5 Thought for 5
+
+@ Looks like that was typed with the keyboard still set to Hebrew — decodes back to
+“thabks"" (typo for “thanks"") on an English layout. Fittingly, exactly the problem this
+whole project exists to fix.
+
+You're welcome! Whenever you're ready, go ahead and run collect _data.py -- 6
+into a real field during the 3-second window, confirm/correct the guessed label, and
+repeat that across a bunch of different fields to build up training data.csv . Let me
+know how the first run goes.
+
+@ You're welcome! Whenever you've run collect 0813 ‏עק.‎ a few times and built up
+some rows in training data.csv , let me know how it went -- or if anything looks
+off, paste what it printed and we'll sort it out before moving on to 5.4 (training the
+actual model).",english
+claude.ai/code/artifact/féd5d3c8-4 1c7-467e-b4d6-163 13baaa78c?org=8fd66d49-6f2b-4e50-8,english
+"ktrl esc to focus or unfocus Claude
+
+6",english
+"You 0
+‏ותלאביג?למהשםל‎ ramen E
+
+47.45 אבל במודיעי היו תקופות יפות אחרי ה7 כזה פחות",hebrew
+"8
+
+- Flash Gemi
+
+והפתרונות, או כשאתה עומד בחזית ומוביל ‎NRX‏ התהליך?
+
+חלק 2: ערכים וזהות
+
+4. עקרונות ברזל: מהם 3-2 הערכים ‎AW‏ חשוב לך לשמור עליהם, גם כשהדברים נעשים קשים או
+לא נוחים?
+
+5 גאווה אישית: איזה עניין או הישג מהעבר שלך (קטן או גדול) ‎OW‏ לך להרגיש סיפוק אמיתי כשאתה
+נזכר בו?
+
+6 משענת סביבתית: איזה תפקיד אתה ממלא בדרך כלל בחיים של האנשים הקרובים אליך (הפתור
+בעיות, האוזן הקשבת, המצחיק, או זה שמביא יציבות)?
+
+חלק 3: ניהול אנרגיה ומשאבים
+
+7 הטענת מצברים: מה הדבר שהכי משקם את האנרגיה שלך אחרי שבוע עמוס - שקט וזמן אישי, או
+יצירה וצשייה של משהו מנושי?
+
+8. מנגנוני עומס: כשהמערכת שלך עמוסה רגשית או מנטלית, מה הדרך הטבעית שלך להתמודד
+(התכנסות פנימה, פריקה בשיחה, או בריחה לעיסוק מסיח ‎DVT‏
+
+חלק 4: מבט קדימה
+
+9. שינוי וצמיחה: ‎ATR‏ שינוי שעברת בשנים האחרונות אתה הכי מעריך בצצמך?
+
+0. הצעד הבא: אם היית יכול לבחור תכונה אחת או הרגל אחד לחזק בעצמך בתקופה הקרובה, מה
+הוא היה?
+
+אתה מוזמן לענות כאן על השאלות (כולן או חלקן), או רק לכתוב לעצמך בצד. אם תרצה לשתף
+בתשובות, נוכל לנתח אותן יחד ולגבש תמונה ברורה של הפרופיל והחוזקות שלך.
+
+ס 6 ם -
+
+9 2Gemini-7 ‏ישלךשאלה‎ +-
+
+‎Gemini‏ כובוסס על וא ויכול לטעות.",hebrew
+"print(f""OCR read: {text!r}"")
+print(f""Guessed label (from character script): {guess}"")
+
+answer = input(""Press Enter to accept, or type ‘english'/‘hebrew' to correct: ""
+label = answer if answer in (“english"", “hebrew"") else guess
+
+if Label is None:
+print(“Could not determine a label (no letters found) - skipped."")
+return
+
+append_row(text, Label)
+print(f""Saved as {label!r}. Run this again on a different field to add more rou
+
+How TO TEST IT
+
+Save it as ckils/ueekS/collect_data.py , next to ocr_reader.py .
+
+Run it repeatedly — click into a different field each time (chat boxes,
+documents, search bars, both languages, both apps you use daily) — building
+up training_data.csv one row per run.
+
+‘Aim for at least 60-100 rows total, roughly balanced between English and
+Hebrew, and make sure a meaningful chunk are the short/messy/ambiguous
+kind described above, not just clean full sentences.
+
+Open training_data.csv afterward and spot-check a few rows -- confirm the
+‘text and label actually match what you saw on screen.
+
+WHAT SUCCESS LOOKS LIKE
+
+training_data.csv grows by one row per run, with real OCR text paired with a
+label you personally confirmed or corrected - a
+not just the easy ones
+
+of clean and messy examples,
+
+- When your code produces the expected output, bring it back to your
+Claude Code chat (paste it, or point to the file) for review — it gets
+checked, explained, and merged into ckils-poc before you move on.",english
+"Python Libraries
+
+import numpy, pandas, matplotlib, seaborn as data_science
+
+@ 8 Slide Decks = Coming Soon
+
+| Slide Decks (rxesenrarions) .
+
+DECK ‏גס‎
+
+₪ Lessons 4 More coming soon
+
+DECK 02
+
+(ANTRO ‏סד‎ DATA SCIENCE
+
+(uumpy
+
+Jupyter & Anaconda
+
+What is Data Science, structured vs unstructured data, Python
+libraries overview, Anaconda installation, Jupyter Notebook
+setup, and mastering cells and keyboard shortcuts
+
+Open slide deck +
+
+DECK 03
+
+NumPy Fundamentals
+
+What NumPy is, use cases, installing with pip, import
+
+conventions, and creating arrays with np.array0, np.arange0,
+
+np.zeros0, npJinspace0, np.random, and seeds
+
+Start +
+
+DECK 04",english
+"PYTHON
+
+import
+
+import
+
+import
+
+-- ספריות ‎Python‏ [0. הוסמה56 | 8..02מתמס | 03.שלב ‎inns‏ ©
+
+* תרגיל חזרה למבחן - ‎pom‏ 4
+
+תרגילי חזרה - ‎Seaborn‏
+
+תרגלו את התרשימים המרכזיים של ‎Seaborn‏ לקראת המכחן בעזרת קובץ | סס. ספח
+- תרשים פיזור, תרשים עמודות, תרשים ספירה, היסטוגרמה ותרשים ‎.box‏ בכל תרגי
+מופיעה המשימה והתרשים המצופה 992
+
+BARPLOT ) | SCATTERPLOT
+
+BOXPLOT ) ( HISTPLOT ) | COUNTPLOT ) |
+
+השתמשו בקובץ ‎mpg.csv‏
+
+כל חמשת התרגילים משתמשים בקוכץ שפס-טפה ‏ (רכבים עם נתוני צריכת דלק, ‎yan‏ ומקור הרכב).
+הורידו אותו מהמאגר שלמטה וטענו אותו עם ‎pandas‏
+
+1 הורדת
+
+- sErup Copy
+
+pandas as pd
+
+seaborn as sns
+
+matplotlib.pyplot as plt",hebrew
+"-- ספריות ‎Python‏ [0. הוסמה56 | 8..02מתמס | 03.שלב ‎inns‏ ©
+
+df = pd.read_csv(""mpg.csv')
+
+עמודה משמעות.
+‎mpg‏ מיילים לגלון - יעילות דלק (ערך גבוה = צריכת דלק נמוכת)
+‎cylinders‏ ינדרים במנוע (3, 4, 5. 6, 8
+‎horsepower‏ כוח המנוע
+‎weight‏ משקל ‎aon‏
+‎origin‏ מקור הרכב - ‎usa / europe / japan‏
+
+SCATTERPLOT -
+
+origin ‏לפי‎ , mpg ‏מול‎ horsepower ‏תרשים פיזור:‎
+{mpg  תדומעל‎ | horsepower | NTIDY ‏בין‎ ) scatterplot ) ‏תרשים פיזור‎ NY
+
+הוסיפו צבעים שונים לפי עמודת | ‎ exdgin‏ (מקור הרכב) בעזרת הפרמטר. ‎ue‏
+
+EXPECTED OUTPUT - HORSEPOWER VS MPG, HUE = ORIGIN
+
+origin
+
+וו
+
+mpg
+
+30 .",hebrew
+"mpg
+
+ה- ‎ms‏ יורד (קשר שלילי). רכבים אמריקאיים מתרכזים בכוח סוס גכוה / ‎mpg‏
+
+01 הוסט56 | 02..אטחגק | 03 שלבי פתהן ‎SB‏
+
+EXPECTED OUTPUT - HORSEPOWER VS MPG, HUE = ORIGIN
+
+origin
+-
+-
+‏טס‎
+‎-
+‎.
+‎.
+‎-
+‎6 .
+. .
+.
+0
+50
+50 100 150 200
+horsepower
+
+Python ‏ספריות‎ --
+
+‎AD‏ ראים: ‎horsepower “NWI‏ עולה,
+
+‏נמוך, ורכבים יפניים בכוח סוס נמוך / ‎mpg‏ גבוה
+
+‏| הרגיל ג > דסופהאם
+
+‎ONT‏ רכבים ‎oy‏ 4 צילינדרים צורכים פחות דלק ‎Sn‏ צילינדרים?
+
+‏בדקו האם רכבים עם 4 צילינדרים צורכים פחות ‎PIT‏ מרכבים ‎BY‏ 8 צילינדרים (באמצעות עמודת  ‎(mpg‏
+
+‏הציגו זאת באמצעות תרשים עמודות ( פסנפצפפ ). ‎[mpg | DY‏ גבוה יותר משמעו שהרכב צורך פחות דלק
+
+‎EXPECTED OUTPUT - MEAN MPG BY CYLINDERS )4 VS 8)
+
+‎5 -",hebrew
+"~ ספריות ‎Python‏ 1. הוסמ56 | 04.02חגם 03 שלביפתרן | $
+-
+-
+-.-
+2
+פ
+0 5
+0
+0
+0
+0 30
+0
+0
+0
+0
+50
+200 150 100 50
+‎horsepower‏
+
+mpg / ‏יורד (קשר שלילי). רכבים אמריקאיים מתרכזים בכוח סוס גכוה‎ mes ‏עולה, ה-‎ horsepower “NW 999 ‏חאים:‎ AD
+ADA mpg / ‏נמוך, ורכבים יפניים בכוח סוס נמוך‎
+
+| הרגיל ג > דסופהאם
+
+‎ONT‏ רכבים ‎oy‏ 4 צילינדרים צורכים פחות דלק ‎Sn‏ צילינדרים?
+
+‏בדקו האם רכבים עם 4 צילינדרים צורכים פחות ‎PIT‏ מרכבים ‎BY‏ 8 צילינדרים (באמצעות עמודת  ‎(mpg‏
+‏הציגו זאת באמצעות תרשים עמודות ( פסנפצפפ ). ‎[mpg | DY‏ גבוה יותר משמעו שהרכב צורך פחות דלק
+
+‎EXPECTED OUTPUT - MEAN MPG BY CYLINDERS )4 VS 8)
+
+‎30
+
+‎20
+
+‎mpg",hebrew
+"-- ספריות ‎2bw-03—Pandas-02Seaborn-01 Python‏ פתון | מצ=
+
+mpg / ‏שלילי). רכבים אמריקאיים מתרכזים בכוח סוס גכוה‎ WP) ‏יורד‎ mes ‏עולה, ה-‎ horsepower ‏חאים: ככל שה-‎ AD
+ADA mpg / ‏נמוך, ורכבים יפניים בכוח סוס נמוך‎
+
+| הרגיל ג > דסופהאם
+
+‎ONT‏ רכבים ‎oy‏ 4 צילינדרים צורכים פחות דלק ‎Sn‏ צילינדרים?
+
+‏בדקו האם רכבים עם 4 צילינדרים צורכים פחות ‎PIT‏ מרכבים ‎BY‏ 8 צילינדרים (באמצעות עמודת  ‎(mpg‏
+‏הציגו זאת באמצעות תרשים עמודות ( פסנפפפפ ). ‎[mpg | DY‏ גבוה יותר משמעו שהרכב צורך פחות ‎PIT‏
+
+‎EXPECTED OUTPUT - MEAN MPG BY CYLINDERS )4 VS 8)
+
+‎30
+
+‎20
+
+‎mpg
+
+‎10
+
+‎cylinders
+
+‏מסקנה: כן - לרכבים עם 4 צילינדרים ממוצע ‎ses‏ גכוה בהרבה (-09 מרכבים עם 8
+פחות דלק באופן משמעותי
+
+‏ינדרים (--15), כלומר הם צורכים",hebrew
+"-- Python Libs 01
+
+LINEAR REGRESSION
+
+overview
+
+Introduction
+
+Key terms
+
+sklearn
+
+MSE
+
+LinearRegression
+
+Single line
+
+Multiple features
+
+mean_squared error
+
+Rt < SSE / SST
+
+Train / Test
+
+Adjusted R*
+
+cuba library
+
+Exercises
+
+© LINEAR REGRESSION - TOP!
+
+Linear Regression
+
+Fit the best straight line through data:
+
+ם
+‎Introduction‏
+
+What are we doing here? Points, a line, and ‏ב‎
+‎prediction.
+
+03/13
+sklearn
+
+Meet scikit-learn — the ML library and its fit /
+predict recipe,
+
+02/13
+
+Key terms
+
+Observation, prediction, residual — the words of,
+regression.
+
+04/13
+MSE
+
+Mean Squared Error — how wrong the line is,
+on average.",english
+"8
+
+תרשום לי משפטים רנדומלים באנגלית ובעברית
+
+ם 2
+
+עברית:
+ס \הקפה שלהבוקר תמיד ‎WIND‏ טעים יותר כשיש זמן לשבת ברוגע.
+ס לפעמים הפתרון לבעיה מורכבת ‎VAN‏ דווקא כשיוצאים להליכה קצרה.
+‎o‏ שילוב של ‎NINO‏ וסבלנות יכול לקחת אותך רחוק מאוד.
+ס = ענים אפורים בשמיים תמיד מוסיפים אווירה קצת ‎TNR‏
+‏ס \ הטעויות הכי קטנות בדרך הן אלה שמלמדות אותנו הכי הרבה.
+‎:English‏
+‏ס ‎Small steps every single day accumulate into massive progress over time‏
+ס \ ‎Clean code usually speaks much louder than pages of dense documentation‏
+ס ‎The best ideas often surface when you least expect themto‏
+ס ‎Curiosity is the compass that guides us toward meaningful discoveries‏
+‎Sometimes a quiet evening is all you need to recharge your energy 0‏
+
+9 2Gemini-7 ‏ישלךשאלה‎ +-
+
+‎Gemini‏ כובוסס על וא ויכול לטעות.",hebrew
+"8
+
+תרשום לי משפטים רנדומלים באנגלית ובעברית
+
+עברית:
+
+ס \הקפה שלהבוקר תמיד ‎WIND‏ טעים יותר כשיש זמן לשבת ברוגע.
+ס לפעמים הפתרון לבעיה מורכבת ‎VAN‏ דווקא כשיוצאים להליכה קצרה.
+
+‎o‏ שילוב של ‎NINO‏ וסבלנות יכול לקחת אותך רחוק מאוד.
+
+‏ס ‎DNV‏ אפורים בשמיים תמיד מוסיפים אווירה קצת ‎TNR‏
+‏ס הטעויות הכי קטנות בדרך הן ‎ATR‏ שמלמדות אותנו הכי הרבה.
+
+‎:English
+
+‎Small steps every single day accumulate into massive progress over time ‏ס‎
+‎Clean code usually speaks much louder than pages of dense documentation 0
+The best ideas often surface when you least expect themto ‏ס‎
+
+‎Curiosity is the compass that guides us toward meaningful discoveries ‏ס‎
+
+‎Sometimes a quiet evening is all you need to recharge your energy ‏ס‎
+
+‏0 ש 0 6 © =
+
+‎9 2Gemini-7 ‏ישלךשאלה‎ +-
+
+‎Gemini‏ כובוסס על וא ויכול לטעות.",hebrew
+"‎Gmail‏ חיפוש תמונות
+
+‎Google
+
+‎Alayn &
+
+‎4
+
+‏הוספת קיצור דרך.
+
+‏'7. התאמה אישית של ‎Chrome‏",hebrew
+https://drive.google.com/drive/my-drive,english
+"29:09
+
+NOOOOO * | ONE PIECE | Reaction 451 &
+452
+
+Haylo & Kiss
+‏צפיות - לפני שנה‎ %
+
+אינטראקטיב ישראל - מסחר עצמאי - לפתיחת חשבון
+
+באינטראקטיב ‎pow‏
+‏ממומן - אינטראקטיב ישראל
+
+צפייה",hebrew
+"wear
+
+903
+
+-
+
+1046
+
+one
+
+anaat
+
+anaat
+
+anaat
+
+ane
+
+‘anaat
+
+anaat
+
+anaat
+
+.0 חיפוש באימייל
+
+Gomi
+
+רוצה לשפר את הפרודוקטיביות ‎2Gmail-2 Gemini oy‏ לקבלת ההטבה.
+
+ה לך גישה מורחבת ‎Gemini-7‏ באפליקציות שונות, ולל ומוום,וגם אחסון בנפח 40068 12-2 ₪ למשך3.
+
+See who reached out, ‏ש המ‎ .- You have ? new invitations
+
+‘Your chance to make ‏ם‎ photobook at almo...- This ie it. Our biggest sale is ending
+
+‘See your recomm... - Emil Rozenblat, CEO & Founder, is popular in your network
+‘Your Account Was Accessed . - Your Account Was Accessed From a New Device
+
+Project Loan Approval Pr.
+
+Project Loan Approval Project Production Checklist
+‘Your deal ends soon. ... - Final reminder: Last chance to save 50% OFF sitewide
+
+‘Save 50% OFF your first order now. .- Storewide offer ends soon
+
+‎Pro, Max, and Team plans now use. -Ollama’s new transparent pricing‏ ום.
+‎See what people are saying about thei albu... - We just wanted to say thank you‏
+הצצה ראשונה: אתר המסחר החדש של מיטב טרייד - בלעדי עבורכם - שלום, אנוש .
+אלו הם היעדים הפופולריים ביותר בחודש ספטמברד - הנתונים שבירנו מראים שאלו..
+מתנות לחגים ב- ‎LEGO® STORE‏ | פרסומת - - בית לאוהבי לגו בישראל ‎LEGO® STORE‏
+לירו, חצייומולדת שמח מרשת אסקייפ רום ; המתנה שלך מחכה לך במייל (פרסו..
+‎View jobs picked for you . - Junior Al Solution Engineer role at Jeon.ai‏
+לירן חוזרים ללימודים ומתכוננים לחגים: ואיקאה -10% ‎AMA‏ בחיוב 3.92[ עד 15% ..
+הוזמנת למרחב המשותף ""אדוא"" - ‎Google Chat‏ הודמנת עלידי ‎idan avitan‏ (וו00פסו.
+‎Automation Engineer - Student at HP‏ - -ם ‎LHP Automation Engineer - Student:‏
+
+‎Asyou've discovere... - Build, deploy, and monitor your application in one place
+
+‏טופס אישור ימי מילואים צבור לירן מרטפל - שלום לירן מרטפל, אנו מודים לך על ‎nw‏ ©
+
+‎Answers to questions we hear most often. - Got questions? We've got answers
+
+‎OF‏ - מאחר בכמה דקות חברה.
+
+‏שיחת הכרת ‎ons‏
+‏הזמנה מסי 76 נשלחה בהצלחה לגפניקה מודיצין מסעדה - הזמנת משלוח מספר 76 הת..
+
+‎View jobs picked for you . - Junior Al Solution Engineer role at Jeen.ai
+‏משהו חדש מחכה לך בידג (פרסומת) - - ראל להשכרה, מכירהוקנייה של כמעט כל דבר‎
+
+‎New free course: Deploy secure Al agents using OpenShell and NemoClaw‏ .ם
+
+‎an
+‎.₪-9 ‏חודשים‎
+
+‏חווית לקוח
+‎trivago‏
+
+‎LEGO® Certified Sto.
+Escape Room Club
+Linkedin
+
+‏הוט מועדון צרכנות
+‎Idan avitan (via Go.‏
+‎Linkedin Job Alerts‏
+‎‘Stephen from Render‏
+‎donotroply‏
+‎Souvence‏
+
+‎idan avitan
+
+‏גפניקה מודיצין מסעדה.
+‎Linkedin‏
+
+‎yada
+
+‎NVIDIA Training
+
+‎Gmail M
+em mow
+
+‏דואר גכנס. ‎ws‏
+‏מסומן בכוכב
+
+‏לטיפול בהמשך
+
+‎awn
+
+‏נשלת
+
+‏טיוטות 0
+רכישות
+
+‏רשתות חברתיות
+
+‎paw
+
+‏פורומים
+
+‏קידומי מכירות
+
+‎w
+
+‏העשרה והענק ידע
+לימודי שוק ההון-גיא נתן
+קבלות
+‎Notes‏
+‎Work‏
+
+‏7 ם א ס ם 4 ם ם א ס ם 0
+
+‎0
+
+‏תוויות",hebrew
+"8
+
+- Flash Gemini
+
+lets talk
+
+ם 2
+
+Hey! I'm here. What's on your mind today? We can dive into whatever you're working on,
+brainstorm, or just chat.
+
+0 ש 0 6 © =
+
+9 2Gemini-7 ‏ישלךשאלה‎ +-
+
+‎Gemini‏ כובוסס על וא ויכול לטעות.",english
+"@© New Popular — Simulcast Q ‏ת‎ ""0 -
+
+My Lists
+
+CRUNCHYLISTS HISTORY
+
+= RECENTACTIVITY 2 FILTER
+
+My Hero Academia Fairy Tail
+Up Next: E1 Continue: £495 Start Watching: $2 E176
+‘Sub | Dub QD WW subtitied ‏הן ש‎ subtitied ‏חס‎
+
+SOLO LEVELING
+Solo Leveling
+
+Start Watching: ‏ום‎ ₪1 Start Watching: E1 Continue: $2 £22
+
+‘Sub | Dub QW subidub QO W dubbed ‏דו ש‎",english
+"@© New Popular — Simulcast
+
+> BACK TO CRUNCHYLISTS
+
+Jana&Jiran
+
++ Add Series 2/100 Items
+
+One Piece
+
+‘Sub | Dub
+
+‘Sgt. Frog
+
+@ Crunchyroll
+
+SONY PICTURES | © Crunchyroll, LLC
+
+Welcome to Crunchyroll, your ultimate destination for streaming the best in anime
+entertainment.
+
+אם א ס ם ם
+
+SETTINGS",english
+"1
+0
+ם
+%*
+
+תוכנית חינמית - שדרוג
+
++ חדש
+‎Computer‏ ©
+תוצרים [₪
+התאמה אישית. ©
+0 פרויקטים
+‎v‏ הפעלות
+מה תרצו לדעת?
+שאלכלדבר..
++ ( ₪ חיפוש+ ) © ‎Computer‏ מסה - ‎Oe‏
+
+liranmartf28475 .
+‏תוניתחינמית‎ \ """,hebrew
+"© srommarly Fee EEE
+
+‎Docs‏ ם
+
+‎- -.0 ED
+Version history
+
+‎You're almost done with setup.
+Trash Finish up by downloading the Grammarly desktop app for
+
+‎free.
+‎@ Account
+-
+BY Apps .
+
+‎Docs
+‎Nothing here yet
+Your docs will appear here once you start one.
+Start writing a new doc.
+*, Upload ‏ד‎
+
+‎© Support
+© Sign out
+
+‎liran.martfel@gmailcom",english
+"- SnaptTra
+
+Welcome back
+
+Enter your credentials to access your account
+
+Em
+
+name@example.com
+
+Password Forgot password?
+
+‘OR CONTINUE WITH
+
+G Google
+
+Don't have an account? Sign up",english
+"yiypn ya ‏עסקיםלמכירה \ חיות מחמד‎ = [LowNT | ‏דירות חדשות \ רכב | מוצרים‎ TD
+
+Comet) ‏ט‎
+
+מם 55 ו5 מש % <₪
+
+דירות חדשות בדל""ן רכב מוצרים דרושים בעלי מקצוע \ עסקים(ל
+
+ופרויקטים ודירות חדשות
+
+‎WIN‏ סביבך @ מיקופ לא זמיו
+
+‏רכב מוצרים",hebrew
+"< ₪ ₪ 6 ₪ x ‏יד2‎ Google
+
+* ‏סרטוניםקצרים | חדשות  עוד + כלים‎ oI NMA  גניפש‎ WA Alayn
+
+ס מודיעין מכבים רעות | @ שימוש במיקים מחיק | !
+
+Yad2
++ ‏הסס לטהעאוההאנסמחה‎
+
+לוח יד2 - דירות להשכרה, למכירה, רכב, דרושים, יד ‎nw‏
+
+קונים, מוכרים ומוצאים עבודה עם המגוון הגדול בארץ של דירות למכירה ודירות להשכרה, רכבים, משרות ומוצרי יד ‎aay‏
+‏יש הזדמנויות שאסור לפספס.
+
+טויוטה ‎RAV4‏ למכירה
+חושבים לקנות טויוטה ‎RAVA‏ ? היכנסו ללוח הרכב של יד2 ומצאו עוד היום את
+
+רכבים למכירה ל
+
+5
+חושבים לקנות רכב ? היכנסו ללוח הרכב של יד2 ומצאו עוד היום את הרכב.
+דירות להשכרה 6
+חיפוש נכסים ברוכים הבאים למקום המוביל לחיפוש דירות להשכרה
+מוצרי יד שנייה - ‎©Yad2 Market‏ 6
+האתר הגדול ביותר בישראל לחיפוש מוצרי יד שנייה. ביד2 מחכה לכם מגוון
+דירות ‎8mm‏ 6
+חיפוש נכסים ברוכים הבאים למקום המוביל לחיפוש דירות למכירה
+המקום המוביל לנדל""ן למכירה בישראלל"" 6
+
+חיפוש נכסים המקום המוביל לנדל""ן למכירה בישראל ביד2 - מגוון רחב של.
+
+עוד תוצאות מ- ‎yad2.co‏ «
+
+yad2_official - Instagram
+0 nary 15.9K ‏מעל‎
+
+© (@yad2_official) win ‏יד2 - העמוד‎ - Yad2
+
+‎followers - 12 following - 234 posts - @yad2_official: *‏ א16אם אתם קוראים את זה - זו יד הגורל! ‎yan‏ הזמן
+לרתכדח ‎pom)‏ דרמר החדושר ‎pn‏ ודלי .
+
+‎.",hebrew
+"התחברות לאינסטגרםם
+
+מספר טלפון נייד, שם משתמש או דוא""ל.
+
+שכחת את הסיסמה?
+
+@ התחברות באמצעות פייסבוק
+
+Meta
+
+Threads ‏של וא‎ Meta != ‏אינסטגרם‎ Adm) OM ONIN nro APL ‏משרות עזרה‎ aba nme Meta
+‏הסכמי פשרה‎ Meta Verified ‏יצירת קשר עם העלאות ומי שאינו משתמש‎",hebrew
+"Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+[W 2026-09-01 20:18:02,037 ServerApp] MOY GET /api/contents/Project%20segment%20studio. ipynb?content=&hash=1&contentProvide
+rId=undefined&1788283082003 (7dlatdd4526a45768e02c8al2a80a22e@: :1( 22.85ms referer=http: //LocaLhost :8888/notebooks/Project%*2
+Osegment%20studio. ipynb
+[W 2026-09-01 20:18:02,045 ServerApp] ₪0 GET /api/contents/Project%20segment%20studio. ipynb?content=&hash=1&contentProvide
+riId=undefined&1788283082003 )::1(: No such file or directory: Project segment studio. ipynb
+
+Uploading file to /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Saving file at /Project segment studio.ipynb
+
+Starting buffering for 182b358-ele2-Wuf7-b5Sdil-56794681e075 : 240f6d1-2F82-Ha3d-Babli—-bb
+‘Teb8de7dd1
+
+Connecting to kernel "" 785
+
+Restoring connection for 182b358-ele2-Uf7-b5di-56794681e075 : 240F6d1-2F82-Ha3d-Babli—
+bb7cb8de7dd1",english
+"תרשם ל משפטים רנדומלם באנליתובשברת
+
+הקפה של הבוקר תסיר מיש טעיםיורכשיש ‎jor‏ לשבת ‎gana‏
+‎IDET‏ הפתרו ‎ANAT‏ מורברת ע ‎NAT‏ כשיואיםלהליכה ‎any‏
+‏שב שליסקתותוסבלוותיכוילקחת אותך רחוק מאוה.
+ענגיאפורים בשמיים תפירמוסיפיםאויוהקצת אחות ‎DA‏
+
+Amn oA AN ‏הטעיוהכיקטנות בדרךהןאזה שמלמדות‎
+-
+‏ותם.‎ stops evry single day accumulate nto massive progress ver ime
+
+Clean code us speaks mach ues than pages of dene documentation
+‏מו פוס‎ often ‏סאם‎ when youlest expect them to
+
+-Curoaty isthe compas thet ques us toward mesringfl covers
+Sometimes ‏אם‎ evening sal you ned to recharge your energy
+
+ס ₪ 0 =",hebrew
+"zoom
+Workplace
+
+ZF
+
+04
+Video
+
+מ""
+
+a
+
+ben sibon's scre @)
+
+6 6ס
+
+‎ao x‏ - ש ס ע
+
+‎A Yosef Greenfield
+‏ל-‎
+
+‎[alecPatricky \
+‏עמיד‎
+‎x09
+
+‎4
+
+‏גדה #2100
+
+‎noga danon
+
+‎2 noga danon
+
+‎More Leave",english
+"zoom
+Workplace
+
+04
+Video
+
+מ""
+
+₪8 bensibon's screen
+
+‎eee oe ee‏ י
+
+‎₪-
+
+‎Partici
+
+‎Yosef Greenfield
+
+‏לירן מרטפל ‎WY‏
+
+‎J matan sasson
+
+‎ben siboni
+
+‎‘Alex Patnick|
+
+‏עמיד
+
+‎# voy
+
+‏5.
+‏גרה #10
+
+‎noga danon
+
+‎2 noga danon
+
+‏6 6ס
+
+‎02/09/2026-Al-2025.12.21-Lesson 61-unsup...
+
+‎-5
+
+‎Everyone _matan sa
+
+‎New chat
+
+‎matan sasson (private message)
+W@W ‏אוקי תרגול סוף וסוף‎
+You 1802
+
+‎matan sasson 02
+
+‎You 4
+
+‏לא הקשבתי חחחח אני אשלים את
+הכל כבר כי אין לי ‎WON‏ ברירה גם ככה
+
+‎matan sasson 4
+‏כן‎
+
+‎matan sasson 4
+
+‏שלבד הייתי ‎amon‏
+
+‎You 19:47
+
+‏הההחחה
+
+‎matan sasson 12:50
+
+‏אז נשאר מודול 1 שחיברו אליו המון
+נושאים
+רשתות נוירונים
+
+‎api ae‏ רסט
+
+‏אובגקט אוירנטד
+‎ai‏ סוכני
+
+‎nip
+
+‎EB - oa‏ ס ע
+
+‏א 0
+
+‎Message matan sasson (private message)
+
+‏- ם ם ₪",hebrew
+"Bau Pray Coico
+
+Your account region us United States =
+
+Sign in to your account
+
+‘our work email
+
+check you
+
+Your password
+
+Keep me signedin
+
+Continue
+
+Slonin with ‏יאפ‎ $80
+
+1ccount region before
+
+Forgot vour password?",english
+"© Search . .
+Describe what you want to build...
+
+Home
+* Starred
+
+. Piantirst 9 FD
+© Recents
+
+ר
+סם ‎ |‏ סומו. קמו₪ י : --
+>
+-
+
+Welcome AY | [ New ~ ]
+
+Starred
+
+Recently viewed
+
+My workspace Fi Created date \
+> What's new Item Details
+
+© Help",english
+"Bz Microsoft
+‏היכנס‎
+
+6 כתובת דואר אלקטרוני, מספר טלפון ‎IX‏ שם
+
+לא מצליח לגשת לחשבון שלך?
+
+© אפשרויות כניסה
+
+תנאי ‎winw‏ פרטיות וקבצי 09088",hebrew
+"כלהאמת על עולם המפחר - מושגים ... - הפתיחה - ר...
+
+aS
+
+כלהאמת על עולם המפחר
+מאת: שלו כהן - מכללת ‎WCT‏ כלהאמת על עולם המספחר
+הקורס ייפתח לצפייה לאחר ההרשמה
+חיפוש
+שם מלא.
+כלהאמת על עולם
+ש המסחר- מושגים כתובת מייל לקבלת פרטי הגישה לקורס
+למתחילים
+‎ANNA‏ ו טלפון נייד
+וידאו - )009931(
+אמת על פוגי השווקים להרשמה מהירה
+כבר נרשמת? לכניסה
+מת על מושגים של סוחרים
+)2( עלהקורס: 4
+מת על ‎nip‏ השקעות
+‎CO)‏ עלהמרצה: 4
+
+מת על כסף ממסחר
+
+כלהאמת על עולם
+ש \ המפחר-ניתוח טכני
+למתחילים
+
+מת על נרות יפניים",hebrew
+"Portfolio Visualizer
+
+= Minimize Menu
+
+® summary
+
+& active Returns
+
+& metrics
+
+£4) annual Returns
+£3 monthly Returns
+
+WW Drawdowns
+
+|# Rolling Returns
+
+cover time.
+
+Analysis Markets Docs @ Region "" Tools * SignUp Log In
+
+Customize Data v
+
+Portfolio Analysis Results (Jan 2012 - Aug 2026)
+
+Glink BPor ‏ו₪5‎
+
+Note: The time period was constrained by the available data for Vanguard Total international
+‘Stock ETF (VXUS) [Feb 2011 - Aug 2026]. You can extend the available time period by using
+Vanguard Total Intl Stock Index Inv (VGTSX), which is the oldest share class of the fund.
+
+Sample Portfolio
+
+Ticker Name Allocation
+‏ודל‎ | Vanguard MStar Total Stk Mkt ETF 48.00%
+VNQ Vanguard Real Estate ETF 8.00%
+
+\VXUS Vanguard Total International Stock ‏החדם‎ %
+
+BND Vanguard Total Bond Market ETF 20.00%
+
+@ Edit Portfolio ‏ם‎ Save Portfolio
+
+.
+
+Vanguard MStar Total Stk ..
+₪ Vanguard Real Estate ETF
+
+₪ Vanguard Total internation...
+@ Vanguard Total Bond Mark.
+
+Highlights
+Return Risk
+Annualized Return Volatility and Drawdown
+Portfolio Return Benchmark Standard Drawdown
+Relative Deviation
+23.6%
+
+Benchmark: State Street SPDR S&P 500 ETF",english
+"מסחר גרף פקודות ועסקאות
+
++ 233,286.09 פוא % ד
+
+NIS 230,555.13 NIS 232,744.79
+
+להוספ ת יש לבצע כניסה.
+
+? יצירת חשבון
+
+יתרה
+
+2)
+
+פייה ביתרות יש לבצע כניסה.",hebrew
+"3x ETFs (Exchange Traded Funds)
+
+‘An exchange-traded fund, or ETF, vestment product representing a basket of securities that track an index such as the
+‘Standard & Poor's 500 Index. ETFs, which are available to individual investors only through brokers and advisers, trade like stocks
+‘on an exchange.
+
+rexion Shares and Ultra ProShares are leveraged Exchange-Traded Funds (ETFs) designed to seek daily investment results,
+before fees and expenses, of 300% / 3x of the performance (or 300% / 3x of the inverse of the performance, in the case of a
+bear fund), of the benchmark index that they track. There is no guarantee that the funds will achieve their objective.
+
+BENZINGA
+
+“<i FREE TRADE Free trade idea
+
+in your inbox
+
+OF THE WEEK every monday.
+
+2x ETFs \ High Short Interest Stocks | Low Float Stocks
+
+Direxion Financials Bull 3x ETF fas $174.34 (-2.27%) 242,812
+Direxion Financials Bear 3x ETF FAZ $32.60 (+2.46%) 1,283,450
+Direxion Small Cap Bull 3x ETF INA $66.28 (-3.34%) 3,794,600
+Direxion Small Cap Bear 3x ETF ZA $42.08 (+3.37%) 3,813,730
+Direxion Energy Bull 3x ETF ERK $111.09 (+2.85%) 418,544
+Direxion Eneray Bear ‏א3‎ ETF ERY $8.71 (-2.57%) 10,688,100
+Direxion S&P 500 Bull 3x ETF ‘SPXL $281.35 (-2.04%) 1,957,510
+Direxion S&P 500 Bear 3x ETF 555 $25.23 (+2.02%) 13,472,200
+Direxion Technology Bull 3x ETF TEL $194.05 (-4.11%) 435,056
+Direxion Technology Bear 3x ETF 5 $63.94 (+4.72%) 438,440
+Direxion Emerging Markets Bull ‏א3‎ ETF EDC $78.27 (-1.25%) 79,626
+Direxion Emerging Markets Bear 3x ETF EDZ $14.87 (+0.81%) 175,838
+Direxion Daily Aerospace & Defense Bull 3x ETF DFEN $61.44 (-3.83%) 241,223
+Direxion Daily Biotech Bull 3x ETF ‏הדו‎ .5300.70 (+1.48%) 213,079
+Direxion Daily Biotech Bear 3x ETF asd $6.50 (-2.26%) 20,720,700
+Direxion Daily Brazil Bull 3x ETF BRZU $98.24 (+2.68%) 48,796
+Direxion Daily China Bull 3x ETF YINN $29.05 (-0.38%) 539,895
+Direxion Daily China Bear 3x ETF YANG $28.86 (+0.49%) 426,750
+Direxion Daily Consumer Discretionary Bull 3x ETF WANT $38.55 (-5.19%) 16,946
+
+rexion Daily Dow Jones Internet Bull ‏א3‎ ETF WEBL $28.33 (-5.47%) 89,250",english
+"ListingTrack | Upgrade to Pro Dashboard Q rch companies, pages, tools. ‏ם א+ וום‎ PRO ‏י‎
+
+Listing Track
+
+Welcome to ListingTrack!
+
+SPAC Track users now can enjoy access to a significantly broader dataset covering all initial public
+listings, including traditional IPOs, SPACs, spin-offs, direct listings, and pre-IPO coverage.
+
+To reflect these enhancements, we have transitioned our brand from SPAC Track to ListingTrack.
+We've also developed a radically improved platform here at Listingtrack.io, which will serve as your
+new portal for all of our data and content.
+
+Here's what's changing:
+
+Rebranding: From SPAC Track to ListingTrack to mirror our extended coverage.
+
+New Platform: Spactrack.io, our previous portal, has been replaced by Listingtrack.io, a more
+robust and user-friendly website.
+
+SPAC Data Access: All of our SPAC coverage from SPAC Track (and now much more) will be
+available in the new SPAC Hub here.
+
+Enhanced Data, Features, & Usability: Listingtrack.io includes comprehensive datasets on
+initial public listings, from traditional IPOs and SPACs to spin-offs and direct listings, as well
+as pre-IPO companies—from prominent startups to IPO candidates and rumored IPOs, in
+addition to everything in the previous SPAC Track offering. The platform also features a
+significantly enhanced user experience and new data tools.
+
+Go to SPAC Dashboard",english
+"finviz
+
+‎Elite members get real-‏ לד
+
+‎FINANCIAL
+‎VISUALIZATIONS
+
+‎ime data, technical charting, alerts, and no ads - starting at $24.96/mo. ‏שומ מום₪‎ 7 =(
+
+‎or profile @ 2
+
+‎@ Search ₪
+
+‎Screener Maps Charts News Groups Insider Futures Forex Crypto Portfolio Calendar == Markets Open Wed SEP 02, 1:11PM ET
+
+‎New feature: Automatically detect candlestick patterns ‏חס‎ any chart ReadHow =X
+
+‎~ Today, 12:56 PM US stocks rise as Treasury yields and oil stabilize and softer ADP jobs data eases rate concerns More +
+
+‎‘Advancing
+‎65.5% (3686)
+
+‎Ticker
+‎5 SGLD
+A FAME
+
+‎BIAF
+‎@ Peat
+@ row
+= Lisw
+
+‎SAIH‏ י--
+9.-
+‎RNXT‏
+‏אפסט ‎v‏
+‏דס ‎v‏
+‏6 6
+‎ABI‏ \
+‎PPET‏ @
+דס ‎v‏
+‎ALMS‏ 4
+‎BFE‏ =
+‎GRNT‏
+
+‎Tickers
+‎.
+
+‎50
+
+‎ve
+
+‎""
+
+‏סים
+‏31.8% )2799(
+
+‎Last Change %
+11.66 129.53%
+018 51.81%
+984 49.32%
+2.29 37.88%
+15.09 32.95%
+379 31.42%
+1166 %
+2486 8.31%
+4A3 15.20%
+2.38 12.56%
+33.74 1.84%
+‏ה.16‎ %
+10466 %
+2473 0.04%
+2.29 37.88%
+162 66.62%
+10.58 11.72%
+27.30 3.56%
+515 %
+
+‎+32.27(0.42%)
+
+‎New High Newtow | { Above ‏סהיו‎ Below | { Above ‘sma200 Below
+347% 6) (262)65.3% | | 47.6% (2670) 2945) 52.4% | | 52.4% (2888) (2727) 48.6%
+
+‎‘Volume Signal Ticker Last Change % Volume Signal - ‘S&P 500 - 1 Day Performance
+5.63M Top Gainers ‏א‎ ADBT 1.69 -54.08% | ‏א2.12‎ Top Losers
+'768.66M Top Gainers ea CDT 0.96 -35.13% 968.04K Top Losers
+38.08M Top Gainers ₪ WETO 3.90 -34.26% | 4.84M Top Losers
+68.59M Top Gainers ₪ AMOD 2,08 -25.09% 369.60K Top Losers
+‏א369.23.‎ Top Gainers == CANF \ 251 -23.71% 19.44M Top Losers
+1.51 Top Gainers ₪ APUS 2.72 -23.09% 35.94K Top Losers
+5.63M New High ‏א‎ ADBT 169 -5408% 212M NewLow
+.67.87% New High @TCRX 0.38 -42.49% 4.89M New Low
+463.39K New High ea CDT 0.96 -35.13% 968.04K New Low
+193M New High © GIXt 1046 -14.61% 17376 New Low
+168826 Overbought 8 GYGY 175 26.82% 12.43M Oversold
+ALAAM Overbought Li 0.85 3.57% 16.98M Oversold
+17.17K Unusual Volume ‏א‎ ADBT 169 -54.08% 212M Most Volatile
+50.30K Unusual Volume == LHSW 3.79 31.42% 51M Most Volatile
+68.59M Unusual Volume A FAME 0.18 51.81% 768.66M Most Active
+ALA4M_ Unusual Volume ₪ ‏הדה‎ | 030 12.59% 151.12M Most Active
+669M Upgrades ‏האה ת‎ 4277 -0.09% — 3.88M Downgrades
+‘L45M Eamings Before @ AVGO 367.44 -0.61% 10.32M Earnings After
+L10M Insider Buying A ASND 26458 1.66% 177.94K Insider Selling
+Signal Tickers Signal Major News
+
+‎.",english
+Search tickers or companies,english
+"מנכ""ל מליסרון אופיר ‎TW‏ יוצא. הכנסת תשכם 288
+כחופשה מטעמים בריאוו אכף שקל ‎Jy‏ חנוכייה שתוצב ‎‘Sy‏
+‏02.09.26, 712[ חזכיי הגג שכה
+
+6 עמרי קלישר
+
+עוד ניצחון לגוגל: ביהמ""ש ‎yap‏ בי
+החברה לא תמכור את בורסת
+הפרסום שלה ‎Adx‏
+
+Run
+
+a
+
+le dl
+
+& i
+
+מסס
+
+C:\Users\
+Click int
+You have |",hebrew
+"Search quotes, news Bvideos QQ WATCHLIST/M@ | SIGNIN
+
+MARKETS BUSINESS INVESTING TECH POLITICS 8 POLICY VIDEO INVESTING CLUB PRO © LIVESTREAM
+
+4 ASIA EUR US ‏שוס‎ BONDS GOLD FX CRYPTO PRE-MKT
+
+Stocks rise for first time in four sessions as Treasury yields take breather
+
+Quick Links
+
+Global markets us
+
+-lran tensions Bond rout accelerates G20 meeting BP appoints new chair -
+
+CRBC PRO My Portfolio fc] os",english
+"מתרחש עכשיו.
+
+& המשךעם טלפון \
+\
+
+Apple ny qwnn @&
+
+בהמשך את/ה מסכים/ה ל-תנאי שירות, מדיניות פרטיות ול-שימוש בעוגיות ‎poy‏",hebrew
+"דניאל דמארי
+
+לימודי מסחר בשוק ההון
+
+התחברות
+
+הקורסים שלך מחכים לך.
+
+Google ‏התחברות עם‎ G
+
+כתובת אימייל
+
+עדיין אין לך חשבון?
+
+nw
+
+אנו משתמשוים בעוגיות
+
+אנחנו משתמשים בעוגיות כדי לשפר את חוויית השימוש ‎Ama‏",hebrew
+"‎set A) Gemini Notebook‏ הגדרות
+
+‎arr ‏הכי‎ vie’ gr se
+
+‎7A‏ תיקיות ה-אסספפוסא שלי ‎py‏ הצעות \ אוספים
+
+‏תיקיות ‎Notebook‏ מהזמן האחרון
+
+‏כותרת מקורות תאריך יצירה תפקיד
+‎a‏ ;ס:::;""פ;ם?:;:*%; מקור אחד 9 ביוני 2026 בעלים -
+‎aera .‏ השום ושם מקור אחד 6 במאי 2026 בעלים -
+ז₪ מדריך מקיף לניתוח מניות מקצועי 2 מקורות ‎""19x28‏ 2026 בעלים את
+‎ens ue BEBE‏ מקור אחד 3 באפר' 2026 בעלים -
+‎eer .‏ 1 16 מקורות ‎19x25‏ 2026 בעלים -
+המלצות לתיקיות ‎Notebook‏ הצגת הכול ‎ch‏
+
+‏כותרת מקורות תאריך יצירה תפקיד
+
+‏₪ תוכניות מהפכניות: המייסדים 4 מקורות 7 באפר' 2026 ‎pu‏ הרשאת צפייה
+
+‎a 0‏ ;;םג::';י;:ך'""הצש . 4 מקורות 112.3"" 2025 ‎pu‏ הרשאת צפי
+
+‏=* \ האם מחשב יכול לסמלא מוח? 17 מקורות 2025729 ‎pu‏ \ הרשאת צפייה
+
+‏מה הורים שואלים - מועצת
+
+‏המשפחה של ה-8 ם 3 ‎pu 2025 ‘nya‏ הרשאת צפייה",hebrew
+"NVIDIA and our third-party partners use cookies and other tools to
+collect and record information you provide as well as information about
+your interactions with our websites for performance improvement,
+analytics, and to assist in our marketing efforts. By clicking ""Accept All"",
+you consent to our use of cookies and other tools as described in our
+Cookie Policy. You can manage your cookie settings by clicking on
+""Manage Settings”. Please see our Privacy Policy for more information
+
+on our privacy practices.
+
+Manage Settings Reject Optional
+
+Accept All",english
+"= 00MetaBlueprint Search) (Topics \
+
+Drive traffic ‏ים‎
+‎with Meta Ads Manager
+
+‎Be the expert‏ לד
+
+‎Get started with campaign recommendations from
+opportunity score
+
+‎Opportunity score helps you identify campaign recommendations in near real time. Your
+recommendations are proven, personalized and prioritized, based on your business profile and
+campaign characteristics.
+
+‎Introduction to opportunity score
+Discover how opportunity score provides
+recommendations that can help improve campaign
+performance.
+
+‎< 3m #46 Beginner
+
+‎This site uses cookies to provide you with a greater user experience. By using Exceed LMS, you accept our use of cookies.",english
+"Microsoft Ignite
+
+7 בנובמבר 2025
+
+‎van Leam | ||‏ הדרכה ומעבדות = שאלות ותשובות ש נושאים ש 0 ‎nom‏
+
+‏לפתח עם תשוכות כהישג יד
+
+‏עיינו בתיעוד רשמי, תשובות מעשיות והדרכה מקצועית לעכודה ופתרון בעיות ‎Microsoft oy‏
+
+‎Microsoft Learn -2 ‏חפש‎
+
+‎wien
+
+‏משאבים טכניים והדרכה פופולריים
+
+‏גלה את יסודות הבינה בצע הדרכה לפי דרישה משאבים נוספים
+המלאכותית, ‎Azure‏ ו-
+‎Copilot‏ קדם את הקריירה הטכנית שלך בעזרת. שאל את קהילת המפתחים שלנו שאלות.
+- הדרכה ואישורים מאומתים, טכניות או קבל כישורים שהוחלו והסמכות.
+מאומתות.
+‎ANS‏ ידע ומיומנויות מהר יותר באמצעות
+‎eee nna‏ )‘ יסודות ‎Microsoft Azure‏ שאל שאלה
+
+‏הצטרף לקהילת השאלות והתשובות כדי
+
+‏לשאול שאלות, לשתף ידע וללמוד יחד.
+בינה מלאכותית @ יסודות הבינה המלאכותית
+
+‏הגנרטיבית זכה באישורים
+
+‏גלה אישורים, כולל מיומנויות בעולם
+
+‏האמיתי, מיומנויות מכוססות תרחישים
+‎Azure‏ יסודות ‎‘Microsoft Azure‏ ואישורים מאומתים, המזוהים בתעשייה,
+תיאור מושגי ‎py‏
+
+‏קבל אישורי תלמיד
+- /",hebrew
+"פיתוח וצמיחה של העסק
+
+משך
+
+Al Professional Certificate
+
+‎AT‏ הזמן לקפוץ למי ה-ו העמוקים, עם מעבדות
+מעשיות שמשקפות משימות אמיתיות ויצירת תיק
+עבודות. בנוסף, ‎WORX‏ לקבל מינוי ל-סז ‎Google Al‏
+לשלושה חודשים על חשבוננו (בכפוף לתנאים).
+
+‏להיצע הקורסים ”
+
+‎- .-
+
+‏שדרוג הקריירה
+סינון לפי ‎RWI‏ סוג הסמכה
+3 תוצאותת
+המלצות
+
+‎Start @Google
+PPlace-IL
+
+‎Tech School
+
+‎The Journey to Tech
+
+‏תעשיית ההייטק היא מקור צמיחה וגאווה ישראלית.
+כדי לאפשר צמיחה בת-קיימא ‎Google‏ מציעה מס*
+תכניות על מנת לתת הזדמנות שווה ולהנגיש את
+תעשיית ההייטק למגוון ‎MANA‏ הישראלית.
+
+‏לפרטים 7
+
+‏כל ההדרכות והכלים
+
+‏ב ₪",hebrew
+"ANTHROP\C Anthropic Academy Courses _ Signin
+
+Anthropic Academy / Courses
+
+Anthropic courses
+
+Claude 101
+
+Learn how to use Claude for everyday work tasks, understand core
+features, and explore resources for more advanced learning on other
+topics.
+
+Claude Code 101
+Learn how to use Claude Code effectively in your daily development
+workflow.
+
+Claude Platform 101
+< / > This course teaches developers to build on the Claude Platform from the
+ground up, whether you've made a few API calls or have only used Claude
+through a chat window.",english
+Build an app that tracks inventory and reorders stock when it runs low...,english
+"©) asnboara Q Tre + JO
+woes (Ger Home
+Find a repository. -
+
+5 Liran-Martfel/Loan-aprroval-project
+
+Are Ls Project. ‏שש‎ Trending repositories + See more
+
+@ Liran-Martfel/Project_1_Tic Tac Toe ‘fmtiibsimt
+- LOSGARDIOS/Neuron-OS ‘Amoder formating library
+Ann int projectpizza .. Hate
+
+ Liran-Martfel/18,03.2026
+
+ Liran-Martfel/Python-Libraries-Exam G spoglie researcyt
+‘TimesFM (Time Series Foundation Model isa pretrained time-series foundation
+Show more ‘model developed by Google Research for time-series forecasting,
+
+@Python ‏לץ‎ 6",english
+"ECOM
+
+Already a member
+
+הרשת החברתית של מכללת איקום",hebrew
+"= Psy draw.io Search
+
+Security-first diagramming for teams
+
+Bring your storage to our online tool, or save locally with the desktop app. Your data
+stays yours—we can't access it.
+
+Start Diagramming & Desktop App
+
+Free forever + No sign-up required + Open sourc
+
+100M+ Open Source Since 2005
+
+'s worldwide Apache 2.0 License Trusted for 20 years",english
+"EleetCode Problems Contest
+
+ם
+: 8
+‎School'sin = %‏
+‎Leet's on 8‏
+- ף ר היש
+
+Array 2238 String 893 Hash Table ‘832
+
+Q Search questions wv
+
+(© 3875. Construct Uniform Parity Array !
+1. Two Sum
+
+2. Add Two Numbers
+
+Discuss
+
+Math 702 Dynamic Programming 678 Sorting 4
+
+& Database
+
+3. Longest Substring Without Repeating Characters
+
+4. Median of Two Sorted Arrays
+
+5. Longest Palindromic Substring
+
+6. Zigzag Conversion
+
+7. Reverse Integer
+
+8. String to Integer (atoi)
+
+9. Palindrome Number
+
+10. Regular Expression Matching
+
+.11 Container With Most Water
+
+More *
+
+> Shell
+
+Q Register or Log in
+
+5
+Crash Course:
+‘System Design for interviews
+and Beyond
+
+Greedy 481
+
+₪ Concurrency
+
+85.1%
+58.1%
+49.3%
+39.9%
+%
+38.6%
+55.0%
+32.4%
+21.7%
+
+60.9%
+31.7%
+
+60.8%
+
+Premium
+
+Depth-F Expand ¥
+
+® JavaScript
+
+0/4042 Solved 6
+
+Easy
+
+Easy
+
+Med.
+
+Med.
+
+Hard
+
+Med.
+
+Med.
+
+Med.
+
+Med.
+
+Easy
+
+Hard
+
+Med.",english
+"8 ₪ ₪ ם 6 % +-.> 5
+
+Emojis Stickers Emoji Combiner Games News
+1 Search Emojis or Stickers i)
+oo -8- 8- 8- 8- 4- 8- 4 -4 4 % 4 ‏ש ג‎ «=
+
+Apple
+
+Emojis displayed on iPhone. iPad, Mac. Apple Watch and Apple TV use
+
+the Apple Color Emoji font installed on iOS, macOS, watchOS and tvOS. Select
+Apple devices also support Animoji, Memoji, and Genmoji.
+
+The ‏ם‎ Apple logo is a Private Use Area (PUA) character that is not cross-
+platform compatible but does work on Apple devices. Previously, the ‏ד‎ Beats 1
+Jogo was also supported as a PUA.",english
+"= Playground
+
+Try the Live API
+
+.5 Talk Webcam @ Share Screen
+
+a 88 Tools",english
+"= וחו
+
+אותך יותר טוו
+
+» Made with forms.app
+.",hebrew
+"&
+
+מצטערים, קורס שוק ההון- בגובה העיניים כבר לא זמין ש
+
+אנחנו ממליצים ליצור קשר עם המרצה
+
+©
+
+SCHOOLER",hebrew
+"<&koyfin Product For Financial Advisors For Investors Pricing Log In Sign Up For Free
+
+A modern investment
+platform for advisors and
+investors.
+
+Research markets, analyze portfolios, and create client-ready reports in one
+place.
+
+Sign Up For Free",english
+"print(f""OCR read: {text!r}"")
+print(f""Guessed label (from character script): {guess}"")
+
+answer = input(""Press Enter to accept, or type ‘english'/‘hebrew' to correct: ""
+label = answer if answer in (“english"", “hebrew"") else guess
+
+if Label is None:
+print(“Could not determine a label (no letters found) - skipped."")
+return
+
+append_row(text, Label)
+print(f""Saved as {label!r}. Run this again on a different field to add more rou
+
+How TO TEST IT
+
+- Save it as ckils/weekS/collect_data.py , next to ocr_reader.py .
+
+- Run it repeatedly -- click into a different field each time (chat boxes,
+documents, search bars, both languages, both apps you use daily) — building
+up training_data.csv one row per run.
+
+- Aim for at least 60-100 rows total, roughly balanced between English and
+Hebrew, and make sure a meaningful chunk are the short/messy/ambiguous
+kind described above, not just clean full sentences.
+
+- Open training_data.csv afterward and spot-check a few rows — confirm the
+‘text and label actually match what you saw on screen.
+
+WHAT SUCCESS LOOKS LIKE
+
+training_data.csv grows by one row per run, with real OCR text paired with a
+label you personally confirmed or corrected - a
+not just the easy ones
+
+of clean and messy examples,
+
+- When your code produces the expected output, bring it back to your
+Claude Code chat (paste it, or point to the file) for review — it gets
+checked, explained, and merged into ckils-poc before you move on.",english
+"© Jupyter Homework_07.06 Last Checkpoint: 2 months ago
+
+.
+
+File Edit
+
+View Run Kemel Settings Help
+
+Truste
+
+a+ %
+
+ם
+
+O >» * 0 » Code .
+
+Jupyterlab ]7 & Python 3 (ipykernel) O = |
+
+File ~\anaconda3\Lib\site-packages\pandas\io\parsers\readers.py:1026, in read_csv(filepath_or_buffer, sep, delimiter, header, names, index_col, usecol
+s, dtype, engine, converters, true_values, false values, skipinitialspace, skiprows, skipfooter, nrows, na_values, keep_default_na, na_filter, verbose,
+skip_blank lines, parse dates, infer_datetime format, keep_date_col, date parser, date format, dayfirst, cache dates, iterator, chunksize, compression,
+thousands, decimal, lineterminator, quotechar, quoting, doublequote, escapechar, comment, encoding, encoding errors, dialect, on_bad_lines, delim white
+
+space, low memory, memory map, float_precision, storage_options, dtype_backend)
+
+>
+
+1019 kwds_defaults = _refine_defaults_read(
+
+1014 dialect,
+1015 delimiter,
+-
+1023 )
+
+1024 kwds.update(kwds_defaults)
+ee read(filepath_or_buffer,
+
+1022 dtype_backend=dtype_backend,
+
+File ~\anaconda3\Lib\site-packages\pandas\io\parsers\readers.py:620, in _read(filepath_or_buffer, kwds)
+617 _validate_names(kwds.get(""names"", | ((
+
+--< 620 ‏תספחהם‎ = Text FileReader(filepa
+
+File ~\anaconda3\Lib\site-packages\pandas\io\parsers\readers.py:1620, in TextFileReader._-
+
+>
+
+619 # Create the parser.
+
+622 «© chunksize or iterator:
+623 ooo» parser
+
+1617 - 1) .options[""has_index_names""]
+619 handles: IOHandles | 0 = ‏הכ‎
+‎1620. ._engine = -_make_engin
+
+buffer, **kwds))
+
+kwds[""has_index_names""]
+
+init__(self, f, engine, **kwds)
+
+File ~\anaconda3\Lib\site-packages\pandas\io\parsers\readers.py:1880, in TextFileReader._make_engine(self, f, engine)
+
+1878 -5 ‏""ס""‎ not in mode:
+1879 mode += ‏ם""‎
+‎1080 ‏להש ששצבם = 165מהבה.‎
+
+1881
+1882
+1883
+1884
+1885
+1886
+1887
+1888
+
+y_map
+text=i",english
+"עכרת ‎ANNI‏ פרטי
+
+משתמשים אחרים כמכשיר הזה לא יראו את הפעילות שלך, לכן ניתן לגלוש באופן פרטי ‎ANE‏ אין לכך
+השפעה על דרכי איסוף הנתונים באתרים שכהם ‎Np‏ והשירותים שפועלים כהם, כולל ‎Google‏ עדיין
+תתכצע שמירה של הורדות, סימניות ופריטים מרשימת הקריאה. למידע 900
+
+לא ‎Chrome-2 NNW""‏ הנתונים הכאים: הפעילות שלך עדיין עשויה להיות מוצגת בפני:
+* היסטוריית הגלישה שלך * ‎DANN‏ שאליהם נכנסת
+
+* קוכצי ‎Cookie‏ ונתונים מאתרים + המעסיק ‎IW‏ או כית הספר
+
++* מידע שהוזן כטפסים * ספק האינטרנט שלך
+
+* קובצי ‎Cookie‏ של צד שלישי חסומים
+
+כמצכ פרטי, אתרים לא יכולים להשתמש בקוכצי ‎Cookie‏ של צד שלישי. אם אתר שמשתמש
+
+בקובצי ‎Cookie‏ כאלה לא פועל, ‎WON‏ לנסות לתת לאתר ‎ATA‏ גישה זמנית לקובצי ‎Cookie‏ ש
+צד ‎ww‏",hebrew
+"https://www.ynet.co.il Google
+
+מצב|/ \ ‎wn‏ חדשות \תמונות =סרטונים = שופינג = סרטונים קצרים \ עוד ד כלים ד
+
+ynet
+$ home c https://www.ynet.co.il
+
+@o07IynNI ‏חדשות, כלכלה, ספורט ובריאות - דיווחים שוטפים מהארץ‎ - ynet
+‏אתר החדשות המוביל בישראל מבית ידיעות אחרונות. סיקור מלא של חדשות מישראל והעולם, ספורט, כלכלה, תרבות,‎
+-ynet ‏שמעניין ב‎ an ‏שקורה וכל‎ AN ‏אוכל, מדע וטבע, כל‎
+
+ynet
+news « https://www.ynet.co.il
+
+חדשות - סיקורים, מבזקים וכתבות מהארץ ‎@ov71ynl‏
+‏חדשות על כל מה שקורה בפוליטיקה, בביטחון, בחינוך ועוד. מבזקים שוטפים וכתבות מהארץ ומהעולם. טורים ופרשנויות
+של עיתונאים ומומחים.
+
+ynet
+{category « news « https://www.ynet.co.il
+
+@n'pran - ynet
+‏מבזקי חדשות מהארץ ומהעולם. מבזקים בנושאי ספורט, פול'נ\'קה, תרבות, בריאות ועוד - כל מה שעל סדר היום. עקבו‎
+‏ועל העדכונים החשובים והחמים ביותר‎ ynet ‏אתר המבזקים של‎",hebrew
+"2.9.26 כ באלול התשפ""ו
+
+עכשיו אפשר 1907 -
+השייטת חיסלה את הגנרל
+שלאסדנמרפסת בעיר
+החוף: ""לא הבחינו בהם""
+
+ב-2008 חוסל מוחמד סולימאן, ""הרוח החיה"" מאחורי הכור
+הגרעיני שהופצץ בדיר א-זור בעודו אוכל ארוחת ‎Ny‏ בבית
+הקיט שלו בטרטוס. אחרי 18 שנה, חשף רה""מ דאז אולמרט )1
+מאחורי החיסול עומדת השייטת: ""כשניתנה הפקודה, נור 3
+כדורים, פגעו בעורפו - וראשו נשמט לאחור""
+
+ynet",hebrew
+"Curate Your Custom... meta - microsoft -. ] [ ECOM ][ DCM) .2-nnpxInm2 ] ‏עסקפננסי‎ CF) ‏לימודישוק ההון|וקר..‎ ] [ google drive YouTube » Gmail |
+
+‎LIVE N 12‏ כלהחדשות ביטחוני בעולם פוליטי בחירות 2026 מילהביום ‎English A772‏ המגין תרבות
+‎Mat al‏ .ו הגברים אותרו ‎NTT‏ דופק ונשימה
+- המשטרה חוקרת: הרכב השרוף שייך
+למחסלים
+
+‏וינטר מסרב לחיבור עם דוח מודיעין: הפלישה
+
+‏סמוטריץ': יירק ‎DY‏ אנשים למובלעת הספרדית הייתה
+
+‏חדשים"" מתוכננת
+
+‏האולטימטום שהציב לכניסה לממשלה - ראש הממשלה סנצ'ס האשים קודם לכן
+
+‏ועשוי 207 את נתניהו את ישראל ורוסיה
+
+‎19:34 ‏אור רביד, שרון קנובליך‎ 19:29 N12 20:12 720 nny
+
+‏אלפי חיילים אמריקנים הגיעו קלוני מתייצב לצד הכוכב תוכנית החבלה נחשפת:
+
+‏17 החטאים"" של תאילנד שהואשם באנטישמיות: ארה""ב יצאה למתקפת מנע
+
+‎ayain‏ רחוהד חוווטוות החיו- החועוץ ""זכותו"" באיראו",hebrew
+"מבזקי חדשות
+
+‎e 2090006‏ 20:18 משרד הבריאות באיראן: 18 אנשים נהרגו ולמעלה מ-100 נפצעו בתקיפות האמריקניות הלילה ‎e‏ 20:07 שריפה ‎AXIS‏ בירקון סמוך לא
+
+‏מהלך ההדחה המפתיע:
+האם דגל התורה בדרך
+להפיכה היסטורית?
+
+‏יהודה שלזינגר
+
+‏מאחורי התהליך נמצא קרב בין בתי רבנים על
+שליטה, וגם הכעס ברחוב החרדי על כישלון הנציגות
+הפוליטית להביא לפתרון סוגיית הגיוס
+
+‏תביעה נוספת וואלה 24/7
+
+‏שרה נתניהו נדרשת להתנצל -
+‎IX‏ לשלם 1.5 מיליון שקל
+
+‏יואב איתיאל, אפרת פורשר
+
+‎.
+‎https://news.walla.co.il/item/3865108",hebrew
+"מדדים מט""ח סחורות קריפטו
+
+4,191.430
+
+26’ ‘v90 02
+UTC+3 16:59
+
+יום1 חודש 3 חודשים שנה 5 שנים
+
+°TA35
+35 ‏ת""א‎
+
+5
+ת""א 125",hebrew
+"Gee kti me wane = ‏אירועים‎ \ INSIDER [
+
+גיוסי הון ואקזיטים \ // ‎AlHubbyMicrosoft  //  קטיהבםיחה / Al‏ // ביקורות // מדברים פננסים // \ ‎ITtime‏
+
+הסטארטאפ הישראלי ‎Wonderful‏ גייס עכשיו יותר
+מחצי מיליארד דולר
+
+יניב אביטל +* 15:08",hebrew
+"vionQ ef INT oon nwo mann @ om =
+
+02.09.2026 ‏רביעי כי אלול תשפ""ו‎ OF
+
+חדשות | בחירות 2026 | בעולם | דעות | תרבות: גלריה | אקלים | ספורט | אוכל | ספרים | סוף שבוע | ‎qual ob‏
+
+- פרסומת -
+
+דיווחים מהימנים ופרשנויות מומחים, בזמן אמת \ לרכישת מינוי )",hebrew
+"‎qg =‏ © הרשמה לאתר התחברות לאתר
+
+‏והוסחטי 25
+
+‏אוהדים בחו""ל - כללי ספרים וכתיבה
+
+‏> לקריאת התוכן הבא",hebrew
+אני רוצה לקנות...,hebrew
+"$$ ? al
+‏שירותים א משרדים וגופי ממשל מידע > קבלת קהל 0 עברית * | & 1299 5 לאזור האישי‎ QOV. ‏ו‎
+
+‎TN! x‏ ננצח!
+
+‎YT'Nn 9D‏ הממשלתי
+באתר אחד, נגיש ומקוון
+
+‏ו.צסם - שירותי ממשלה ומידע רשמי במקום אחד
+
+‏חפשו שירות או מידע
+
+‏% עוזרה-ו8 הממשלתי",hebrew
+"amazon
+FT
+
+@ Click the button below to continue
+shopping
+
+Conditions of Use Privacy Policy
+
+© 1996-2025, Amazon.com, Inc. or its affiliates",english
+"WIKIPEDIA
+
+האנציקלופדיה החופשית
+‎English‏ עברית
+‎articles‏ +7,189,000 0 ערכים
+‎Deutsch‏ 5ם
+‎Artikel‏ +3.125.000 +1,503,000
+
+Pyccknii
+2 103 000+ crate
+
+Frangais
+2761 000+ articles
+
+ANT
+1,537,000+ EB / #8
+
+Espajiol
+2.116.000+ 5
+
+Italiano Polski
+1.971.000+ voci 1 696 000+ haset
+
+HE
+
+| * ‏לקרוא את ויקיפדיה בשפה שלף‎ YA",hebrew
+"google.com ‏באמצעות‎ medium.com 5x ‏כניסה‎ G Our story Membership = Write Signin Get started
+
+liran martfel
+
+liran.martfel@gmail.com
+
+liran-3 ‏המשך‎
+
+להמשיך, הפרטים 'שם, כתוכת אימייל ותמונת פרופיל' ישותפו ‎Sy‏
+
+ידי ‎DY google.com‏ האתר ה
+מדיניות הפרטיות ובתנאים
+
+A place to read, write, and deepen your understanding
+
+Start reading
+
+Heln  Chatiie Ahnit  Careere Pre Blan  Ctare Priva Bulec Terme  Tevtin eneech .",english
+"= WixireDIA®
+
+25 years of the free encyclopedia
+
+| Q Search Wikipedia
+
+Search
+
+Main Page Talk
+
+Read View source View history
+
+Welcome to Wikipedia,
+
+the free encyclopedia that anyone can edit.
+256,267 active editors - 7,234,555 articles in English
+
+From today's featured article
+
+Laguna Miscanti is a brackish lake in the
+Altiplano of the Antofagasta Region in
+northern Chile. It has an area of about
+
+13 km2 (5 sq mi) and the shape of an
+
+arrowhead. The lake has no permanent
+surface inflows or outflows apart from several springs, and is primarily
+fed and drained by groundwater. Laguna Miscanti is located among the
+volcanoes of the Central Andes, and formed through tectonic
+processes about 22,000 years ago. It was once larger, but the climate
+became drier again during the Holocene, and the lake shrank and may
+have dried out completely, leaving wetlands behind. The lake reformed
+
+In the news
+
+* Duane Keith Davis is convicted of
+orchestrating the 1996 murder of
+American rapper Tupac Shakur
+(pictured).
+
+. The Nancy Grace Roman Space
+Telescope is launched towards its
+Earth—Sun ! 2 operating orbit. ‏הההל הים ההקחז‎
+
++ An attempted coup against 6 1995
+military junta in Niger fails.
+
++ King Harald V of Norway dies at the age of 89 and is
+
+succeeded bv Haakon VIII
+
+Donate Create account Log in
+
+Appearance _ hide
+Text
+
+O small
+
+© Standard
+
+© Large
+
+Width
+
+© Standard
+
+O Wide
+
+Color
+
+C - ) Automatic
+‏ס‎ Light
+
+O Dark",english
+"‎Vehicles Energy Charging Discover Shop (O) @ @‏ ה0 ם = ד
+
+‎odel¥
+
+‎0.99% APR Available
+
+‎Learn More
+
+‎Help Us Improve Our Website with Cookies
+
+‎We use cookies and process data from your device to analyze website performance, personalize ad content, and improve
+your experience. Your consent includes data transfers outside of the country you're located. View Cookie Settings for
+more information.
+
+‎Accept Reject
+
+‏נק ל מי ‎ee Ae‏
+
+‎Schedule a Drive Today‏ ץ ‎Ask a Question ""Compare Model 3 and Model‏ ט",english
+"Ti TechCrunch Latest Startups Venture Apple Security Al Apps Disrupt 2026
+
+Empower Teams with One License
+
+Professional Remote Management for Teams of Any Size—Explore TeamViewer Pricing Options
+
+Al
+
+OpenAl faces 30 more
+lawsuits tied to .
+Tumbler Ridge Opendlsfistiainodelis
+
+‎way -- and very‏ סחז חס
+
+‎Events Podcasts Newsletters Q
+
+‎accounts after the launch of X Money
+
+‎= GoPro to be acquired for $285M, will
+remain a public company
+
+‏החו וו. הודו / הת הת ההה ‎[nites red‏",english
+"vere Che New York Eimes pr aes
+
+U.S.» Worldy  Businessv Artsy Lifestyle y Opinion» Video» Showsvy Games~v _ Cooking vy Wirecuttery TheAthletic v
+
+LIVE U.S.Open = Trump Administration 29m ago
+
+ANALYSIS The Logistics Nightmare
+President Returns to a Facing U.S. Warships
+Familiar Playbook as Iranian attacks have upended
+the War With Iran the Navy’s supply chain, causing
+
+8 a strain on the aircraft carriers,
+Flares Up Again ships and destroyers that are
+President Trump called on being kept in the Middle East
+Iranians to “rise up and fight” as indefinitely.
+
+the United States seems
+increasingly bogged down after
+six months of conflict.
+
+LIVE 28mago
+
+> MIN READ Trump to Nominate Hung
+Cao as Navy Secretary
+© See more updates > Finding a New Perspective Among
+U.S. and Iran Survey the the Aspen Trees
+Damage After a Night of . .
+: When the Prichards were ready to downsize,
+Intense Strikes - - /
+3 MIN READ building an accessory dwelling unit and charging
+
+rent on their house felt like the most practical
+
+antian",english
+"El (BB Personal Project» ?9 master "" Current File < @ Fed @ i ₪ 8. ₪\ Unlock Pro - ₪
+‏ן‎ DB Project » © find_focus.py © ocr_reader.py ‏יש‎ collect_data.py = training_data.csv ‏יש‎ debug_capture.py) Vv
+5 te ‏י סםז‎ and! process|py, def guess_label(text): 1usage 8 Liran Martfel v
+‏ופו‎ focus_watcher.py return ""hebrew"" if hebrew_chars / letters > 0.3 else “english”
+ty) ‏יס‎ hello_win32.py
+‏י‎ Dweek2
+‏פ‎ > Cen 19 def append_row(text, Label): 1usage 8 Liran Martfel
+is_new = not os.path.exists(DATA_FILE)
+collect_data,
+
+- '5' - with open(DATALFILE, ""a"", ficwiine="""", ecncoding=""Utf-8"") as f:
+
+Run = @ocrreader x | collectdata x a
+
+6 ‏ם‎
+‎» :\Users\liran\Personal_Project\ .venv\Scripts\python.exe C:\Userfs\Liran\Personal_Project\ckils\week2\collect_data.py
+
+Click into a text field with real content, then come back here.
+You have 3 seconds...
+
+-
+
+© Personal Project > ckils > week2 > collect data.py
+
+9 LF UTF-8 ₪₪ 4spac... Python 3.14 (Personal Project)",english
