@@ -656,6 +656,23 @@ Calculator/Settings `ApplicationFrameHost.exe` connection, and the Windows Termi
 
 ---
 
+## 2026-09-02 — SC-09 passes: no crashes over an extended real-world run
+
+**08:15** — `rule_engine.py` ran continuously from 2026-09-01 afternoon through the morning of
+2026-09-02 — well past the charter's 8-hour target, including a stretch of roughly 8 hours with no
+user interaction at all. Confirmed: the process stayed alive and responsive the entire time, no
+crash, no silent death, no restart needed. **SC-09 (0 crashes over 8 continuous hours) passes.**
+
+That closes out every success criterion in 4.2. One separate, real problem surfaced during this
+same run, unrelated to stability: switch reliability degraded badly over the long run — down to
+roughly 20% success, affecting both Chrome and non-Chrome apps (Code.exe), with the console still
+printing "switched" even when the layout visibly didn't change. Investigating this now as its own
+issue before writing up 4.3 — the leading question is whether this is a long-uptime degradation
+(testable by comparing a fresh restart against the same long-running process) or something more
+architectural.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
