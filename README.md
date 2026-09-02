@@ -46,22 +46,28 @@ map required at that point.
   applying the charter's own framework: Go with Conditions** — window/app-level switching is the
   proven foundation; those two findings plus Tier 3 itself are the conditions carried into
   Weeks 5-6.
-- **Week 5 — in progress.** The master goal above, underway: **5.1** (UI Automation pinpoints the
-  exact focused control, not just the window) is built and confirmed working. **5.2** (Windows'
-  own local/free OCR reads the text inside that control — real finding: Hebrew OCR isn't installed
-  by default and needs a separate Windows language feature turned on), **5.3** (build a real labeled
-  dataset from the user's own OCR captures), **5.4** (train a small classifier from scratch —
-  TF-IDF character n-grams + logistic regression, verified end to end — that decides Hebrew or
-  English from that text), and **5.5** (wire that decision in as a refinement over the existing rule
-  table, not a replacement — an empty field or a low-confidence read still falls back to Tiers 1-2)
-  are all written and published to the training platform, ready for the user to build and test.
+- **Week 5 — wired in, real-world testing next.** The master goal above, built end to end: **5.1**
+  (UI Automation pinpoints the exact focused control) confirmed working. **5.2** (OCR reads the
+  text inside that control) — real finding: Windows' own built-in OCR has no Hebrew support at
+  all, on any machine (confirmed via `Get-WindowsCapability`), so this runs on **Tesseract**
+  instead (free, open-source, Apache 2.0), reading English and Hebrew in one call, confirmed
+  working on real captures of both. **5.3** — a real labeled dataset (228 rows) built from the
+  user's own OCR captures plus a smaller supplemental batch, balanced ~50/50 Hebrew/English.
+  **5.4** — a classifier trained from scratch (TF-IDF character n-grams + logistic regression,
+  100% held-out accuracy, correct and appropriately-calibrated on genuinely novel test cases
+  including out-of-vocabulary words and out-of-scope scripts). **5.5** — wired directly into
+  `rule_engine.py`: the model now refines the rule table's answer, and can make a decision even
+  for apps with **no rule configured at all** (a capability improvement over the original design).
+  Verified to compile; not yet run live against real usage — that's the next step, along with
+  measuring whether it adds noticeable latency (a real risk flagged during wiring: this now runs on
+  every browser-tab title-change event, not just full focus changes).
 
 **Overall progress, honestly:** against the original charter (the rule-based POC, Weeks 1-4),
 this is roughly **90%** done — 7 of 8 Must criteria confirmed passing, with only the 8-hour
 stability run left. Against the project's actual **master goal** (AI-driven, no rule table at
-all), it's closer to **45-50%** — Weeks 1-4 are the solid foundation, and Week 5's full lesson
-path now exists and is verified; what's left is the user actually building it and the real-world
-latency/accuracy testing that follows.
+all), it's closer to **65-70%** — the full AI decision pipeline is built and wired into the live
+switching path; what's left is real-world testing (accuracy in daily use, and specifically
+latency against the charter's 150ms target for this new path).
 
 ## Repo layout
 
