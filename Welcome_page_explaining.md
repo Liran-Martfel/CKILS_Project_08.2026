@@ -79,7 +79,7 @@ of being told per-app what to do.
 
 This is a **learning project** — it's being built from scratch in Python, one weekly milestone at
 a time, as a hands-on way to learn both coding and how a real Windows system-level tool comes
-together. **Weeks 1 through 3 are all complete**, and **Week 4 is nearly done.** CKILS watches
+together. **Weeks 1 through 4 are all complete.** CKILS watches
 rule-configured apps, automatically switches each one's keyboard layout (down to the level of
 individual windows and even browser tabs), correctly leaves a window alone if you override it by
 hand — resuming automatically the moment you move on to something else — and measured switch
@@ -90,11 +90,21 @@ one OS thread (which broke the override guard's assumptions until it was re-keye
 reality), and Windows Settings turning out to share Calculator's exact same
 `ApplicationFrameHost.exe` limitation.
 
-Week 4's formal charter checks are mostly done: all five test cases (TC-01–TC-05) pass, and of the
-remaining success criteria, **SC-01 (environment coverage) passes at 7/10 (70%)** against the
-charter's own testbed — confirmed working on Chrome, Edge, Firefox, Word, Windows Terminal, Google
-Docs/Gmail, and Teams. Only SC-09 (an 8-hour stability run) and writing up the final Go/No-Go
-decision (4.3) remain before Week 4 is fully closed out.
+Week 4's formal charter checks are all done: all five test cases (TC-01–TC-05) pass, **SC-01
+(environment coverage) passes at 7/10 (70%)** against the charter's own testbed — confirmed
+working on Chrome, Edge, Firefox, Word, Windows Terminal, Google Docs/Gmail, and Teams — and
+**SC-09 (8-hour stability) passes**, surviving an extended real run with zero crashes. Two real
+findings came out of actually living with it that no short test would have caught: local-app
+workflows that bounce through a terminal expose a genuine limit of pure rule-based switching (a
+real, lived case for the master goal below), and switch reliability drifts downward over very long
+continuous uptime — a plain restart fully restores it, so it's not a broken foundation, but a real
+gap worth closing.
+
+**The Week 4 decision, applying the charter's own framework: Go with Conditions.** Window/app-level
+switching (Tiers 1-2) is fast, accurate, and holds up under real, extended use — the proven part.
+There's no content/context understanding (Tier 3) at all yet, which is exactly what "Go with
+Conditions" describes. That, plus the two findings above, are the specific conditions carried
+forward into Weeks 5-6.
 
 **Honest overall progress:** against the original charter (the rule-based POC), this is roughly
 **90%** done. Against the project's actual **master goal** (AI-driven, no rule table needed at
