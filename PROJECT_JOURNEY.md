@@ -1229,6 +1229,45 @@ starving the model of real content.
 
 ---
 
+## 2026-09-03 — Root-caused the web-app blindness: two real, different problems
+
+**10:30** — Ran `diagnose_focus.py` for real against Google Docs, Gemini, and Google Chat (Hebrew
+and English messages). This was the actual breakthrough of the day — concrete evidence instead of
+guessing, and it revealed **two genuinely different problems**, not one:
+
+1. **Google Docs**: the focused control's `BoundingRectangle` came back as
+   `top=-13318` — nowhere near any real screen. Root cause: UI Automation reports this control's
+   position in the *document's own scroll coordinates*, not real screen pixels — once you've
+   scrolled into a long document, that position can land far outside any monitor. OCRing there is
+   a guaranteed-blank capture, every single time, which is exactly why it always read as empty.
+2. **Gemini**: the rectangle is genuinely on-screen and correct, but it's the *entire* conversation
+   pane (nearly the full browser window) — the 400×150 crop, anchored to the top-left corner, was
+   landing on blank padding, not the actual message text further down.
+3. **Google Chat (real, positive finding)**: the focused control's `Name` property — a standard
+   accessibility field — contained the **entire real message text**, in both the Hebrew and English
+   examples tested. Some apps expose real content directly through accessibility data; OCR isn't
+   the only way in, and where it's available it's faster and immune to problem #1 entirely.
+
+**Fixed with two changes to `decide_with_content()`, verified against the real diagnostic data
+before rebuilding:**
+- Try the control's own `Name` first; only trust it when it's substantial (≥20 characters) so
+  short generic labels (Google Docs' own control is literally named "תוכן מסמך" — "document
+  content," not real content) don't get misread as the actual text.
+- Before falling back to OCR, check whether the rectangle is actually on-screen at all, using the
+  real virtual-desktop bounds from `GetSystemMetrics` (this machine's: `x: -1920 to 1280`,
+  `y: -104 to 976`) — an off-screen rectangle skips OCR entirely instead of wasting ~500ms+ on a
+  capture that can only ever come back blank.
+
+Verified the on-screen check directly against all three real captured rectangles before wiring it
+in (Docs correctly classified off-screen, Gemini and Chat correctly classified on-screen). Rebuilt,
+smoke-tested. **Honest limitation not fully solved by this:** the `Name`-length heuristic isn't
+perfect — a `DocumentControl` reporting its tab/page *title* through `Name` (as Gemini's own top-
+level element did, separately from the crop-position issue) could occasionally be long enough to
+be mistaken for real content when it's genuinely just a title. Not yet a confirmed real problem in
+practice, just a known imperfection to watch for in further testing.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,

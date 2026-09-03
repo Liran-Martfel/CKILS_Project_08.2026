@@ -129,6 +129,29 @@ LANGUAGE_TO_HKL = {"english": English_HKL, "hebrew": Hebrew_HKL}
 MAX_OCR_WIDTH = 400
 MAX_OCR_HEIGHT = 150
 
+# Real finding from diagnose_focus.py: some apps (confirmed: Google Chat) expose
+# the actual visible text directly through the control's accessible Name — e.g.
+# a whole real message, not a generic label. Using that is faster than OCR and
+# immune to the off-screen problem below. Reject short Names (e.g. Google Docs'
+# own "תוכן מסמך" is just its generic role label, not real content) so this
+# doesn't get used for apps where Name isn't actually the content.
+MIN_ACCESSIBLE_TEXT_LENGTH = 20
+
+# Real finding from diagnose_focus.py: some apps (confirmed: Google Docs) report
+# the focused control's rectangle in the *document's own scroll coordinates*,
+# not real screen pixels — after scrolling, this can land far outside any
+# monitor (e.g. top=-13318) and OCR there is a guaranteed-blank capture every
+# time. This is the actual virtual desktop's real bounds, across all monitors.
+SCREEN_LEFT = win32api.GetSystemMetrics(76)    # SM_XVIRTUALSCREEN
+SCREEN_TOP = win32api.GetSystemMetrics(77)     # SM_YVIRTUALSCREEN
+SCREEN_RIGHT = SCREEN_LEFT + win32api.GetSystemMetrics(78)   # + SM_CXVIRTUALSCREEN
+SCREEN_BOTTOM = SCREEN_TOP + win32api.GetSystemMetrics(79)   # + SM_CYVIRTUALSCREEN
+
+
+def _is_onscreen(rect):
+    return (rect.right > SCREEN_LEFT and rect.left < SCREEN_RIGHT
+            and rect.bottom > SCREEN_TOP and rect.top < SCREEN_BOTTOM)
+
 
 def decide_with_content(fallback_hkl):
     """
@@ -139,13 +162,29 @@ def decide_with_content(fallback_hkl):
     try:
         control = auto.GetFocusedControl()
         rect = control.BoundingRectangle
-        right = min(rect.right, rect.left + MAX_OCR_WIDTH)
-        bottom = min(rect.bottom, rect.top + MAX_OCR_HEIGHT)
-        text = read_region(rect.left, rect.top, right, bottom)
     except Exception as e:
         if DEBUG:
             print(f"  [content] skipped ({e})")
         return fallback_hkl
+
+    accessible_text = (control.Name or "").strip()
+    if len(accessible_text) >= MIN_ACCESSIBLE_TEXT_LENGTH:
+        text = accessible_text
+        if DEBUG:
+            print(f"  [content] read from accessible text, no OCR needed: {text[:60]!r}")
+    elif not _is_onscreen(rect):
+        if DEBUG:
+            print(f"  [content] control rect is off-screen ({rect.left},{rect.top}) — skipping OCR")
+        return fallback_hkl
+    else:
+        try:
+            right = min(rect.right, rect.left + MAX_OCR_WIDTH)
+            bottom = min(rect.bottom, rect.top + MAX_OCR_HEIGHT)
+            text = read_region(rect.left, rect.top, right, bottom)
+        except Exception as e:
+            if DEBUG:
+                print(f"  [content] skipped ({e})")
+            return fallback_hkl
 
     if not text.strip():
         if DEBUG:
