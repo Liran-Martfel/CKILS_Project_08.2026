@@ -19,7 +19,10 @@ map required at that point.
 
 - Watches Windows focus changes (`SetWinEventHook` / `EVENT_SYSTEM_FOREGROUND`) to know the moment
   you switch apps or windows.
-- Looks up the focused app against a small process → language rule table.
+- Reads the actual on-screen text of the focused control (UI Automation + OCR) and decides the
+  language with a model trained from scratch on real usage — no hand-written per-app rule table.
+- Remembers its own confident decisions per app (`learned_defaults.json`) as an instant first guess
+  for a brand-new, still-empty window — self-taught, not hand-authored.
 - Switches that window's keyboard layout automatically (`WM_INPUTLANGCHANGEREQUEST`).
 - Respects a manual override instantly and invisibly: if you switch the language yourself, CKILS
   leaves that window alone — no timer, no button — and quietly resumes automatic control the
@@ -56,11 +59,16 @@ map required at that point.
   **5.4** — a classifier trained from scratch (TF-IDF character n-grams + logistic regression,
   100% held-out accuracy, correct and appropriately-calibrated on genuinely novel test cases
   including out-of-vocabulary words and out-of-scope scripts). **5.5** — wired directly into
-  `rule_engine.py`: the model now refines the rule table's answer, and can make a decision even
-  for apps with **no rule configured at all** (a capability improvement over the original design).
-  Verified to compile; not yet run live against real usage — that's the next step, along with
-  measuring whether it adds noticeable latency (a real risk flagged during wiring: this now runs on
-  every browser-tab title-change event, not just full focus changes).
+  `rule_engine.py`, then confirmed working live and iterated through several real bugs found only by
+  actually using it: a severe latency issue (fixed by running content-awareness in a background
+  thread instead of blocking the switch), a COM per-thread initialization bug, a race condition
+  between concurrent correction threads, and a tug-of-war bug where a hand-written rule kept undoing
+  the model's own confident decisions. **5.6** — that last finding led to removing the hand-written
+  `RULES` table entirely: CKILS now learns its own instant-guess defaults purely from its own
+  confident decisions (`learned_defaults.json`), never from a person's assumption about what an app
+  "should" be. Still open: UI Automation unreliably lands on the wrong small element (a button, a
+  clock) instead of real article text on some complex web apps (Google Docs, Gemini), starving the
+  model of good input there specifically — under active investigation.
 
 **Overall progress, honestly:** against the original charter (the rule-based POC, Weeks 1-4),
 this is roughly **90%** done — 7 of 8 Must criteria confirmed passing, with only the 8-hour
@@ -79,17 +87,21 @@ latency against the charter's 150ms target for this new path).
 
 ## Build & run
 
-Requirements: Windows 10/11, Python 3.10+, with `pywin32` and `psutil` installed
-(`pip install pywin32 psutil`) inside a virtual environment.
+Requirements: Windows 10/11, Python 3.10+, with the packages in `ckils/week2/` installed
+(`pywin32`, `psutil`, `uiautomation`, `pytesseract`, `Pillow`, `scikit-learn`, `joblib`) inside a
+virtual environment, plus [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) installed
+separately (`winget install --id UB-Mannheim.TesseractOCR -e`).
 
-To try the current rule-based auto-switcher, edit the `RULES` dictionary near the top of
-`ckils/week2/rule_engine.py` to match two apps you actually have open, then run:
+To run it, no configuration needed — no rules to edit, CKILS decides from real on-screen content
+and learns its own per-app defaults as it goes:
 
 ```
 python ckils/week2/rule_engine.py
 ```
 
-and Alt-Tab between them.
+Alt-Tab between apps and type real Hebrew/English text to see it decide. A packaged standalone
+`CKILS.exe` (via PyInstaller, bundling everything except Tesseract itself) also exists — see
+`PROJECT_JOURNEY.md` for the build command.
 
 ## Learning platform
 
