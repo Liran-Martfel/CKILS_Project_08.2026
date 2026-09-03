@@ -1268,6 +1268,42 @@ practice, just a known imperfection to watch for in further testing.
 
 ---
 
+## 2026-09-03 — The flagged imperfection became real, plus a much bigger bug underneath it
+
+**11:30** — A real extended test session (English vs. Hebrew CVs in different tabs, Google Docs,
+Gemini, Segment Studio) surfaced three concrete, connected problems from a single log:
+
+1. **The biggest one — Chrome shares ONE `thread_id` across every tab in the same window.**
+   Confirmed directly: `hwnd=197900 thread=18984` appeared identical across Google Docs, Gemini,
+   Segment Studio, and multiple PDF tabs. `content_decision` is keyed by `thread_id` — so a
+   decision made on one tab was leaking straight into every other tab sharing that thread. This is
+   the real explanation for Google Docs "acting like a coin flip": it wasn't random at all, it was
+   just inheriting whatever the *last different tab* had decided.
+2. **The flagged imperfection from 5.7 turned out to be real, not hypothetical.** `control.Name`
+   returned the exact page title for both "Segment Studio Checklist" and Gemini's own top-level
+   element — metadata, not the actual visible content — and both got confidently classified from
+   that title text instead of the real page.
+3. **The actual cause of the English CV reading as Hebrew:** Chrome's own PDF viewer exposes a
+   generic Hebrew status message through `Name` — `'מסמך ה-PDF מכיל 2 דפים'` ("This PDF document
+   contains 2 pages") — for *every* PDF, regardless of what's actually in it. The accessible-text
+   shortcut from 5.7 was reading browser chrome, not the resume.
+
+**Fixed, verified against the exact real strings from the log before rebuilding:**
+- `last_title_by_thread`: a title change on a shared thread (e.g. a genuine Chrome tab switch) now
+  resets `content_decision` even when `thread_id` didn't change — closing the tab-bleeding hole.
+- `_looks_like_real_content()`: rejects accessible text that's just an echo of the window's own
+  title (`accessible_text in title`), and rejects the specific Chrome PDF-viewer boilerplate
+  pattern (containing both "מכיל" and "דפים"). Ran all five real strings from the log through this
+  function directly before wiring it in — all five now classify correctly (2 title-echoes and the
+  PDF message correctly rejected, 2 real Google Chat messages correctly accepted).
+
+Rebuilt, smoke-tested. Honest note: the PDF-viewer rejection is a narrow, pattern-specific fix for
+this one observed browser message, not a general solution — a different generic browser-chrome
+message elsewhere could still slip through the same way. Watching for that in further testing,
+not pre-solving it without evidence it's needed.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
