@@ -5,6 +5,9 @@ import time
 import threading
 import json
 import os
+import sys
+import sqlite3
+import datetime
 import uiautomation as auto
 from ocr_reader import read_region
 from predict_language import predict_language
@@ -12,6 +15,17 @@ from predict_language import predict_language
 # Set to False for a quiet, end-user-facing run — True prints a line for every
 # focus change and every content-layer check, useful while developing/debugging.
 DEBUG = True
+
+# Real bug found live: in the packaged .exe, __file__ resolves inside a TEMPORARY
+# extraction folder that PyInstaller deletes when the process exits — fine for
+# reading bundled read-only files (tessdata, the model), but anything written
+# there using that path silently vanishes on close. Files meant to persist
+# across runs (learned_defaults.json, page_learned_defaults.json, the decisions
+# database) need the exe's own real, permanent folder instead.
+def _persistent_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
 # ================================================================================
 # CKILS rule_engine.py — Legend (short)
 # ================================================================================
@@ -74,7 +88,7 @@ HKL_TO_LANGUAGE_NAME = {v: k for k, v in LANGUAGE_NAME_TO_HKL.items()}
 # brand-new, still-empty window of an app CKILS has seen decide confidently
 # before; a genuinely new app just gets no instant guess until Tier 3 has
 # actually read real content from it at least once.
-LEARNED_DEFAULTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "learned_defaults.json")
+LEARNED_DEFAULTS_FILE = os.path.join(_persistent_dir(), "learned_defaults.json")
 learned_defaults_lock = threading.Lock()  # multiple correction threads could write this file at once
 
 
@@ -102,7 +116,7 @@ learned_defaults = load_learned_defaults()
 # Real, honest limitation: apps with volatile titles (an unread-count badge that
 # changes every message, e.g. Telegram) build up many near-duplicate entries
 # instead of one reusable one — harmless, just less effective for those apps.
-PAGE_LEARNED_DEFAULTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page_learned_defaults.json")
+PAGE_LEARNED_DEFAULTS_FILE = os.path.join(_persistent_dir(), "page_learned_defaults.json")
 page_learned_defaults_lock = threading.Lock()
 
 
@@ -122,6 +136,78 @@ def save_page_learned_default(exe_name, title, language_name):
         page_learned_defaults[_page_key(exe_name, title)] = language_name
         with open(PAGE_LEARNED_DEFAULTS_FILE, "w", encoding="utf-8") as f:
             json.dump(page_learned_defaults, f, ensure_ascii=False, indent=2)
+
+
+# A real database logging every content decision CKILS makes, for the monthly
+# review-assisted retrain discussed with the user: NOT auto-retrained blindly
+# (that would just teach the model to repeat its own mistakes — confirmed by
+# real testing, e.g. the PDF-viewer message was confidently "correct" before
+# it was found to be wrong). Instead this just captures everything; a separate
+# script (review_decisions.py) picks out the entries actually worth a human's
+# 30 seconds — low/borderline confidence, or followed shortly by a manual
+# override — for a quick confirm/correct pass, same style as collect_data.py.
+DECISIONS_DB_FILE = os.path.join(_persistent_dir(), "ckils_decisions.db")
+decisions_db_lock = threading.Lock()
+
+
+def init_decisions_db():
+    with decisions_db_lock:
+        conn = sqlite3.connect(DECISIONS_DB_FILE)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                exe_name TEXT NOT NULL,
+                title TEXT,
+                thread_id INTEGER,
+                source TEXT,
+                text TEXT,
+                predicted_label TEXT,
+                confidence REAL,
+                applied INTEGER,
+                reviewed INTEGER DEFAULT 0,
+                confirmed_label TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS overrides (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                exe_name TEXT NOT NULL,
+                title TEXT,
+                thread_id INTEGER,
+                overridden_to_hkl INTEGER
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+
+def log_decision(exe_name, title, thread_id, source, text, predicted_label, confidence, applied):
+    with decisions_db_lock:
+        conn = sqlite3.connect(DECISIONS_DB_FILE)
+        conn.execute(
+            "INSERT INTO decisions (timestamp, exe_name, title, thread_id, source, text, predicted_label, confidence, applied) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (datetime.datetime.now().isoformat(), exe_name, title, thread_id, source, text,
+             predicted_label, confidence, int(applied))
+        )
+        conn.commit()
+        conn.close()
+
+
+def log_override(exe_name, title, thread_id, overridden_to_hkl):
+    with decisions_db_lock:
+        conn = sqlite3.connect(DECISIONS_DB_FILE)
+        conn.execute(
+            "INSERT INTO overrides (timestamp, exe_name, title, thread_id, overridden_to_hkl) VALUES (?, ?, ?, ?, ?)",
+            (datetime.datetime.now().isoformat(), exe_name, title, thread_id, overridden_to_hkl)
+        )
+        conn.commit()
+        conn.close()
+
+
+init_decisions_db()
 
 
 page_learned_defaults = load_page_learned_defaults()
@@ -213,7 +299,7 @@ def _looks_like_real_content(accessible_text, title):
     return True
 
 
-def decide_with_content(fallback_hkl, title):
+def decide_with_content(fallback_hkl, title, exe_name, thread_id):
     """
     Falls back to fallback_hkl (Tier 1/2's answer, possibly None) on an empty
     field, low model confidence, or any failure in this layer — Tier 1/2 stays
@@ -230,6 +316,7 @@ def decide_with_content(fallback_hkl, title):
     accessible_text = (control.Name or "").strip()
     if _looks_like_real_content(accessible_text, title):
         text = accessible_text
+        source = "accessible_text"
         if DEBUG:
             print(f"  [content] read from accessible text, no OCR needed: {text[:60]!r}")
     elif not _is_onscreen(rect):
@@ -241,6 +328,7 @@ def decide_with_content(fallback_hkl, title):
             right = min(rect.right, rect.left + MAX_OCR_WIDTH)
             bottom = min(rect.bottom, rect.top + MAX_OCR_HEIGHT)
             text = read_region(rect.left, rect.top, right, bottom)
+            source = "ocr"
         except Exception as e:
             if DEBUG:
                 print(f"  [content] skipped ({e})")
@@ -262,7 +350,13 @@ def decide_with_content(fallback_hkl, title):
     confidence = proba[label]
     if DEBUG:
         print(f"  [content] read {text[:60]!r} -> {label} ({confidence:.2f} confidence)")
-    if confidence < CONTENT_CONFIDENCE_THRESHOLD:
+
+    applied = confidence >= CONTENT_CONFIDENCE_THRESHOLD
+    # Logged regardless of outcome — this is the raw material for the monthly
+    # review pass (review_decisions.py), not something retrained on directly.
+    log_decision(exe_name, title, thread_id, source, text, label, confidence, applied)
+
+    if not applied:
         if DEBUG:
             print(f"  [content] confidence below {CONTENT_CONFIDENCE_THRESHOLD} threshold, keeping the current default")
         return fallback_hkl
@@ -334,6 +428,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         if thread_id in last_set and actual_hkl != last_set[thread_id] and not just_switched:
             overridden.add(thread_id)
             last_set[thread_id] = actual_hkl  # treat the user's manual choice as the new "last known" state
+            log_override(exe_name, title, thread_id, actual_hkl)  # real, free evidence a recent decision was wrong
             print(f"{exe_name}: manual override detected, leaving it alone")
         else:
             # This is the fast path — unchanged from Weeks 2-4, still sub-millisecond.
@@ -372,7 +467,7 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         auto.InitializeUIAutomationInCurrentThread()
 
         start = time.perf_counter()
-        corrected_hkl = decide_with_content(fallback_hkl, title)
+        corrected_hkl = decide_with_content(fallback_hkl, title, exe_name, thread_id)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         if corrected_hkl == fallback_hkl or corrected_hkl is None:
