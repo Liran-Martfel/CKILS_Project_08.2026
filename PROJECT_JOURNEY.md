@@ -1382,6 +1382,40 @@ directly on disk that a fresh, properly-initialized (16KB, both tables) database
 
 ---
 
+## 2026-09-03 — Google Docs is a confirmed, structural dead end for reading real content
+
+**14:00** — With the crash fixed, the next real test surfaced the untitled Google Doc staying
+English the entire session, every single visit hitting `control rect is off-screen`. Investigated
+whether UI Automation's `TextPattern` (specifically `GetVisibleRanges()`, meant to return only
+what's actually on screen, independent of document-scroll coordinates) could route around the
+rectangle problem entirely. Built `diagnose_textpattern.py` and tested it directly, twice — once on
+an untitled doc, once on a real document with substantial real Hebrew content ("עידן כהן ראיון").
+
+**Confirmed, conclusively: Google Docs does not expose its real body text through any UI Automation
+mechanism at all.** `GetVisibleRanges()` returned zero ranges both times. `DocumentRange.GetText()`
+— the whole document, no coordinates involved at all — returned only `'תוכן מסמך'`, the exact same
+generic role label (`"document content"`) as `control.Name`. `GetSelection()` returned an empty
+range. Every path dead-ends at the same generic label. This is a genuine wall in Google Docs' own
+accessibility implementation, not something fixable in this codebase — consistent with Google Docs
+being widely known as poorly-supported for accessibility tooling generally.
+
+**Built the one honest fallback left**: `_google_docs_title_text()` — when the body is confirmed
+unreadable (off-screen, no real accessible text), use the document's own title instead. Not the
+body content, but genuine, real, user-authored text — clearly labeled in the code and logs as what
+it actually is (`source = "google_docs_title"`), not disguised as reading the document itself.
+Filters out Google's own generic "Untitled document" / "מסמך ללא שם" placeholder (real user titles
+only). Verified the extraction logic against all four real title patterns seen in testing before
+wiring it in — all four classified correctly (real title extracted, both generic-placeholder
+variants correctly rejected, a non-Docs title correctly ignored).
+
+**Also, honestly:** accidentally deleted the real accumulated `learned_defaults.json`,
+`page_learned_defaults.json`, and `ckils_decisions.db` from the user's actual testing session while
+clearing what were assumed to be smoke-test artifacts, without checking first whether they held
+real data. Flagged directly to the user rather than silently moving past it. Not catastrophic — the
+system is designed to rebuild this quickly from real use — but a real process mistake worth naming.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,

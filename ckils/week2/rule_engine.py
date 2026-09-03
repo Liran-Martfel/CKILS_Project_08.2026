@@ -319,6 +319,27 @@ def _looks_like_real_content(accessible_text, title):
     return True
 
 
+# Real finding, confirmed directly with diagnose_textpattern.py on real documents
+# with real content: Google Docs does not expose its actual body text through
+# ANY UI Automation mechanism — not the bounding rectangle (document-scroll
+# coordinates, often off-screen), not accessible Name, not even TextPattern's
+# DocumentRange (all three return only the generic "תוכן מסמך" role label).
+# This is a genuine wall in Google Docs' own accessibility support, not
+# something fixable in this codebase. The one real, honest signal left: the
+# document's own title — not the body, but genuine user-authored text, used
+# only when the body is confirmed unreadable, not pretended to be the content.
+GOOGLE_DOCS_GENERIC_TITLES = ["מסמך ללא שם", "Untitled document"]
+
+
+def _google_docs_title_text(title):
+    if " - Google Docs" not in title:
+        return None
+    doc_title = title.split(" - Google Docs")[0].strip()
+    if not doc_title or doc_title in GOOGLE_DOCS_GENERIC_TITLES:
+        return None
+    return doc_title
+
+
 def decide_with_content(fallback_hkl, title, exe_name, thread_id):
     """
     Falls back to fallback_hkl (Tier 1/2's answer, possibly None) on an empty
@@ -340,9 +361,16 @@ def decide_with_content(fallback_hkl, title, exe_name, thread_id):
         if DEBUG:
             print(f"  [content] read from accessible text, no OCR needed: {text[:60]!r}")
     elif not _is_onscreen(rect):
-        if DEBUG:
-            print(f"  [content] control rect is off-screen ({rect.left},{rect.top}) — skipping OCR")
-        return fallback_hkl
+        title_text = _google_docs_title_text(title)
+        if title_text is not None:
+            text = title_text
+            source = "google_docs_title"
+            if DEBUG:
+                print(f"  [content] Google Docs body unreadable, using document title instead: {text!r}")
+        else:
+            if DEBUG:
+                print(f"  [content] control rect is off-screen ({rect.left},{rect.top}) — skipping OCR")
+            return fallback_hkl
     else:
         try:
             right = min(rect.right, rect.left + MAX_OCR_WIDTH)
