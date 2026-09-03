@@ -8,6 +8,7 @@ import os
 import sys
 import sqlite3
 import datetime
+import re
 import uiautomation as auto
 from ocr_reader import read_region
 from predict_language import predict_language
@@ -305,6 +306,13 @@ def _is_onscreen(rect):
 # classifying EVERY PDF as Hebrew regardless of what's actually in it.
 GENERIC_ACCESSIBLE_TEXT_MARKERS = ["מכיל", "דפים"]
 
+# Real finding: clicking Gemini's "New chat" button (שיחה חדשה) briefly put
+# focus on the BUTTON itself, whose Name was "New chat" plus its keyboard-
+# shortcut hint ("Ctrl+Shift+O") — never something a person would actually
+# type, but long/mixed enough to reach the classifier and score a shaky,
+# meaningless confidence. Reject any accessible text carrying a shortcut hint.
+SHORTCUT_HINT_PATTERN = re.compile(r"(Ctrl|Alt|Shift|Cmd)\s*\+\s*(Ctrl|Alt|Shift|Cmd)?", re.IGNORECASE)
+
 
 def _looks_like_real_content(accessible_text, title):
     if len(accessible_text) < MIN_ACCESSIBLE_TEXT_LENGTH:
@@ -315,6 +323,8 @@ def _looks_like_real_content(accessible_text, title):
     if accessible_text in title:
         return False
     if all(marker in accessible_text for marker in GENERIC_ACCESSIBLE_TEXT_MARKERS):
+        return False
+    if SHORTCUT_HINT_PATTERN.search(accessible_text):
         return False
     return True
 
