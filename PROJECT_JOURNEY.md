@@ -1446,6 +1446,30 @@ anything post-rebuild, rather than repeating the earlier deletion mistake.
 
 ---
 
+## 2026-09-03 — Real bug: a button's own label was misread as page content
+
+**14:20** — User tested clicking Gemini's "New chat" button (שיחה חדשה) specifically to see if
+CKILS would switch to Hebrew. The console showed a real, concrete case: accessible text
+`'ש שיחה חדשה ‎Ctrl+Shift+O‏'` read at 62% Hebrew confidence, below the 65% switch
+threshold, so nothing changed. Traced with the user rather than guessed: they confirmed exactly
+what they clicked, which is what made the real cause certain rather than assumed.
+
+**Root cause:** clicking the button briefly put UI Automation focus on the *button itself*, whose
+`Name` is its label plus its keyboard-shortcut hint ("New chat" + "Ctrl+Shift+O") — never text a
+person would actually type. The 62% confidence was arguably the right call for that specific
+string, mixed and short as it was, but the deeper problem is one level up: a button's label should
+never have reached the classifier as "content" in the first place. Same category of gap as the
+title-echo and PDF-boilerplate rejections already in `_looks_like_real_content()` — just a pattern
+those two didn't cover yet.
+
+**Fix:** added `SHORTCUT_HINT_PATTERN` — a regex rejecting any accessible text containing a
+keyboard-shortcut hint (`Ctrl+`, `Alt+`, `Shift+`, `Cmd+` combinations) before it ever reaches the
+classifier. Verified against the exact real logged string (correctly rejected) and against normal
+Hebrew and English sentences (correctly left alone) before rebuilding. Rebuilt, smoke-tested — ran
+clean, no crash.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
