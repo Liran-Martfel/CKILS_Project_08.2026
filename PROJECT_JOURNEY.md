@@ -1362,6 +1362,26 @@ request, for easy day-to-day launching.
 
 ---
 
+## 2026-09-03 — Real bug: an unguarded DB write crashed every single correction
+
+**13:20** — First real test with the new database found something serious: every content check was
+crashing with `sqlite3.OperationalError: no such table: decisions`, printed as a raw
+"Exception in thread" traceback for every single check. Root cause: a leftover 0-byte
+`ckils_decisions.db` from earlier today (almost certainly the exe being force-killed mid-write
+during one of many rebuild/test cycles), and — the real problem — `log_decision()` had no
+try/except at all, unlike every other step in the Tier 3 pipeline. That let a database problem
+crash the entire `apply_content_correction()` call, meaning **no corrections were applying at all**
+during that whole test, not just logging silently failing.
+
+**Fixed two ways:** wrapped the database write in `_run_logged_write()`, which retries once after
+re-running `init_decisions_db()` (self-healing the schema if it's ever missing or corrupted) and
+gives up quietly on a second failure — a database problem can never again break the actual
+switching logic. Reproduced the exact real error message (`no such table: decisions`) against a
+simulated 0-byte file before trusting the fix, confirmed it heals and succeeds. Rebuilt, verified
+directly on disk that a fresh, properly-initialized (16KB, both tables) database gets created.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
