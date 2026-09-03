@@ -1463,6 +1463,48 @@ so low confidence there is correct behavior, not a remaining gap.
 
 ---
 
+## Future ideas (not yet implemented)
+
+Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
+not designed in detail yet, just captured.
+
+**2026-09-03 — Gibberish-typing fallback (Tier 4 safety net)**
+
+User's idea: as a last-resort backstop underneath everything else (focus detection, learned
+defaults, content-aware correction), watch what the user is actually *typing*. If CKILS fails to
+switch the language in time — a bug, a slow/failed content check, a case it doesn't recognize — and
+the user starts typing, the keystrokes will come out as "gibberish": real words typed in the wrong
+keyboard layout produce a garbled string of characters that isn't a real word in either language
+(e.g. Hebrew intended, typed in the English layout, or vice versa). The idea is to detect that
+pattern *mid-sentence*, as it's happening, and correct the keyboard language automatically —
+without waiting for a focus change or relying on the content-reading pipeline at all.
+
+**Why this matters:** every other mechanism CKILS has today (rule fallback, learned defaults,
+content-aware OCR/accessible-text correction) depends on reading something *around* the user —
+the app, the page, the screen. This would be the first mechanism that reacts to the user's own
+typing directly, catching exactly the cases where everything upstream failed or hasn't caught up
+yet. A genuine safety net, not a replacement for the existing tiers.
+
+**Open questions to work out when this gets designed for real (not answered yet, on purpose):**
+- How to reliably detect "this is gibberish" from a short, in-progress keystroke sequence, without
+  false-positiving on real short words, abbreviations, passwords, code, or intentional gibberish
+  (e.g. usernames). Likely needs a real dictionary/character-pattern check per language, tested
+  against real typing samples — not guessed.
+- How to actually correct mid-sentence: what happens to the already-typed garbled characters —
+  are they auto-corrected/retyped in the right layout, or does the layout just switch going
+  forward and the user fixes the start themselves?
+- How to capture keystrokes system-wide without becoming, in effect, a keylogger — needs a design
+  that only ever looks at very recent, transient keystroke patterns for the gibberish check itself,
+  never logs or stores raw keystrokes anywhere (including the decisions database), and is scoped
+  narrowly enough to explain and defend that distinction clearly if this project is ever shown to
+  anyone outside personal use.
+- Where this sits relative to the existing 3-tier architecture and the content-aware correction
+  layer — likely a 4th, independent tier that can fire regardless of what the other three decided.
+
+**Status:** written down only. Not scheduled, not designed, not started.
+
+---
+
 ## Reference
 
 - **Project home:** `C:\Users\liran\Personal_Project` (GitHub: `Liran-Martfel/CKILS_Project_08.2026`)
