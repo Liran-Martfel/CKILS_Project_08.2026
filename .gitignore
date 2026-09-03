@@ -3,8 +3,8 @@ __pycache__/
 *.pyc
 *.egg-info/
 
-# Personal rules config - copy rules_config.example.json to create your own
-ckils/week2/rules_config.json
+# Per-machine memory the program builds itself (not hand-written, not shared)
+ckils/week2/learned_defaults.json
 
 # Runtime log the uiautomation library writes automatically on errors
 @AutomationLog.txt

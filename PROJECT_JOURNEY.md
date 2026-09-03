@@ -1193,6 +1193,42 @@ fix actually resolves the "rule keeps winning" symptom in practice.
 
 ---
 
+## 2026-09-03 — Replaced the hand-written RULES table with a learned memory
+
+**09:30** — After a full day of real testing (2026-09-02) exposed how much the hand-written
+`rules_config.json` (Gmail→Hebrew, Google Docs→English, ML-course-topic keywords — all written
+just to exercise the system while building it) was quietly still deciding outcomes, the user asked
+directly: they want the *rules* to reflect what the *model* was trained on, not a human's testing
+assumptions. Framed as a real architecture question — two honest options: (a) an empty field is
+simply left untouched until real content exists to judge, the purest "AI decides everything"
+version, but gives up the founding use case (the right language ready *before* you start typing
+into a blank field); or (b) CKILS remembers the last confident language the model itself decided
+for each app, and uses that as its own instant first guess next time — built entirely from what the
+model observed, not a person's guess. User chose (b).
+
+**Built `learned_defaults.json`**: a small `exe_name → "english"/"hebrew"` memory, gitignored
+(per-machine, not shared), written only by `apply_content_correction()` whenever Tier 3 makes a
+confident decision — never hand-authored. `resolve_target()` and the whole `RULES`/
+`rules_config.json`/`rules_config.example.json` mechanism removed entirely, along with all
+per-title keyword matching (Tier 3's own per-window content decision already handles that far
+better than a keyword match ever could). Verified the save/load logic directly before wiring it in.
+
+**What this actually changes, honestly:** a genuinely new app CKILS has never seen decide
+confidently gets *no* instant guess on its first visit — same limitation as option (a) for that one
+case. But every app it *has* seen decide confidently before gets an instant, correct-so-far guess
+from then on, entirely self-taught. This is a real, direct answer to yesterday's closing question
+("is it AI-driven or rule-driven?") — the instant-guess mechanism itself is now built from the
+model's own observations, not a person's assumptions, though it's still gated by the same
+underlying problem from yesterday (Tier 3 needs a confident read to ever teach it anything, and
+complex web apps like Google Docs still aren't reliably giving it one — that diagnostic is still
+the next real step).
+
+Rebuilt the exe, smoke-tested (launches, no crash). Not yet run through a real, extended session —
+that's next, alongside finally running `diagnose_focus.py` to find out why Google Docs keeps
+starving the model of real content.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,

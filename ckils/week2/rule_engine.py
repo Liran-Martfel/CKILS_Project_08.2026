@@ -5,7 +5,6 @@ import time
 import threading
 import json
 import os
-import shutil
 import uiautomation as auto
 from ocr_reader import read_region
 from predict_language import predict_language
@@ -35,13 +34,18 @@ DEBUG = True
 #                   variable so it isn't garbage-collected while active.
 # hook              Your active SetWinEventHook registration.
 #
-# RULES             exe_name -> either a plain hkl (simple app) or a list of
-#                   (keyword, hkl) tuples (multi-window app, matched by title).
-# resolve_target()  Decides the hkl for the focused window, or None.
-# exe_name          Focused app's file name — the RULES dict key.
-# title             Focused window's title-bar text — tells apart windows
-#                   sharing the same exe_name.
-# target_hkl        What resolve_target() says this window SHOULD be.
+# learned_defaults  exe_name -> "english"/"hebrew", written by the program itself
+#                   whenever Tier 3 confidently decides a window's language —
+#                   never hand-written. This is the instant first guess for a
+#                   brand-new, still-empty window of that app; genuinely AI-driven,
+#                   not a human-authored assumption about what an app "should" be.
+# exe_name          Focused app's file name — the learned_defaults dict key.
+# title             Focused window's title-bar text — used only for debug output
+#                   now; Tier 3's per-window content decision replaced the old
+#                   per-title keyword matching entirely.
+# target_hkl        The instant first guess for this event — the current
+#                   content_decision for this window if one exists yet, else
+#                   whatever's in learned_defaults for this app, else None.
 # actual_hkl        What the layout ACTUALLY is right now — compared against
 #                   last_set to catch a manual override.
 #
@@ -62,37 +66,33 @@ DEBUG = True
 English_HKL = 0x04090409
 Hebrew_HKL  = -0xfc2fbf3
 LANGUAGE_NAME_TO_HKL = {"english": English_HKL, "hebrew": Hebrew_HKL}
+HKL_TO_LANGUAGE_NAME = {v: k for k, v in LANGUAGE_NAME_TO_HKL.items()}
 
-# Your own app -> language rules live in rules_config.json, not hardcoded here —
-# that file is personal/local (gitignored), so this code stays clean and generic
-# for anyone else who downloads it. See rules_config.example.json for the format.
-RULES_DIR = os.path.dirname(os.path.abspath(__file__))
-RULES_CONFIG_FILE = os.path.join(RULES_DIR, "rules_config.json")
-RULES_EXAMPLE_FILE = os.path.join(RULES_DIR, "rules_config.example.json")
-
-
-def load_rules():
-    if not os.path.exists(RULES_CONFIG_FILE):
-        if os.path.exists(RULES_EXAMPLE_FILE):
-            shutil.copy(RULES_EXAMPLE_FILE, RULES_CONFIG_FILE)
-        else:
-            return {}
-
-    with open(RULES_CONFIG_FILE, encoding="utf-8") as f:
-        raw = json.load(f)
-
-    rules = {}
-    for exe_name, value in raw.items():
-        if exe_name.startswith("_"):  # e.g. "_comment" — documentation, not a rule
-            continue
-        if isinstance(value, str):
-            rules[exe_name] = LANGUAGE_NAME_TO_HKL[value]
-        else:
-            rules[exe_name] = [(keyword, LANGUAGE_NAME_TO_HKL[lang]) for keyword, lang in value.items()]
-    return rules
+# No hand-written per-app assumptions anymore — this file is a small memory the
+# program builds up itself, only ever written by a confident Tier 3 decision
+# (see apply_content_correction below). It's the instant first guess for a
+# brand-new, still-empty window of an app CKILS has seen decide confidently
+# before; a genuinely new app just gets no instant guess until Tier 3 has
+# actually read real content from it at least once.
+LEARNED_DEFAULTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "learned_defaults.json")
+learned_defaults_lock = threading.Lock()  # multiple correction threads could write this file at once
 
 
-RULES = load_rules()
+def load_learned_defaults():
+    if not os.path.exists(LEARNED_DEFAULTS_FILE):
+        return {}
+    with open(LEARNED_DEFAULTS_FILE, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_learned_default(exe_name, language_name):
+    with learned_defaults_lock:
+        learned_defaults[exe_name] = language_name
+        with open(LEARNED_DEFAULTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(learned_defaults, f, ensure_ascii=False, indent=2)
+
+
+learned_defaults = load_learned_defaults()
 
 last_set = {}          # hwnd -> HKL we last set (or the user's manual choice) for that window
 last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
@@ -100,10 +100,11 @@ overridden = set()     # hwnd the user manually overrode, not yet reset
 SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 
 # Real bug found live: once Tier 3 corrected a window's language, the very next
-# focus/title event for that SAME window re-applied the raw rule and undid the
-# correction — the fast path had no memory that content already decided this
-# window. This makes a confident content decision "stick" for as long as you
-# stay in that window; it resets to rule-first the moment you leave and return.
+# focus/title event for that SAME window re-applied the raw learned default and
+# undid the correction — the fast path had no memory that content already
+# decided this window. This makes a confident content decision "stick" for as
+# long as you stay in that window; it resets to the learned default the moment
+# you leave and return.
 content_decision = {}  # thread_id -> the last confident Tier 3 decision, if any
 
 # Real bug found live: some apps fire EVENT_OBJECT_NAMECHANGE repeatedly for the
@@ -115,7 +116,7 @@ content_decision = {}  # thread_id -> the last confident Tier 3 decision, if any
 # NAMECHANGE event skips spawning a redundant, racing one.
 content_check_in_progress = set()
 
-# Tier 3 (Week 5): refines — or, for an unruled app, supplies — the switch decision
+# Tier 3 (Week 5): refines — or, for an app with no learned default yet, supplies — the switch decision
 # using the actual on-screen text, via UI Automation + OCR + the model trained in 5.4.
 CONTENT_CONFIDENCE_THRESHOLD = 0.65
 LANGUAGE_TO_HKL = {"english": English_HKL, "hebrew": Hebrew_HKL}
@@ -164,7 +165,7 @@ def decide_with_content(fallback_hkl):
         print(f"  [content] read {text[:60]!r} -> {label} ({confidence:.2f} confidence)")
     if confidence < CONTENT_CONFIDENCE_THRESHOLD:
         if DEBUG:
-            print(f"  [content] confidence below {CONTENT_CONFIDENCE_THRESHOLD} threshold, trusting the rule")
+            print(f"  [content] confidence below {CONTENT_CONFIDENCE_THRESHOLD} threshold, keeping the current default")
         return fallback_hkl
 
     return LANGUAGE_TO_HKL[label]
@@ -177,28 +178,10 @@ WinEventProcType = ctypes.WINFUNCTYPE(
     None, ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD, ctypes.wintypes.HWND,
     ctypes.wintypes.LONG, ctypes.wintypes.LONG, ctypes.wintypes.DWORD, ctypes.wintypes.DWORD)
 
-def resolve_target(exe_name,title):
-    """
-    if it's none, nothing happened.
-    rule = RULES.get(exe_name) means look up what is stored in RULES
-    and check, is that a value a number? if that so, return the rule.
-    if it's not a number, check if the keyword or hkl is anywhere inside this title text, if so return the hkl
-    """
-    rule = RULES.get(exe_name)
-    if rule is None:
-        return None
-    if isinstance(rule, int): #a simple app, the title doesn't matter, just the rule.
-        return rule
-    for keyword, hkl in rule: #relevent in multi-window app - first matching to the title wins.
-        if keyword in title:
-            return hkl
-    return None # none of the known titles matched — leave it alone
-
-
 def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
     global previous_thread
     # The instant focus leaves a window we were overriding, forget it ever happened —
-    # its next visit starts completely fresh, rule applied automatically, nothing to see.
+    # its next visit starts completely fresh, learned default applied automatically.
 
     if event == win32con.EVENT_OBJECT_NAMECHANGE:
         if id_object != win32.lib.win32con.OBJID_WINDOW or id_child != win32.lib.win32con.CHILDID_SELF:
@@ -209,7 +192,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         if previous_thread in overridden:
             overridden.discard(previous_thread)
             last_set.pop(previous_thread, None)
-        content_decision.pop(previous_thread, None)  # fresh window = rule-first again
+        content_decision.pop(previous_thread, None)  # fresh window = learned default first, again
     previous_thread = thread_id
 
     try:
@@ -227,8 +210,9 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     if DEBUG:
         print(f"  [debug] exe_name = {exe_name!r}")
     # Once Tier 3 has made a confident call for this window, trust that over the
-    # raw rule for the rest of this visit — see content_decision above for why.
-    target_hkl = content_decision.get(thread_id, resolve_target(exe_name, title))
+    # learned default for the rest of this visit — see content_decision above for why.
+    learned_hkl = LANGUAGE_NAME_TO_HKL.get(learned_defaults.get(exe_name))
+    target_hkl = content_decision.get(thread_id, learned_hkl)
 
     if target_hkl is not None:
         actual_hkl = win32api.GetKeyboardLayout(thread_id)
@@ -267,7 +251,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         ).start()
 
 
-def apply_content_correction(hwnd, thread_id, exe_name, rule_hkl):
+def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl):
     # Held for the whole function, not just the OCR part — this is what actually
     # stops two corrections for the same window from racing on last_set/overridden.
     try:
@@ -277,10 +261,10 @@ def apply_content_correction(hwnd, thread_id, exe_name, rule_hkl):
         auto.InitializeUIAutomationInCurrentThread()
 
         start = time.perf_counter()
-        corrected_hkl = decide_with_content(rule_hkl)
+        corrected_hkl = decide_with_content(fallback_hkl)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
-        if corrected_hkl == rule_hkl or corrected_hkl is None:
+        if corrected_hkl == fallback_hkl or corrected_hkl is None:
             if DEBUG:
                 print(f"  [content] {exe_name}: no change ({elapsed_ms:.0f} ms)")
             return
@@ -297,6 +281,7 @@ def apply_content_correction(hwnd, thread_id, exe_name, rule_hkl):
         last_set[thread_id] = corrected_hkl
         last_switch_time[thread_id] = time.time()
         content_decision[thread_id] = corrected_hkl  # sticks for the rest of this visit
+        save_learned_default(exe_name, HKL_TO_LANGUAGE_NAME[corrected_hkl])  # genuinely AI-learned, not hand-written
         print(f"{exe_name}: content-aware correction to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
     finally:
         content_check_in_progress.discard(thread_id)
