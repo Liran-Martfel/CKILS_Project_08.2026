@@ -1416,6 +1416,36 @@ system is designed to rebuild this quickly from real use — but a real process 
 
 ---
 
+## 2026-09-03 — Real bug: switching to a fresh tab could get silently skipped
+
+**14:30** — User reported a real, repeatable symptom: opening a genuinely new tab (tested on a live
+Hebrew news site) sometimes took a long time and a lot of back-and-forth between tabs before it
+actually corrected. Root cause: `content_check_in_progress` was keyed by `thread_id` alone — and
+since Chrome shares one `thread_id` across every tab in a window (established back when fixing the
+tab-bleeding bug), switching to a brand-new tab while an *older* tab's check was still in flight
+(checks can take 0.5-3+ seconds) meant the new tab's check got silently skipped entirely — nothing
+would be queued for it until the old check finished AND another event happened to fire for the tab
+actually being viewed.
+
+A second, related correctness risk found in the same review: a stale check finishing late could
+apply its result to whatever tab is *currently* focused, since the existing
+`GetForegroundWindow() != hwnd` safety check can't detect a tab switch — Chrome's `hwnd` is
+identical across all its tabs.
+
+**Fixed both**: `content_check_in_progress` now keyed by `(thread_id, title)` instead of
+`thread_id` alone — different tabs can now check concurrently without blocking each other, while
+repeated `NAMECHANGE` spam for the exact same tab still only gets one check in flight, preserving
+the original race fix. And `apply_content_correction()` now re-verifies the window's *current*
+title still matches what the correction was actually computed for, right before applying —
+discarding it as stale otherwise, rather than misapplying a decision meant for a tab the user has
+since left. Rebuilt, smoke-tested.
+
+**Also, honestly:** learned this time — checked the persistent files (`learned_defaults.json`,
+`page_learned_defaults.json`, `ckils_decisions.db`) for real accumulated data before touching
+anything post-rebuild, rather than repeating the earlier deletion mistake.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,

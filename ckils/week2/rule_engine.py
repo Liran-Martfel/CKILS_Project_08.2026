@@ -496,8 +496,16 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     # disagrees, is confident, and the user hasn't already moved on or overridden it.
     # Skip spawning one if this same window already has a correction in flight —
     # see content_check_in_progress above for why that matters.
-    if thread_id not in content_check_in_progress:
-        content_check_in_progress.add(thread_id)
+    # Real bug found live: keyed by thread_id alone, this blocked a genuinely new
+    # tab from ever getting its own check queued whenever an older tab's check
+    # (same shared Chrome thread_id) was still running — the user had to keep
+    # switching back and forth until one finally landed. Keying by (thread_id,
+    # title) instead means different tabs can check concurrently without either
+    # blocking the other, while repeated NAMECHANGE spam for the SAME tab still
+    # only gets one check in flight, exactly as before.
+    check_key = (thread_id, title)
+    if check_key not in content_check_in_progress:
+        content_check_in_progress.add(check_key)
         threading.Thread(
             target=apply_content_correction,
             args=(hwnd, thread_id, exe_name, target_hkl, title),
@@ -508,6 +516,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
 def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
     # Held for the whole function, not just the OCR part — this is what actually
     # stops two corrections for the same window from racing on last_set/overridden.
+    check_key = (thread_id, title)
     try:
         # COM (which UI Automation needs) is initialized per THREAD, not once for the
         # whole process — this function runs in a new background thread every time,
@@ -526,6 +535,15 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
             if DEBUG:
                 print(f"  [content] {exe_name}: decision arrived too late, focus moved on ({elapsed_ms:.0f} ms)")
             return
+        # Real bug found live: Chrome's hwnd doesn't change between tabs, so the
+        # check above alone can't tell "still the same window" apart from "same
+        # window, but you've since switched to a different tab." Re-check the
+        # window's CURRENT title still matches what this correction was actually
+        # computed for — otherwise this is a stale result for a tab you've left.
+        if win32gui.GetWindowText(hwnd) != title:
+            if DEBUG:
+                print(f"  [content] {exe_name}: decision is for a different tab now, discarding ({elapsed_ms:.0f} ms)")
+            return
         if thread_id in overridden:
             if DEBUG:
                 print(f"  [content] {exe_name}: user has manually overridden this window, leaving it alone ({elapsed_ms:.0f} ms)")
@@ -540,7 +558,7 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         save_page_learned_default(exe_name, title, language_name)  # this exact page — both genuinely AI-learned
         print(f"{exe_name}: content-aware correction to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
     finally:
-        content_check_in_progress.discard(thread_id)
+        content_check_in_progress.discard(check_key)
 
 callback = WinEventProcType(on_focus_change)
 hook = user32.SetWinEventHook(
