@@ -94,6 +94,38 @@ def save_learned_default(exe_name, language_name):
 
 learned_defaults = load_learned_defaults()
 
+# Per-app memory alone is nearly useless for a browser (chrome.exe hosts wildly
+# different sites in wildly different languages). This is the more precise
+# layer: remembers a learned language per (app, exact window title) — "this
+# Gmail inbox is Hebrew," "this Google Doc is Hebrew" — individually, still
+# entirely self-taught from real confident Tier 3 decisions, never hand-written.
+# Real, honest limitation: apps with volatile titles (an unread-count badge that
+# changes every message, e.g. Telegram) build up many near-duplicate entries
+# instead of one reusable one — harmless, just less effective for those apps.
+PAGE_LEARNED_DEFAULTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "page_learned_defaults.json")
+page_learned_defaults_lock = threading.Lock()
+
+
+def _page_key(exe_name, title):
+    return f"{exe_name}||{title}"
+
+
+def load_page_learned_defaults():
+    if not os.path.exists(PAGE_LEARNED_DEFAULTS_FILE):
+        return {}
+    with open(PAGE_LEARNED_DEFAULTS_FILE, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_page_learned_default(exe_name, title, language_name):
+    with page_learned_defaults_lock:
+        page_learned_defaults[_page_key(exe_name, title)] = language_name
+        with open(PAGE_LEARNED_DEFAULTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(page_learned_defaults, f, ensure_ascii=False, indent=2)
+
+
+page_learned_defaults = load_page_learned_defaults()
+
 last_set = {}          # hwnd -> HKL we last set (or the user's manual choice) for that window
 last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
 overridden = set()     # hwnd the user manually overrode, not yet reset
@@ -284,10 +316,14 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         content_decision.pop(thread_id, None)
         last_title_by_thread[thread_id] = title
 
-    # Once Tier 3 has made a confident call for this window, trust that over the
-    # learned default for the rest of this visit — see content_decision above for why.
-    learned_hkl = LANGUAGE_NAME_TO_HKL.get(learned_defaults.get(exe_name))
-    target_hkl = content_decision.get(thread_id, learned_hkl)
+    # Layered fallback, most specific first: this visit's own decision (if Tier 3
+    # already confidently decided this exact window) -> this exact page's learned
+    # history (seen this app+title combination decide confidently before) ->
+    # this app's general learned history -> nothing.
+    page_hkl = LANGUAGE_NAME_TO_HKL.get(page_learned_defaults.get(_page_key(exe_name, title)))
+    app_hkl = LANGUAGE_NAME_TO_HKL.get(learned_defaults.get(exe_name))
+    default_hkl = page_hkl if page_hkl is not None else app_hkl
+    target_hkl = content_decision.get(thread_id, default_hkl)
 
     if target_hkl is not None:
         actual_hkl = win32api.GetKeyboardLayout(thread_id)
@@ -356,7 +392,9 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         last_set[thread_id] = corrected_hkl
         last_switch_time[thread_id] = time.time()
         content_decision[thread_id] = corrected_hkl  # sticks for the rest of this visit
-        save_learned_default(exe_name, HKL_TO_LANGUAGE_NAME[corrected_hkl])  # genuinely AI-learned, not hand-written
+        language_name = HKL_TO_LANGUAGE_NAME[corrected_hkl]
+        save_learned_default(exe_name, language_name)  # this app in general
+        save_page_learned_default(exe_name, title, language_name)  # this exact page — both genuinely AI-learned
         print(f"{exe_name}: content-aware correction to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
     finally:
         content_check_in_progress.discard(thread_id)
