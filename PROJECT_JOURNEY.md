@@ -1304,6 +1304,36 @@ not pre-solving it without evidence it's needed.
 
 ---
 
+## 2026-09-03 — Full bug list compiled; added page-level learned memory
+
+**12:30** — After an extended real testing session (English/Hebrew CVs, Telegram, Discord,
+Explorer, a login page with a language toggle), compiled the full list of everything found so far —
+11 fixed, 5 open and connected by one root cause (OCR/accessible text reading generic UI
+boilerplate instead of real content: Telegram's "Write a message..." placeholder, Discord's
+sidebar channel-list metadata, Explorer's generic "תיקיית קבצים"/File Folder type label, a login
+page's fixed "English" toggle button), plus 2 rare/lower-priority items (a 25-second COM stall,
+already-handled minor COM errors).
+
+Agreed on direction with the user: chasing each app's specific boilerplate string doesn't scale.
+Two real next steps identified — reading the focused control's actual `ValuePattern` (the literal
+typed value, immune to placeholders and OCR noise) for real typed content, not yet built; and,
+at the user's request, a way to "recognize the page and decide before typing" without hand-writing
+assumptions.
+
+**Built the second one now: `page_learned_defaults.json`.** `learned_defaults` alone (per-app) is
+nearly useless for a browser hosting wildly different sites. This adds a second, more precise
+memory layer keyed by `(exe_name, exact window title)` — "this Gmail inbox is Hebrew," "this
+Google Doc is Hebrew" — individually, still entirely self-taught from real confident Tier 3
+decisions. Layered fallback, most specific first: this visit's own decision → this exact page's
+learned history → this app's general learned history → nothing. Verified the layering logic
+against simulated real/unknown page and app cases before wiring it in. Rebuilt, smoke-tested.
+
+Honest limitation: apps with volatile titles (Telegram's unread-count badge changes on every
+message) build up many near-duplicate keys instead of one reusable one — harmless, just less
+effective for those apps specifically.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
