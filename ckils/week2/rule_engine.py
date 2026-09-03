@@ -183,28 +183,48 @@ def init_decisions_db():
         conn.close()
 
 
+def _run_logged_write(sql, params):
+    # Real bug found live: a 0-byte/corrupted db file (from the exe being force-
+    # killed mid-write during earlier testing) raised "no such table", and since
+    # nothing caught it, it crashed the entire background correction thread —
+    # meaning NO corrections applied at all, not just logging failing quietly.
+    # This must never be able to break the actual switching logic, so: try once,
+    # self-heal the schema and retry once on failure, then give up quietly.
+    try:
+        with decisions_db_lock:
+            conn = sqlite3.connect(DECISIONS_DB_FILE)
+            conn.execute(sql, params)
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        if DEBUG:
+            print(f"  [content] decisions db write failed, healing schema and retrying ({e})")
+        try:
+            init_decisions_db()
+            with decisions_db_lock:
+                conn = sqlite3.connect(DECISIONS_DB_FILE)
+                conn.execute(sql, params)
+                conn.commit()
+                conn.close()
+        except Exception as e2:
+            if DEBUG:
+                print(f"  [content] decisions db write still failing, giving up for this entry ({e2})")
+
+
 def log_decision(exe_name, title, thread_id, source, text, predicted_label, confidence, applied):
-    with decisions_db_lock:
-        conn = sqlite3.connect(DECISIONS_DB_FILE)
-        conn.execute(
-            "INSERT INTO decisions (timestamp, exe_name, title, thread_id, source, text, predicted_label, confidence, applied) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (datetime.datetime.now().isoformat(), exe_name, title, thread_id, source, text,
-             predicted_label, confidence, int(applied))
-        )
-        conn.commit()
-        conn.close()
+    _run_logged_write(
+        "INSERT INTO decisions (timestamp, exe_name, title, thread_id, source, text, predicted_label, confidence, applied) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (datetime.datetime.now().isoformat(), exe_name, title, thread_id, source, text,
+         predicted_label, confidence, int(applied))
+    )
 
 
 def log_override(exe_name, title, thread_id, overridden_to_hkl):
-    with decisions_db_lock:
-        conn = sqlite3.connect(DECISIONS_DB_FILE)
-        conn.execute(
-            "INSERT INTO overrides (timestamp, exe_name, title, thread_id, overridden_to_hkl) VALUES (?, ?, ?, ?, ?)",
-            (datetime.datetime.now().isoformat(), exe_name, title, thread_id, overridden_to_hkl)
-        )
-        conn.commit()
-        conn.close()
+    _run_logged_write(
+        "INSERT INTO overrides (timestamp, exe_name, title, thread_id, overridden_to_hkl) VALUES (?, ?, ?, ?, ?)",
+        (datetime.datetime.now().isoformat(), exe_name, title, thread_id, overridden_to_hkl)
+    )
 
 
 init_decisions_db()
