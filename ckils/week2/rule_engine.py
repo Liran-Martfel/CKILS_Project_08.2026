@@ -107,6 +107,13 @@ SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 # you leave and return.
 content_decision = {}  # thread_id -> the last confident Tier 3 decision, if any
 
+# Real bug found live: Chrome shares ONE thread_id across every tab in the same
+# window — confirmed directly (hwnd=197900 thread=18984 identical across Google
+# Docs, Gemini, and multiple PDF tabs in the same log). Without this, a content
+# decision made on one tab was leaking straight into every other tab sharing
+# that thread — the actual cause of Google Docs looking like "a coin flip."
+last_title_by_thread = {}  # thread_id -> last-seen window title
+
 # Real bug found live: some apps fire EVENT_OBJECT_NAMECHANGE repeatedly for the
 # same window in quick succession (e.g. while a page is still loading). Each one
 # used to spawn its own background correction thread, and multiple could race on
@@ -153,7 +160,28 @@ def _is_onscreen(rect):
             and rect.bottom > SCREEN_TOP and rect.top < SCREEN_BOTTOM)
 
 
-def decide_with_content(fallback_hkl):
+# Real finding: Chrome's own PDF viewer exposes a generic status message
+# through the control's Name - "מסמך ה-PDF מכיל N דפים" ("This PDF document
+# contains N pages") - completely unrelated to the actual PDF's content, but
+# long enough and Hebrew enough to fool the accessible-text shortcut into
+# classifying EVERY PDF as Hebrew regardless of what's actually in it.
+GENERIC_ACCESSIBLE_TEXT_MARKERS = ["מכיל", "דפים"]
+
+
+def _looks_like_real_content(accessible_text, title):
+    if len(accessible_text) < MIN_ACCESSIBLE_TEXT_LENGTH:
+        return False
+    # Real finding: some apps (confirmed: "Segment Studio Checklist", Gemini's
+    # own top-level element) report the page/tab TITLE through Name, not the
+    # actual visible content — reject anything that's just an echo of the title.
+    if accessible_text in title:
+        return False
+    if all(marker in accessible_text for marker in GENERIC_ACCESSIBLE_TEXT_MARKERS):
+        return False
+    return True
+
+
+def decide_with_content(fallback_hkl, title):
     """
     Falls back to fallback_hkl (Tier 1/2's answer, possibly None) on an empty
     field, low model confidence, or any failure in this layer — Tier 1/2 stays
@@ -168,7 +196,7 @@ def decide_with_content(fallback_hkl):
         return fallback_hkl
 
     accessible_text = (control.Name or "").strip()
-    if len(accessible_text) >= MIN_ACCESSIBLE_TEXT_LENGTH:
+    if _looks_like_real_content(accessible_text, title):
         text = accessible_text
         if DEBUG:
             print(f"  [content] read from accessible text, no OCR needed: {text[:60]!r}")
@@ -248,6 +276,14 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
 
     if DEBUG:
         print(f"  [debug] exe_name = {exe_name!r}")
+
+    # A real title change on a shared thread (e.g. switching Chrome tabs) means
+    # this is genuinely different content, even though thread_id didn't change —
+    # see last_title_by_thread above for why this matters.
+    if last_title_by_thread.get(thread_id) != title:
+        content_decision.pop(thread_id, None)
+        last_title_by_thread[thread_id] = title
+
     # Once Tier 3 has made a confident call for this window, trust that over the
     # learned default for the rest of this visit — see content_decision above for why.
     learned_hkl = LANGUAGE_NAME_TO_HKL.get(learned_defaults.get(exe_name))
@@ -285,12 +321,12 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         content_check_in_progress.add(thread_id)
         threading.Thread(
             target=apply_content_correction,
-            args=(hwnd, thread_id, exe_name, target_hkl),
+            args=(hwnd, thread_id, exe_name, target_hkl, title),
             daemon=True
         ).start()
 
 
-def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl):
+def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
     # Held for the whole function, not just the OCR part — this is what actually
     # stops two corrections for the same window from racing on last_set/overridden.
     try:
@@ -300,7 +336,7 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl):
         auto.InitializeUIAutomationInCurrentThread()
 
         start = time.perf_counter()
-        corrected_hkl = decide_with_content(fallback_hkl)
+        corrected_hkl = decide_with_content(fallback_hkl, title)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         if corrected_hkl == fallback_hkl or corrected_hkl is None:
