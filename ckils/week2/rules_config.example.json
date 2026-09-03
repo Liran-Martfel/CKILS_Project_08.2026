@@ -1,9 +1,0 @@
-{
-  "_comment": "Copy this file to rules_config.json and edit it - that copy is yours, not shared or overwritten by updates. Each key is an app's .exe filename. A plain \"english\"/\"hebrew\" value applies to that app always. An object value lets different windows/tabs of the same app (matched by a keyword anywhere in the window title) use different languages - the first matching keyword wins. CKILS still works fine with an empty file ({}) - the trained content-aware model handles everything except a field with nothing typed into it yet.",
-
-  "Notepad.exe": "english",
-  "chrome.exe": {
-    "Gmail": "hebrew",
-    "Google Docs": "english"
-  }
-}
