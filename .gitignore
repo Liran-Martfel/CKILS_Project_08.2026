@@ -6,9 +6,13 @@ __pycache__/
 # Per-machine memory the program builds itself (not hand-written, not shared)
 ckils/week2/learned_defaults.json
 ckils/week2/page_learned_defaults.json
+ckils/week2/ckils_decisions.db
 
 # Runtime log the uiautomation library writes automatically on errors
 @AutomationLog.txt
+
+# Screenshot saved by diagnose_focus.py - can contain whatever was on screen
+ckils/week2/diagnose_focus.png
 
 # PyInstaller build output - rebuild with the command in PROJECT_JOURNEY.md
 ckils/week2/build/

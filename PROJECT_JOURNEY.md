@@ -1334,6 +1334,34 @@ effective for those apps specifically.
 
 ---
 
+## 2026-09-03 — Real decisions database, plus a serious persistence bug caught before shipping
+
+**13:00** — Built `ckils_decisions.db` (SQLite, two tables: `decisions` logs every content check —
+text read, source, predicted label, confidence, whether it was applied; `overrides` logs every
+manual override) and `review_decisions.py`, the review-assisted monthly pass discussed with the
+user: NOT a blind auto-retrain (real testing already proved confident-but-wrong decisions happen —
+the PDF-viewer message was 0.72-0.75 confident before it was found to be wrong), but a script that
+surfaces only entries actually worth a human's time — borderline confidence (0.50-0.80), or
+followed within 8 seconds by a real manual override (free, genuine evidence a decision was wrong).
+Verified the SQL candidate-selection queries against four constructed cases (clear-correct,
+borderline, near-override, far-override) before trusting it — all four classified correctly.
+
+**Caught a serious bug in the same pass, before it could quietly break everything:** in the packaged
+`.exe`, `__file__` resolves inside a *temporary* extraction folder that PyInstaller deletes the
+moment the process exits. That's correct for reading bundled read-only files (tessdata, the model)
+but wrong for anything meant to persist — meaning `learned_defaults.json`,
+`page_learned_defaults.json`, and the new decisions database were all silently being written to a
+folder that vanished on close. None of today's "learning" was actually surviving between runs of
+the exe, even though it looked like it worked within a single test session. Fixed with
+`_persistent_dir()`: uses the real, permanent folder next to `sys.executable` when frozen, the
+normal script folder otherwise. Verified directly on disk (not just by reading code) that the
+database now survives after the process exits, in the exe's real folder.
+
+**Also created a desktop shortcut** (`CKILS.lnk`) pointing at the packaged exe, at the user's
+request, for easy day-to-day launching.
+
+---
+
 ## 2026-09-02 — Grew the dataset to address the 5.4 confidence finding
 
 **21:40** — Directly addressed the low-confidence finding from 5.4 by adding 68 more labeled rows,
