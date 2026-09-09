@@ -12,6 +12,7 @@ import re
 import uiautomation as auto
 from ocr_reader import read_region
 from predict_language import predict_language
+import decision_logger
 
 # Set to False for a quiet, end-user-facing run — True prints a line for every
 # focus change and every content-layer check, useful while developing/debugging.
@@ -102,7 +103,9 @@ def load_learned_defaults():
 
 def save_learned_default(exe_name, language_name):
     with learned_defaults_lock:
-        learned_defaults[exe_name] = language_name
+        history = _history_of(learned_defaults.get(exe_name))
+        history.append(language_name)
+        learned_defaults[exe_name] = {"history": history[-TRUST_HISTORY_LENGTH:]}
         with open(LEARNED_DEFAULTS_FILE, "w", encoding="utf-8") as f:
             json.dump(learned_defaults, f, ensure_ascii=False, indent=2)
 
@@ -134,7 +137,10 @@ def load_page_learned_defaults():
 
 def save_page_learned_default(exe_name, title, language_name):
     with page_learned_defaults_lock:
-        page_learned_defaults[_page_key(exe_name, title)] = language_name
+        key = _page_key(exe_name, title)
+        history = _history_of(page_learned_defaults.get(key))
+        history.append(language_name)
+        page_learned_defaults[key] = {"history": history[-TRUST_HISTORY_LENGTH:]}
         with open(PAGE_LEARNED_DEFAULTS_FILE, "w", encoding="utf-8") as f:
             json.dump(page_learned_defaults, f, ensure_ascii=False, indent=2)
 
@@ -299,12 +305,77 @@ def _is_onscreen(rect):
             and rect.bottom > SCREEN_TOP and rect.top < SCREEN_BOTTOM)
 
 
+# Real finding: hand-naming specific apps as "too coarse to trust" (a browser
+# hosting wildly different pages, e.g.) or "title can't identify the real
+# page" (WhatsApp, Zoom, ...) is itself a hand-authored assumption — it won't
+# generalize to an app nobody's named yet, or to this code running on a
+# different computer with different apps installed. Replaced with a mechanism
+# that measures trustworthiness from CKILS's own observed history for that
+# exact key (app-level or page-level) — no app name anywhere in this file.
+#
+# TRUST_HISTORY_LENGTH: how many of the most recent confident decisions (Tier
+# 3 reads AND manual overrides — see on_focus_change) are kept per key.
+# TRUST_MIN_SAMPLES: fewer than this many observations isn't enough evidence
+# either way — same as "no default yet" today.
+# TRUST_AGREEMENT_THRESHOLD: the smallest round fraction that means "near-
+# unanimous" (7/8, 4/5) rather than a bare majority, so one stray wrong
+# reading can't flip a key that's otherwise been consistent.
+#
+# Checked against the user's real accumulated page_learned_defaults.json:
+# most keys have only ever been decided once, so requiring 3 before trusting
+# doesn't regress a typical single-visit app once it's had a couple more
+# confident reads — and a key that's genuinely inconsistent (a browser's
+# whole-app guess, WhatsApp/Zoom's one shared title) naturally never clears
+# 80% agreement, so it's excluded automatically, with nothing hand-named.
+TRUST_HISTORY_LENGTH = 8
+TRUST_MIN_SAMPLES = 3
+TRUST_AGREEMENT_THRESHOLD = 0.8
+
+
+def _history_of(value):
+    # Back-compat: every key in the user's real, already-accumulated JSON
+    # files today is a bare string ("chrome.exe": "hebrew") — the single most
+    # recent decision, no history. Treating that as a 1-length history means
+    # it starts below TRUST_MIN_SAMPLES (not yet trusted) rather than being
+    # instantly re-trusted from a possibly-already-wrong single old value —
+    # deliberate: the point of this change is to stop trusting exactly the
+    # kind of contaminated single guesses this session found (WhatsApp,
+    # Zoom, chrome.exe's coarse default), not to preserve them.
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        return list(value.get("history", []))
+    return [value]
+
+
+def _trust(history):
+    if len(history) < TRUST_MIN_SAMPLES:
+        return None
+    hebrew_count = history.count("hebrew")
+    english_count = history.count("english")
+    majority_count = max(hebrew_count, english_count)
+    if majority_count / len(history) >= TRUST_AGREEMENT_THRESHOLD:
+        return "hebrew" if hebrew_count > english_count else "english"
+    return None
+
+
 # Real finding: Chrome's own PDF viewer exposes a generic status message
 # through the control's Name - "מסמך ה-PDF מכיל N דפים" ("This PDF document
 # contains N pages") - completely unrelated to the actual PDF's content, but
 # long enough and Hebrew enough to fool the accessible-text shortcut into
 # classifying EVERY PDF as Hebrew regardless of what's actually in it.
 GENERIC_ACCESSIBLE_TEXT_MARKERS = ["מכיל", "דפים"]
+
+# Real finding: WhatsApp's own empty-compose-box placeholder — "Type a message"
+# with or without a trailing "to <contact name>" — is always in English
+# regardless of what language the actual conversation is in, but reached the
+# classifier as if it were real content, confidently and wrongly forcing
+# English on Hebrew conversations every time the box was empty. Same category
+# as the PDF-viewer boilerplate above: UI chrome, not something a person
+# actually typed. Zoom's own product-branding text ("zoom. Workplace ...")
+# read the same way, every single call, real content or not — same fix.
+PLACEHOLDER_TEXT_PREFIXES = ["Type a message"]
+UI_CHROME_MARKERS = ["Workplace"]
 
 # Real finding: clicking Gemini's "New chat" button (שיחה חדשה) briefly put
 # focus on the BUTTON itself, whose Name was "New chat" plus its keyboard-
@@ -325,6 +396,8 @@ def _looks_like_real_content(accessible_text, title):
     if all(marker in accessible_text for marker in GENERIC_ACCESSIBLE_TEXT_MARKERS):
         return False
     if SHORTCUT_HINT_PATTERN.search(accessible_text):
+        return False
+    if any(accessible_text.startswith(prefix) for prefix in PLACEHOLDER_TEXT_PREFIXES):
         return False
     return True
 
@@ -350,24 +423,43 @@ def _google_docs_title_text(title):
     return doc_title
 
 
-def decide_with_content(fallback_hkl, title, exe_name, thread_id):
+def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     """
     Falls back to fallback_hkl (Tier 1/2's answer, possibly None) on an empty
     field, low model confidence, or any failure in this layer — Tier 1/2 stays
     the proven base (Week 4: "Go with Conditions"), this only adds to it.
     """
+    # Real bug found live: this runs in a background thread that can be delayed
+    # (Tesseract alone takes 500ms+, on top of thread-scheduling lag) — by the
+    # time GetFocusedControl() below actually runs, the user may have alt-tabbed
+    # away from hwnd and back to a DIFFERENT window. GetFocusedControl() reads
+    # whatever is focused RIGHT NOW, with no idea it's supposed to be reading for
+    # hwnd specifically, so it can silently read a completely unrelated window's
+    # content. The existing checks in apply_content_correction() only catch this
+    # if hwnd is no longer foreground by the time the decision is APPLIED — if
+    # the user flickers back to hwnd before then, those checks pass even though
+    # the content read was for a different window entirely. Checking here, right
+    # before the read, closes that gap at the source.
+    if win32gui.GetForegroundWindow() != hwnd:
+        if DEBUG:
+            print("  [content] skipped, focus moved before content could be read")
+        return fallback_hkl, None
+
     try:
         control = auto.GetFocusedControl()
         rect = control.BoundingRectangle
     except Exception as e:
         if DEBUG:
             print(f"  [content] skipped ({e})")
-        return fallback_hkl
+        return fallback_hkl, None
 
+    screenshot_rect = None
     accessible_text = (control.Name or "").strip()
     if _looks_like_real_content(accessible_text, title):
         text = accessible_text
         source = "accessible_text"
+        if _is_onscreen(rect):
+            screenshot_rect = (rect.left, rect.top, rect.right, rect.bottom)
         if DEBUG:
             print(f"  [content] read from accessible text, no OCR needed: {text[:60]!r}")
     elif not _is_onscreen(rect):
@@ -380,22 +472,42 @@ def decide_with_content(fallback_hkl, title, exe_name, thread_id):
         else:
             if DEBUG:
                 print(f"  [content] control rect is off-screen ({rect.left},{rect.top}) — skipping OCR")
-            return fallback_hkl
+            return fallback_hkl, None
     else:
         try:
             right = min(rect.right, rect.left + MAX_OCR_WIDTH)
             bottom = min(rect.bottom, rect.top + MAX_OCR_HEIGHT)
             text = read_region(rect.left, rect.top, right, bottom)
             source = "ocr"
+            screenshot_rect = (rect.left, rect.top, right, bottom)
         except Exception as e:
             if DEBUG:
                 print(f"  [content] skipped ({e})")
-            return fallback_hkl
+            return fallback_hkl, None
 
     if not text.strip():
         if DEBUG:
             print("  [content] empty field, nothing to read")
-        return fallback_hkl
+        return fallback_hkl, None
+
+    # Real finding: Zoom's own product-branding text ("zoom. Workplace ...")
+    # came through OCR, not accessible text, so _looks_like_real_content()
+    # above (which only guards the accessible-text path) never saw it — it
+    # reached the classifier as if it were real meeting content every single
+    # call. Same gap, confirmed again for WhatsApp's "Type a message"
+    # placeholder: when accessible text is (correctly) rejected as that
+    # placeholder, this falls through to OCR of the exact same on-screen
+    # region — which just reads that same visible placeholder text again,
+    # completely bypassing the accessible-text-only check. Both checks must
+    # apply to whatever text was FINALLY selected, regardless of source.
+    if any(marker in text for marker in UI_CHROME_MARKERS):
+        if DEBUG:
+            print(f"  [content] rejected as app UI chrome, not real content: {text[:60]!r}")
+        return fallback_hkl, None
+    if any(text.startswith(prefix) for prefix in PLACEHOLDER_TEXT_PREFIXES):
+        if DEBUG:
+            print(f"  [content] rejected as an empty-field placeholder, not real content: {text[:60]!r}")
+        return fallback_hkl, None
 
     try:
         label, proba = predict_language(text)
@@ -404,7 +516,7 @@ def decide_with_content(fallback_hkl, title, exe_name, thread_id):
         # already found and fixed) falls back gracefully here now, same as OCR.
         if DEBUG:
             print(f"  [content] skipped ({e})")
-        return fallback_hkl
+        return fallback_hkl, None
     confidence = proba[label]
     if DEBUG:
         print(f"  [content] read {text[:60]!r} -> {label} ({confidence:.2f} confidence)")
@@ -417,9 +529,20 @@ def decide_with_content(fallback_hkl, title, exe_name, thread_id):
     if not applied:
         if DEBUG:
             print(f"  [content] confidence below {CONTENT_CONFIDENCE_THRESHOLD} threshold, keeping the current default")
-        return fallback_hkl
+        return fallback_hkl, None
 
-    return LANGUAGE_TO_HKL[label]
+    # Full "why" for decision_logger — everything that went into this call,
+    # not just the resulting hkl, so a bad decision can be inspected later
+    # from the log instead of needing to be caught live in DEBUG output.
+    reason = {
+        "mechanism": "tier3_content",
+        "source": source,
+        "text": text,
+        "predicted_label": label,
+        "confidence": confidence,
+        "screenshot_rect": screenshot_rect,
+    }
+    return LANGUAGE_TO_HKL[label], reason
 
 previous_thread = None   # whichever thread window was focused just before the current event
 
@@ -444,6 +567,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             overridden.discard(previous_thread)
             last_set.pop(previous_thread, None)
         content_decision.pop(previous_thread, None)  # fresh window = learned default first, again
+        decision_logger.forget_thread(previous_thread)
     previous_thread = thread_id
 
     try:
@@ -470,10 +594,13 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
 
     # Layered fallback, most specific first: this visit's own decision (if Tier 3
     # already confidently decided this exact window) -> this exact page's learned
-    # history (seen this app+title combination decide confidently before) ->
-    # this app's general learned history -> nothing.
-    page_hkl = LANGUAGE_NAME_TO_HKL.get(page_learned_defaults.get(_page_key(exe_name, title)))
-    app_hkl = LANGUAGE_NAME_TO_HKL.get(learned_defaults.get(exe_name))
+    # history, IF it's actually trustworthy (see _trust above) -> this app's
+    # general learned history, IF that's trustworthy -> nothing. No app name is
+    # checked anywhere here — a coarse or contradictory history (a browser's
+    # whole-app guess, WhatsApp/Zoom's one shared title) simply never earns
+    # trust, automatically, for any app with that shape.
+    page_hkl = LANGUAGE_NAME_TO_HKL.get(_trust(_history_of(page_learned_defaults.get(_page_key(exe_name, title)))))
+    app_hkl = LANGUAGE_NAME_TO_HKL.get(_trust(_history_of(learned_defaults.get(exe_name))))
     default_hkl = page_hkl if page_hkl is not None else app_hkl
     target_hkl = content_decision.get(thread_id, default_hkl)
 
@@ -487,14 +614,52 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             overridden.add(thread_id)
             last_set[thread_id] = actual_hkl  # treat the user's manual choice as the new "last known" state
             log_override(exe_name, title, thread_id, actual_hkl)  # real, free evidence a recent decision was wrong
+            # A manual override is the user telling CKILS, with certainty, what
+            # this app/page should be — feed it into the same trust history a
+            # confident Tier 3 decision uses, so this stops being a one-time
+            # log entry only a monthly human review ever sees. One override is
+            # still just one data point under the same TRUST_MIN_SAMPLES/
+            # TRUST_AGREEMENT_THRESHOLD rule as everything else, so it can't
+            # single-handedly overwrite an otherwise well-established default.
+            override_language = HKL_TO_LANGUAGE_NAME.get(actual_hkl)
+            if override_language is not None:
+                save_learned_default(exe_name, override_language)
+                save_page_learned_default(exe_name, title, override_language)
+            decision_logger.log_manual_override(exe_name, title, thread_id, override_language)
             print(f"{exe_name}: manual override detected, leaving it alone")
         else:
             # This is the fast path — unchanged from Weeks 2-4, still sub-millisecond.
             # Tier 3 (below) never blocks this; it only corrects it afterward if needed.
+            previous_hkl_for_thread = last_set.get(thread_id)
             start = time.perf_counter()
             win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
             elapsed_ms = (time.perf_counter() - start) * 1000
             print(f'{exe_name}: switched to {hex(target_hkl)} in {elapsed_ms:.1f} ms')
+            if previous_hkl_for_thread != target_hkl:
+                if thread_id in content_decision:
+                    fast_source = "sticky_content_decision"
+                elif page_hkl is not None:
+                    fast_source = "page_learned_default"
+                elif app_hkl is not None:
+                    fast_source = "app_learned_default"
+                else:
+                    fast_source = "unknown"
+                try:
+                    screenshot_rect = win32gui.GetWindowRect(hwnd)
+                except Exception:
+                    screenshot_rect = None
+                decision_logger.log_auto_change(
+                    exe_name, title, thread_id,
+                    HKL_TO_LANGUAGE_NAME.get(previous_hkl_for_thread),
+                    HKL_TO_LANGUAGE_NAME.get(target_hkl),
+                    {
+                        "mechanism": "fast_path",
+                        "source": fast_source,
+                        "page_history": _history_of(page_learned_defaults.get(_page_key(exe_name, title))),
+                        "app_history": _history_of(learned_defaults.get(exe_name)),
+                        "screenshot_rect": screenshot_rect,
+                    },
+                )
             last_set[thread_id] = target_hkl
             last_switch_time[thread_id] = time.time()
 
@@ -534,7 +699,7 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         auto.InitializeUIAutomationInCurrentThread()
 
         start = time.perf_counter()
-        corrected_hkl = decide_with_content(fallback_hkl, title, exe_name, thread_id)
+        corrected_hkl, reason = decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         if corrected_hkl == fallback_hkl or corrected_hkl is None:
@@ -564,11 +729,62 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         last_switch_time[thread_id] = time.time()
         content_decision[thread_id] = corrected_hkl  # sticks for the rest of this visit
         language_name = HKL_TO_LANGUAGE_NAME[corrected_hkl]
+        decision_logger.log_auto_change(
+            exe_name, title, thread_id,
+            HKL_TO_LANGUAGE_NAME.get(fallback_hkl), language_name,
+            reason or {},
+        )
+        # Always record this confident decision into both histories — even for
+        # a key whose history is currently inconsistent (a browser's whole-app
+        # guess, WhatsApp/Zoom's one shared title). Recording every observation
+        # is exactly how _trust() can tell a consistent key from an inconsistent
+        # one; skipping the write for "unreliable" keys would mean nothing ever
+        # measures whether they've become reliable (or stayed unreliable). What
+        # changes is only whether a later READ trusts this key (see _trust
+        # above and its use in on_focus_change) — never whether it gets written.
         save_learned_default(exe_name, language_name)  # this app in general
         save_page_learned_default(exe_name, title, language_name)  # this exact page — both genuinely AI-learned
         print(f"{exe_name}: content-aware correction to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
     finally:
         content_check_in_progress.discard(check_key)
+
+# Real gap: switching conversations inside some chat apps (confirmed:
+# WhatsApp Web/Business) fires no Windows focus/title event at all — the
+# window never loses focus and its title never changes — so on_focus_change
+# would never even get a chance to re-check. There's no reliable way to name
+# in advance which apps have this gap (that was the hand-written-list problem
+# this session removed), so this polls the CURRENTLY FOCUSED window
+# unconditionally, on a plain timer — no app name, no trust check. A normal
+# single-purpose app (Notepad, an editor) just gets one redundant, cheap,
+# deduped-against-in-flight-checks Tier 3 read every interval; an app with
+# this exact gap gets the re-check it would otherwise never receive.
+UNTRUSTED_POLL_SECONDS = 3.0
+
+
+def _poll_focused_window():
+    while True:
+        time.sleep(UNTRUSTED_POLL_SECONDS)
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            title = win32gui.GetWindowText(hwnd)
+            thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+            exe_name = psutil.Process(pid).name()
+        except Exception:
+            continue  # window vanished or info unavailable between calls — just skip this tick
+
+        check_key = (thread_id, title)
+        if check_key in content_check_in_progress:
+            continue  # a check for this same title (from an event or a previous tick) is already in flight
+        content_check_in_progress.add(check_key)
+        threading.Thread(
+            target=apply_content_correction,
+            args=(hwnd, thread_id, exe_name, last_set.get(thread_id), title),
+            daemon=True
+        ).start()
+
+
+threading.Thread(target=_poll_focused_window, daemon=True).start()
+decision_logger.start_background_pruning()
 
 callback = WinEventProcType(on_focus_change)
 hook = user32.SetWinEventHook(
