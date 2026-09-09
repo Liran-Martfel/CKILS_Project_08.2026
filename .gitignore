@@ -14,6 +14,10 @@ ckils/week2/ckils_decisions.db
 # Screenshot saved by diagnose_focus.py - can contain whatever was on screen
 ckils/week2/diagnose_focus.png
 
+# Per-machine decision log + screenshots the program builds itself (real
+# content crops of whatever was on screen at each auto-decision/override)
+ckils/week2/logs/
+
 # PyInstaller build output - rebuild with the command in PROJECT_JOURNEY.md
 ckils/week2/build/
 ckils/week2/dist/

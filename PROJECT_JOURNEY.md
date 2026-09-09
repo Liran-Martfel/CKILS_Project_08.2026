@@ -1487,6 +1487,217 @@ so low confidence there is correct behavior, not a remaining gap.
 
 ---
 
+## 2026-09-06 — Real race condition found: Tier 3 could read a completely different window's content
+
+**Via Claude Code, working from a pasted debug log.** User reported CKILS suddenly "not knowing how
+to handle things it always did" — investigated from the actual console output rather than guessed.
+Found a concrete, damning line: while focus was on a Chrome/Gemini tab, the logged content read was
+`'Ps) project Segment Studio\n\nProject v'` — garbled OCR of **PyCharm's own project-tree panel**,
+not anything from Chrome. Chrome still got forced to English from it.
+
+**Root cause:** `decide_with_content()` runs in a background thread that can lag well behind the
+focus event that spawned it (Tesseract alone costs 500ms+, on top of thread-scheduling delay). It
+calls `auto.GetFocusedControl()` with no idea which window it's supposed to be reading for — if the
+user alt-tabs away and back to the original window before the thread actually runs, it silently
+reads whatever's focused *at that moment*, which can be a totally different app. The existing
+safety checks in `apply_content_correction()` only run **after** the read, at apply-time — if focus
+has flickered back to the right window by then, those checks pass even though the content itself
+came from somewhere else. This is exactly the kind of bug that gets *more* likely the faster someone
+switches windows, matching this user's own rapid PyCharm↔Chrome debugging workflow shown in the log.
+
+**Fix:** `decide_with_content()` now takes `hwnd` and checks `win32gui.GetForegroundWindow() == hwnd`
+immediately, before calling `GetFocusedControl()` at all — closing the gap at the source instead of
+only catching it after the fact. Verified with a mocked test (not live Win32, to keep it fast and
+repeatable): confirms `GetFocusedControl()` is never even called when focus has moved, and behaves
+identically to before when it hasn't.
+
+---
+
+## 2026-09-06/08 — Real finding: the self-learned memory itself becomes wrong once enough history piles up
+
+**Symptom, from real use:** wrong language switches in specific apps — a brand-new Gemini chat
+instantly forced to Hebrew, WhatsApp conversations getting the wrong language regardless of their
+actual content, Zoom always defaulting to English even in all-Hebrew calls. Confirmed via git log
+that no code had changed in the 3 days before this showed up — ruling out a regression from an edit
+and pointing at the learned *data* itself, not the code, as the actual driver.
+
+**Root cause #1 — coarse per-app memory misapplied to brand-new pages (Gemini).** Confirmed directly
+from `learned_defaults.json`: `"chrome.exe": "hebrew"` — a single, whole-app instant guess built
+from *all* past Chrome browsing. A brand-new page CKILS has never seen inherits that guess
+**instantly**, before Tier 3 gets a chance to read real content, and Tier 3 often can't correct it
+if the field is empty at that moment. Chrome (and other multi-site browsers) hosting arbitrarily
+different pages in different languages makes this one whole-app guess fundamentally unreliable for
+any page it hasn't specifically seen before.
+
+**Root cause #2 — some apps' titles can't identify what's actually on screen (WhatsApp, Zoom).**
+Confirmed directly from `page_learned_defaults.json`: WhatsApp Web's tab title never changes between
+conversations (`"WhatsApp Web - Google Chrome"`, same title whether the chat is Hebrew or English),
+and Zoom's window title is always exactly `"Zoom Meeting"` for every single call. Stored memory keyed
+by title therefore can't tell conversations/calls apart at all — a decision made in one conversation
+silently leaks into every other one sharing that same generic title, in both directions. Worse,
+switching WhatsApp conversations by clicking the sidebar fires **no Windows focus/title event at
+all**, so nothing would even re-check without an explicit poll.
+
+**Root cause #3 — generic UI chrome misread as real content.** Real strings confirmed from the
+console log: WhatsApp's empty-compose-box placeholder (`"Type a message"`, with or without a
+trailing "to <contact>") and Zoom's own product-branding text (`"zoom. Workplace ..."`) both reached
+the classifier as if they were real conversation/meeting content — always in English regardless of
+the actual conversation's language, so they confidently forced the wrong switch every time. A first
+pass only filtered these on the accessible-text path; testing showed the exact same strings slipping
+through **OCR of the same on-screen region** once accessible text was correctly rejected — the
+filter had to move to apply to whichever text was *finally* selected, regardless of source, to
+actually close the gap.
+
+**Fixes, all in `ckils/week2/rule_engine.py` (not yet committed to git):**
+- `BROWSER_EXE_NAMES` — for browsers, the coarse whole-app memory is never used as an instant guess;
+  only the precise per-page memory (an exact title seen before) is trusted. A genuinely new page
+  waits the ~1s for Tier 3 instead of guessing wrong instantly.
+- `UNSTABLE_TITLE_MARKERS` (`"WhatsApp"` — covers both Web and Business — `"Zoom Meeting"`, plus
+  Telegram/Discord web as untested-but-same-shaped cases) — for apps whose title can't identify the
+  real page, stored memory (both app- and page-level) is never trusted or written to; every decision
+  is made fresh from live content. A new background thread (`_poll_unstable_title_windows`, every 2s)
+  re-checks these while they stay focused, since switching conversations inside them fires no event.
+- `UI_CHROME_MARKERS` (`"Workplace"`) and `PLACEHOLDER_TEXT_PREFIXES` (`"Type a message"`) — both
+  now checked once, on the final selected text regardless of source (accessible text, OCR, or the
+  Google Docs title fallback), closing the OCR-bypass gap found during this fix.
+
+**Verified with mocked unit tests** (new pattern for this project — previously verification was
+always live/manual) covering: the focus-race guard, browser app-default suppression, unstable-title
+caching suppression, both WhatsApp title variants, the bare vs. contact-suffixed placeholder text,
+and the Zoom branding text arriving via OCR specifically. Each rebuild was smoke-tested live by the
+user afterward, which is how root causes #2 and #3 (WhatsApp Business's different title, the OCR
+bypass) were actually caught — the mocked tests only cover what's already been identified, not a
+substitute for real use.
+
+**Note on process:** partway through this session the user asked for a standing rule — never change
+or delete their existing work without describing the change and asking first. Applied from that
+point on: every fix above was explained and approved before being written, and rebuilds only
+happened after closing the user's own confirmation to close the running `CKILS.exe` first.
+
+---
+
+## 2026-09-08 — Removed both hand-written app lists; trust is now self-measured, and manual overrides teach CKILS directly
+
+**Planned via Claude Code's plan mode, reviewed and approved before any code was written** (see
+`C:\Users\liran\.claude\plans\compressed-imagining-glacier.md`). The user pushed back on the
+`BROWSER_EXE_NAMES`/`UNSTABLE_TITLE_MARKERS` fix from two days ago as still being a hand-authored
+rule ("if you tell the model what to trust, how can it thrive on a computer outside your reach?") —
+correct: naming specific apps in code doesn't generalize to an app nobody's named yet, or to this
+code running on a different machine. Also requested a genuinely new capability: when the user
+manually corrects the keyboard language, CKILS should learn from that moment directly, not just log
+it for the existing monthly human-review pass.
+
+**What changed, all in `rule_engine.py`:**
+- `learned_defaults`/`page_learned_defaults` now store a short rolling history (last 8 decisions) per
+  key instead of just the single most-recent one. Two new pure helpers: `_history_of(value)`
+  (normalizes either the new `{"history": [...]}` shape or a legacy bare string — today's real data —
+  into a list) and `_trust(history)` (returns the majority language only if there are ≥3 samples and
+  one language is ≥80% of them; otherwise `None`, same as "no default yet").
+- `BROWSER_EXE_NAMES`, `UNSTABLE_TITLE_MARKERS`, and `_is_unstable_title` are gone entirely. Every
+  place that used to check them now just calls `_trust(_history_of(...))` on the raw stored value —
+  no app name anywhere. A browser's whole-app key naturally stays inconsistent (many different-
+  language pages) and never earns trust; WhatsApp/Zoom's one shared generic-title key naturally stays
+  inconsistent (different conversations/calls) and never earns trust — both automatically, for any
+  app with that shape, including ones not yet encountered.
+- **Deliberate migration choice:** a legacy bare-string value normalizes to a 1-length history, which
+  is below the 3-sample minimum — meaning every existing key, including already-known-bad ones
+  (WhatsApp's and Zoom's contaminated single guess, `chrome.exe`'s coarse Hebrew guess), resets to
+  "not yet trusted" rather than being seeded as instantly-trusted. The alternative (seed 3 copies of
+  the existing value) was considered and rejected — it would have kept exactly the contaminated
+  entries this whole session has been fixing trusted from the first run. The honest cost: previously-
+  reliable apps (`Code.exe`, Notepad) briefly stop getting an instant guess post-upgrade until they
+  re-earn it over a few real visits.
+- Manual-override learning: in `on_focus_change`'s existing override-detection branch, the language
+  the user just switched *to* now gets appended to both the app-level and page-level history via the
+  same save functions Tier 3 already uses — one more data point under the same 3-sample/80% rule, so
+  a single override can't instantly overwrite an otherwise well-established trusted history, but a
+  consistent pattern of overrides will eventually earn trust on its own.
+- `apply_content_correction`'s caching branch now **always** appends to history on every confident
+  Tier-3 decision, even for a currently-inconsistent key — recording every observation is exactly how
+  `_trust()` can tell a key has become (or stayed) unreliable; only whether a later *read* trusts a
+  key changed, never whether a decision gets recorded.
+- **Real design gap caught before shipping, not after:** the original plan had the periodic poll
+  thread (needed because switching WhatsApp conversations fires no Windows event at all) gated on
+  "is this key currently untrusted." Caught during implementation review that this conflates two
+  unrelated things — trust (should I use stored memory as an instant guess) and event-completeness
+  (does this app tell me when its content changed at all) — and gating polling on trust would both
+  poll every ordinary app unnecessarily until it earns trust, and stop polling a chat app at exactly
+  the moment it falsely earns trust, compounding the problem instead of catching it. Fixed before
+  building: the poll thread (`_poll_focused_window`, renamed from `_poll_unstable_title_windows`) now
+  polls whatever window is currently focused unconditionally, every 3 seconds, with no trust check and
+  no app name — deduped against in-flight event-triggered checks via the existing
+  `content_check_in_progress` set, so it costs at most one extra background Tier-3 read per interval.
+- **Trade-off surfaced and confirmed with the user directly, not assumed:** the new mechanism is
+  probabilistic, not absolute — unlike the old hard-coded list's unconditional "never trust WhatsApp,
+  ever" guarantee, a long enough run of same-language conversations could theoretically push a
+  WhatsApp-shaped key over the trust threshold before a differing one drags it back down. Presented
+  this trade-off directly (keep both mechanisms vs. remove the lists fully) — user chose full removal.
+
+**Verified with new mocked unit tests** before rebuilding: `_trust`/`_history_of` boundary cases;
+trust computed correctly for a fabricated, never-named fake app (proving the mechanism, not a name
+check, is what withholds trust); a manual-override test confirming history gets appended to both
+app-level and page-level keys and that one override downgrades rather than instantly flips an
+established trusted history (3/3 English + 1 override Hebrew = 75%, below the 80% threshold — no
+longer trusted either way, correctly conservative). Rebuilt and smoke-tested; live re-testing (does
+WhatsApp/Zoom actually stop misfiring, does Code.exe/Notepad re-earn instant guesses within a few
+visits) is next.
+
+**Not yet done (per the same plan):** Phase 2 (an experimental attempt at real Google Docs body text,
+via OCR-ing the window's own client rectangle instead of the focused control's broken one) and Phase
+3 (triage of the still-open WhatsApp/VS Code reports, deferred until this mechanism has been live-
+tested).
+
+---
+
+## 2026-09-09 — Live re-test failed (WhatsApp/Zoom still picked the wrong language); added a persistent decision log so this stops being diagnosed from a closing console window
+
+**Live re-test result:** the trust-history mechanism from 2026-09-08 did not fix the reported case —
+WhatsApp and Zoom still picked the wrong language from actual conversation/call content, even though
+the window title alone would have implied the right one. Root cause not yet identified: the only
+evidence available was the `DEBUG` console output, which is gone the moment the app's window closes
+(which is literally what happened here — the app closed for an update mid-session and took the only
+record of what it had been doing with it).
+
+**The actual gap this exposed:** `log_decision`/`log_override` (2026-09-03) already write every
+content-layer decision to `ckils_decisions.db`, but that table has no picture of what was actually on
+screen at the time, and nothing distinguishes an entry that changed the active language from one that
+didn't — reconstructing "why did it pick Hebrew here" still meant re-reading DEBUG scrollback that may
+already be gone.
+
+**What was added, all new: `decision_logger.py`, wired into `rule_engine.py`:**
+- A persistent, human-readable log (`logs/decisions.jsonl`, one JSON object per line) written
+  whenever the active language actually **changes** — not on every focus event or every Tier 3 check,
+  same restraint as the existing decisions DB, just keyed to real changes instead of every attempt.
+- Two entry types: `log_auto_change(...)`, called from both `on_focus_change`'s fast-path switch and
+  `apply_content_correction`'s Tier 3 correction, records the full "why" (which mechanism decided;
+  for Tier 3 — the source, exact text read, predicted label, confidence; for the fast path — which
+  learned-default layer was used and its trust history) plus a screenshot. `log_manual_override(...)`
+  deliberately does **not** duplicate that detail for the manual act itself — it just attaches the
+  most recent `log_auto_change` entry for that window (kept in memory per thread_id, cleared when
+  focus genuinely leaves via the same spot `content_decision` already resets), so a correction reads
+  as "here's what CKILS decided, and why, right before you fixed it."
+- **Screenshot scope, decided with the user directly:** cropped to the actual region read (the OCR/
+  accessible-text control's bounding rect for Tier 3, the window rect for a fast-path switch) rather
+  than the full screen — smaller files, no added latency, and avoids capturing unrelated on-screen
+  content (another app, someone else's video during a Zoom call) that has nothing to do with the
+  decision being logged.
+- **Retention, also decided with the user directly:** 60 days rolling. A background thread prunes the
+  JSONL file and deletes now-unreferenced screenshots every 6 hours, plus once at startup — bounds
+  disk usage without the user needing to manage it manually.
+- `logs/` added to `.gitignore` — same reasoning as the existing `learned_defaults.json`/decisions-DB
+  exclusion, but more so: these screenshots are real crops of whatever was actually on screen.
+
+**Verified directly:** wrote isolated smoke tests (redirecting the module's own path constants to a
+temp directory, not the real log) confirming `log_auto_change` → `log_manual_override` produces both
+entries correctly linked, Hebrew text round-trips through the JSON file intact (a terminal print of it
+looked mangled — confirmed that was only the Windows console's own encoding, not the file, by reading
+the raw file bytes back and asserting the Hebrew substring is present), and `prune_old_logs` correctly
+keeps/deletes matching entries and screenshots. Not yet verified against the real live bug — that's
+next: reproduce the WhatsApp/Zoom misfire again and read the resulting log entry instead of guessing
+from memory what the console said.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
@@ -1526,6 +1737,34 @@ yet. A genuine safety net, not a replacement for the existing tiers.
   layer — likely a 4th, independent tier that can fire regardless of what the other three decided.
 
 **Status:** written down only. Not scheduled, not designed, not started.
+
+---
+
+**2026-09-08 — A real page-identity signal for title-less chat apps (WhatsApp, Zoom, ...)**
+
+The `UNSTABLE_TITLE_MARKERS` fix (see 2026-09-06/08 above) is an honest patch, not a real solution:
+it stops these apps from *learning the wrong thing*, but it also means they can never benefit from
+the self-learned instant-guess at all — every single visit waits for a fresh Tier 3 read, forever,
+because their window title can never identify what's actually on screen. A hand-maintained list of
+app names is also, structurally, the same kind of hand-authored assumption the whole learned-defaults
+architecture was built to get away from (see the 2026-09-03 RULES-removal entries) — it's about
+*trust in stored memory*, not *the language itself*, but it's still something a person had to notice
+and name, one app at a time.
+
+**The idea:** find a real, per-conversation identity signal for these apps that doesn't depend on
+the window title — e.g. UI Automation reading the open contact/channel name as its own element
+(separate from the title bar), so `page_learned_defaults` could key on "WhatsApp + Ron Katz"
+instead of "WhatsApp + (whatever the tab title happens to say)." That would let these apps get the
+same fast, self-taught instant guess every other app gets, instead of being permanently exempted
+from it.
+
+**Open questions:** whether WhatsApp Web/Business and Zoom expose a stable, reliable UI Automation
+element for "which conversation/call is this" at all (not yet checked); whether such an element
+would itself be reliable across the apps' own updates; whether this is worth the fragility of
+depending on another app's internal UI structure versus just accepting the "always decide fresh"
+cost for this specific category of app.
+
+**Status:** written down only. Not designed, not started.
 
 ---
 
