@@ -402,6 +402,47 @@ def _looks_like_real_content(accessible_text, title):
     return True
 
 
+# Real finding, confirmed live with diagnose_zoom_tree.py: for Zoom's chat panel
+# (both the popped-out "Meeting chat" window and the docked panel inside the main
+# "Zoom Meeting" call window), GetFocusedControl() lands on a short header pane
+# (~66px tall, holding only the session/recording title text) that sits as a
+# SIBLING right above the real chat body — a much taller pane (~925px) that Zoom
+# draws as pixels with no accessible Name of its own, meaning it can only ever be
+# read via OCR. The old top-anchored crop was reading the correct control just
+# fine — it was simply the wrong control. Structural, not app-named: this pattern
+# (a short header sibling next to a much taller content sibling) can occur in any
+# app; nothing here checks exe_name or title.
+HEADER_LIKE_MAX_HEIGHT = 90
+LARGE_SIBLING_MIN_HEIGHT = 300
+
+
+def _find_larger_sibling_rect(control):
+    try:
+        parent = control.GetParentControl()
+        if parent is None:
+            return None
+        my_rect = control.BoundingRectangle
+        best = None
+        sibling = parent.GetFirstChildControl()
+        while sibling is not None:
+            try:
+                srect = sibling.BoundingRectangle
+                # Only a sibling clearly BELOW this one (not overlapping/above it)
+                # counts as "the body under this header" — a small vertical
+                # tolerance for adjacent panes that touch exactly at the border.
+                if (srect.height() >= LARGE_SIBLING_MIN_HEIGHT
+                        and srect.top >= my_rect.bottom - 5
+                        and _is_onscreen(srect)
+                        and (best is None or srect.height() > best.height())):
+                    best = srect
+            except Exception:
+                pass
+            sibling = sibling.GetNextSiblingControl()
+        return best
+    except Exception:
+        return None
+
+
 # Real finding, confirmed directly with diagnose_textpattern.py on real documents
 # with real content: Google Docs does not expose its actual body text through
 # ANY UI Automation mechanism — not the bounding rectangle (document-scroll
@@ -453,6 +494,13 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
             print(f"  [content] skipped ({e})")
         return fallback_hkl, None
 
+    # Diagnostic, not behavior: the raw, UNCAPPED control rect of whatever was
+    # actually focused (unlike screenshot_rect below, which reflects the final
+    # region actually read, possibly redirected to a sibling — see
+    # _find_larger_sibling_rect) — kept so a logged decision shows the real
+    # height/width CKILS started from, useful for spotting this exact
+    # short-header-control shape in some future app.
+    full_control_rect = (rect.left, rect.top, rect.right, rect.bottom)
     screenshot_rect = None
     accessible_text = (control.Name or "").strip()
     if _looks_like_real_content(accessible_text, title):
@@ -474,12 +522,20 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
                 print(f"  [content] control rect is off-screen ({rect.left},{rect.top}) — skipping OCR")
             return fallback_hkl, None
     else:
+        ocr_rect = rect
+        source = "ocr"
+        if rect.height() < HEADER_LIKE_MAX_HEIGHT:
+            sibling_rect = _find_larger_sibling_rect(control)
+            if sibling_rect is not None:
+                ocr_rect = sibling_rect
+                source = "ocr_sibling"
+                if DEBUG:
+                    print(f"  [content] focused control looks like a thin header ({rect.height()}px) — reading its larger sibling pane instead")
         try:
-            right = min(rect.right, rect.left + MAX_OCR_WIDTH)
-            bottom = min(rect.bottom, rect.top + MAX_OCR_HEIGHT)
-            text = read_region(rect.left, rect.top, right, bottom)
-            source = "ocr"
-            screenshot_rect = (rect.left, rect.top, right, bottom)
+            right = min(ocr_rect.right, ocr_rect.left + MAX_OCR_WIDTH)
+            bottom = min(ocr_rect.bottom, ocr_rect.top + MAX_OCR_HEIGHT)
+            text = read_region(ocr_rect.left, ocr_rect.top, right, bottom)
+            screenshot_rect = (ocr_rect.left, ocr_rect.top, right, bottom)
         except Exception as e:
             if DEBUG:
                 print(f"  [content] skipped ({e})")
@@ -540,6 +596,8 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
         "text": text,
         "predicted_label": label,
         "confidence": confidence,
+        "control_rect": full_control_rect,
+        "control_size": (full_control_rect[2] - full_control_rect[0], full_control_rect[3] - full_control_rect[1]),
         "screenshot_rect": screenshot_rect,
     }
     return LANGUAGE_TO_HKL[label], reason
@@ -567,7 +625,15 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             overridden.discard(previous_thread)
             last_set.pop(previous_thread, None)
         content_decision.pop(previous_thread, None)  # fresh window = learned default first, again
-        decision_logger.forget_thread(previous_thread)
+        # Real bug found live: unlike content_decision (a per-visit "sticky"
+        # value that SHOULD reset the moment you leave), decision_logger's
+        # last-auto-decision record is meant to answer "what did CKILS decide
+        # right before this override" even when the override comes after
+        # briefly tabbing away and back — the single most common real pattern
+        # (glance elsewhere, come back, notice it's wrong, correct it). Forgetting
+        # it here made every such override log "preceding_auto": null instead of
+        # the decision that was actually being corrected. Intentionally NOT
+        # cleared on focus-away — same lifetime as last_set, not content_decision.
     previous_thread = thread_id
 
     try:

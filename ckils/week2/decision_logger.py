@@ -115,15 +115,6 @@ def log_manual_override(exe_name, title, thread_id, new_language):
     _append(entry)
 
 
-def forget_thread(thread_id):
-    # Mirrors rule_engine's own content_decision.pop(previous_thread, ...) —
-    # once focus genuinely leaves a window, its last auto-decision shouldn't
-    # keep getting attached to whatever unrelated window happens to reuse
-    # that same thread_id later.
-    with _last_auto_lock:
-        _last_auto_decision.pop(thread_id, None)
-
-
 def prune_old_logs():
     cutoff = datetime.datetime.now() - datetime.timedelta(days=RETENTION_DAYS)
     if not os.path.exists(LOG_FILE):
