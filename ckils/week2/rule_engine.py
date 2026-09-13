@@ -384,6 +384,26 @@ UI_CHROME_MARKERS = ["Workplace"]
 # meaningless confidence. Reject any accessible text carrying a shortcut hint.
 SHORTCUT_HINT_PATTERN = re.compile(r"(Ctrl|Alt|Shift|Cmd)\s*\+\s*(Ctrl|Alt|Shift|Cmd)?", re.IGNORECASE)
 
+# Real finding: clicking directly into a WhatsApp Web message bubble DOES
+# correctly focus that message (confirmed live: fixed the "wrong pane read
+# entirely" problem) — but its accessible Name glues the real message text
+# together with English UI metadata on both ends: a "You: " sender prefix,
+# and a trailing "HH:MM Delivered/Read/Sent Open message options ..." status/
+# action footer, e.g. 'You: בטח אחי נדבר מחר על התוכנית 16:36 Delivered Open
+# message o'. That English wrapper dilutes a real, unambiguously-Hebrew
+# message down to 56% confidence — below CONTENT_CONFIDENCE_THRESHOLD — so
+# nothing gets corrected even though the actual message content is obvious.
+# Unlike the reject-the-whole-string checks above, this only strips the known
+# wrapper and keeps the real content in between.
+MESSAGE_SENDER_PREFIX_PATTERN = re.compile(r"^You:\s*")
+MESSAGE_METADATA_SUFFIX_PATTERN = re.compile(r"\s*\d{1,2}:\d{2}\s+(Delivered|Read|Sent)\b.*$", re.IGNORECASE)
+
+
+def _strip_message_metadata(text):
+    text = MESSAGE_SENDER_PREFIX_PATTERN.sub("", text)
+    text = MESSAGE_METADATA_SUFFIX_PATTERN.sub("", text)
+    return text.strip()
+
 
 def _looks_like_real_content(accessible_text, title):
     if len(accessible_text) < MIN_ACCESSIBLE_TEXT_LENGTH:
@@ -544,6 +564,15 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     if not text.strip():
         if DEBUG:
             print("  [content] empty field, nothing to read")
+        return fallback_hkl, None
+
+    stripped_text = _strip_message_metadata(text)
+    if stripped_text != text and DEBUG:
+        print(f"  [content] stripped sender/status wrapper: {text[:60]!r} -> {stripped_text[:60]!r}")
+    text = stripped_text
+    if not text:
+        if DEBUG:
+            print("  [content] nothing left after stripping message metadata")
         return fallback_hkl, None
 
     # Real finding: Zoom's own product-branding text ("zoom. Workplace ...")
