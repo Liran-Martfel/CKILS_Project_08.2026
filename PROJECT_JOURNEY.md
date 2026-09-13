@@ -1698,10 +1698,142 @@ from memory what the console said.
 
 ---
 
+## 2026-09-11 — Live re-test round 2: fixed the override-log gap, and a real (partial) fix for Zoom reading its own chat header instead of the conversation
+
+**`decision_logger`'s own bug, found immediately on re-test:** every manual override logged
+`"preceding_auto": null`, even seconds after a real auto-decision had fired for that exact window.
+Cause: `forget_thread(previous_thread)` was called on every focus change to a different thread — modeled
+on `content_decision.pop(previous_thread, ...)`, which is correct for a per-visit "sticky" value, but
+wrong here. The whole point of `preceding_auto` is to show what CKILS decided right before a correction
+that comes *after* briefly tabbing away and back (the single most common real pattern) — it needs the
+same unclearing lifetime as `last_set`, not `content_decision`. Fixed by deleting the `forget_thread`
+call (and the now-unused function) entirely; the record simply gets overwritten next time an auto
+decision fires for that thread_id.
+
+**The real Zoom finding, from `diagnose_zoom_tree.py` (new — walks a window's whole UI Automation tree
+top-down, unlike `diagnose_focus.py` which only walks up from whatever's focused):** for Zoom's chat
+panel (both the popped-out "Meeting chat" window and the docked panel inside the main "Zoom Meeting"
+call window), `GetFocusedControl()` lands on a short header pane (~66px tall, holding only the
+session/recording title) that sits as a **sibling**, right above the real chat body — a ~925px pane
+Zoom draws as pixels with no accessible Name of its own, readable only via OCR. The crop itself was
+never the problem; it was reading the correct control's content faithfully — just the wrong control.
+
+**Fix, structural not app-named** (same category as the existing Google-Docs-title fallback): added
+`_find_larger_sibling_rect()` — when the focused control is short (<90px) and a much larger sibling
+(≥300px tall) sits directly below it, OCR that sibling instead. Nothing here checks `exe_name` or
+`title`; it fires for any control shaped this way, in any app.
+
+**Confirmed only a partial fix, live:** this correctly handles the header case. But a second live
+re-test hit a *different* wrong control in the same "Zoom Meeting" window — the "Start my video"
+toolbar button, whose siblings are just other short toolbar buttons, not the chat body (which lives
+in a completely separate branch of the tree, several levels away — cousins, not siblings). The
+sibling-check correctly does nothing here (no false redirect), but doesn't help either. A full fix
+would mean searching the whole window tree from its root for the chat pane, independent of whatever
+happens to be "focused" — bigger, more invasive change, deferred.
+
+---
+
+## 2026-09-11 — Real bug: WhatsApp messages diluted by their own English UI wrapper
+
+Clicking directly into a WhatsApp Web message bubble does correctly focus that exact message (unlike
+Zoom, Chrome's own accessibility tree for the page collapses almost every element to the same
+full-page-sized bounding rect, so no sibling-redirect trick was possible *or* needed here — the
+control being focused was already the right one). The actual bug: its accessible Name glues the real
+message together with English UI metadata on both ends — a `"You: "` sender prefix, and a trailing
+`"HH:MM Delivered/Read/Sent Open message options ..."` status/action footer, e.g. one real, confirmed
+capture: `'You: בטח אחי נדבר מחר על התוכנית 16:36 Delivered Open message o'`. That English wrapper
+diluted an unambiguously Hebrew message down to 56% confidence — below `CONTENT_CONFIDENCE_THRESHOLD`
+— so nothing corrected.
+
+**Fix:** new `_strip_message_metadata()` — unlike the existing reject-the-whole-string checks
+(placeholders, UI chrome), this only trims the known wrapper and keeps the real content in between.
+**Verified directly** before rebuilding: stripping the confirmed real string and re-running it through
+`predict_language` gives Hebrew at 84% confidence (was 56% English with the wrapper attached); live
+re-testing in the actual conversation afterward showed clean, correctly-classified reads with no
+metadata noise.
+
+Also hardened `diagnose_zoom_tree.py` (used to rule out a sibling-redirect fix here) with a node cap
+and small/unnamed-node filtering — a rendered Chrome page's accessibility tree can run to thousands of
+nodes, unlike a native app's much smaller one.
+
+---
+
+## 2026-09-13 — Three more real problems reported; one root-caused and fixed from the log alone
+
+User reported three things in one sitting:
+
+1. **YouTube: keyboard left in Hebrew from a previous video, on a page that's now all English.** Traced
+   to a real gap, not a bug: a brand-new YouTube page/video has no learned history yet, so
+   `target_hkl` is `None` and the fast path does nothing proactively — the keyboard just sits at
+   whatever it physically last was until Tier 3 catches up from actual typed/read content. Requested
+   idea: for YouTube specifically, read the page's general content (title/description/comments, not
+   just the focused control) to make an initial probabilistic guess before typing starts, as a weak
+   prior only — never overriding real per-video typing history once Tier 3 has actually seen it.
+   Discussed, not yet designed or built.
+
+2. **Claude.ai: a whole Hebrew CV conversation kept getting forced back to English.** This one was
+   root-caused directly from `logs/decisions.jsonl` alone, no live reproduction needed — same category
+   of bug as WhatsApp's placeholder, just never covered: Claude.ai's own empty compose-box placeholder,
+   `"Write your prompt to Claude"`, was being read as confident real English content every time the box
+   was momentarily empty between messages — dozens of times over the one conversation in the log — each
+   one silently feeding that page's `page_learned_defaults` history another false "english" entry. The
+   trust mechanism itself (2026-09-08) worked exactly as designed; it was just being fed contaminated
+   input, so it confidently and correctly-per-its-own-logic kept re-asserting a majority that was never
+   real. **Fixed** by adding `"Write your prompt to Claude"` to the existing `PLACEHOLDER_TEXT_PREFIXES`
+   list — the same fix category as WhatsApp's, not a new mechanism.
+
+3. **Should the language model be retrained now, with everything logged so far?** Answered directly:
+   no — not on the raw logs, and not on a calendar timer. The project's existing policy (2026-09-03,
+   the decisions-DB design) was already to never retrain blindly on raw auto-logged decisions; this
+   week's finds are exactly why — a real portion of what's logged is now *known* contaminated by the
+   very bugs fixed above (Zoom's header/toolbar text, WhatsApp's and Claude.ai's placeholders). Training
+   on that would reinforce the mistakes, not correct them. Also worth noting directly: stripping
+   WhatsApp's wrapper let the *existing, untouched* model correctly call the remaining text Hebrew at
+   84% — this week's bugs were reading-the-wrong-text problems, not classifier-accuracy problems, so
+   retraining wouldn't have fixed any of them. The real trigger for retraining is "reading-bugs have
+   stopped surfacing, so a review-and-train pass over the confirmed-clean subset is worth it" — not a
+   fixed number of days.
+
+Also fixed the Claude.ai placeholder found above (added to `PLACEHOLDER_TEXT_PREFIXES`, same fix as
+WhatsApp's).
+
+**New team practice adopted: a regression test for every future bug fix, reproducing the exact real
+failure, not a synthetic approximation.** First real obstacle hit immediately: `rule_engine.py` ran its
+hook-setup and `PumpMessages()` message loop unconditionally at import time, so a test file could never
+`import rule_engine` to reach its pure functions without also hooking real Windows-wide events and
+hanging forever. Fixed by guarding everything from the poll-thread start through `PumpMessages()` in
+`if __name__ == "__main__":` — changes nothing about running CKILS itself (`python rule_engine.py` and
+the packaged exe both still run as `"__main__"`), only makes the module safely importable. Also
+extracted the inline UI-chrome/placeholder rejection check (previously only reachable through a live
+OCR read) into its own `_rejected_as_ui_noise()` function, purely so it has a direct test.
+
+**`test_regressions.py` (new, stdlib `unittest`, no new dependency)** — one test class per real bug
+fixed so far: WhatsApp/Claude.ai placeholder rejection, the UI-chrome/placeholder OCR-path gap, the
+WhatsApp metadata-stripping fix (using the exact string captured live, re-run through the real
+`predict_language` model — not mocked, since the point was confirming the *existing* model classifies
+it correctly once the wrapper is gone), the Zoom sibling-redirect fix (via small fake `uiautomation`-
+shaped Control objects reproducing both the header case it fixes and the toolbar-button case it
+correctly leaves alone), the trust/history mechanism, and the `preceding_auto` override-link fix. All
+21 tests pass.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
 not designed in detail yet, just captured.
+
+**2026-09-13 — Page-language guess for a brand-new YouTube page**
+
+User's idea: on YouTube specifically, a fresh page/video with no learned history yet leaves the
+keyboard at whatever it last physically was (see 2026-09-13 entry above) instead of making any
+proactive guess. Proposed fix: read the page's general content (title/description/visible comments,
+not just the empty focused comment box) to make an initial probabilistic guess at the likely typing
+language, scoped to YouTube only by title suffix (same pattern as the existing Google Docs title
+special-case) — and only as a weak prior for a page with no history yet, never overriding real
+per-video typing history once Tier 3 has actually seen it. Honest limitation flagged directly: this
+is inherently probabilistic (an English video with a Hebrew comment is common), not a guaranteed fix.
+Not yet designed in detail or built.
 
 **2026-09-03 — Gibberish-typing fallback (Tier 4 safety net)**
 
