@@ -374,8 +374,28 @@ GENERIC_ACCESSIBLE_TEXT_MARKERS = ["מכיל", "דפים"]
 # as the PDF-viewer boilerplate above: UI chrome, not something a person
 # actually typed. Zoom's own product-branding text ("zoom. Workplace ...")
 # read the same way, every single call, real content or not — same fix.
-PLACEHOLDER_TEXT_PREFIXES = ["Type a message"]
+# Real finding, confirmed from the decisions log: Claude.ai's own empty
+# compose-box placeholder ("Write your prompt to Claude") hit this exact gap
+# too — read as confident, real English content dozens of times over one
+# genuinely Hebrew conversation, each one silently feeding that page's
+# learned-default history another false "english" data point. That poisoned
+# history is what kept overriding the real (Hebrew) content via the fast path
+# faster than Tier 3 could correct it — not a flaw in the trust mechanism
+# itself, just contaminated input reaching it in the first place.
+PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude"]
 UI_CHROME_MARKERS = ["Workplace"]
+
+
+def _rejected_as_ui_noise(text):
+    """Applied to whatever text was FINALLY selected, regardless of source
+    (unlike _looks_like_real_content, which only guards the accessible-text
+    path) — see the real findings above for why OCR needs the same checks.
+    Returns a short reason string if text should be rejected, else None."""
+    if any(marker in text for marker in UI_CHROME_MARKERS):
+        return "app UI chrome"
+    if any(text.startswith(prefix) for prefix in PLACEHOLDER_TEXT_PREFIXES):
+        return "an empty-field placeholder"
+    return None
 
 # Real finding: clicking Gemini's "New chat" button (שיחה חדשה) briefly put
 # focus on the BUTTON itself, whose Name was "New chat" plus its keyboard-
@@ -585,13 +605,10 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     # region — which just reads that same visible placeholder text again,
     # completely bypassing the accessible-text-only check. Both checks must
     # apply to whatever text was FINALLY selected, regardless of source.
-    if any(marker in text for marker in UI_CHROME_MARKERS):
+    rejection_reason = _rejected_as_ui_noise(text)
+    if rejection_reason is not None:
         if DEBUG:
-            print(f"  [content] rejected as app UI chrome, not real content: {text[:60]!r}")
-        return fallback_hkl, None
-    if any(text.startswith(prefix) for prefix in PLACEHOLDER_TEXT_PREFIXES):
-        if DEBUG:
-            print(f"  [content] rejected as an empty-field placeholder, not real content: {text[:60]!r}")
+            print(f"  [content] rejected as {rejection_reason}, not real content: {text[:60]!r}")
         return fallback_hkl, None
 
     try:
@@ -878,16 +895,26 @@ def _poll_focused_window():
         ).start()
 
 
-threading.Thread(target=_poll_focused_window, daemon=True).start()
-decision_logger.start_background_pruning()
+# Real gap found while adding regression tests: everything below this point used
+# to run unconditionally at import time — hooking real Windows-wide events and
+# blocking forever in PumpMessages(). That's correct for `python rule_engine.py`
+# or the packaged exe (both run as "__main__"), but it means a test file can
+# never simply `import rule_engine` to reach its pure functions (_trust,
+# _strip_message_metadata, _find_larger_sibling_rect, ...) without also starting
+# a real background listener and hanging on the message loop. Guarding it here
+# changes nothing about running CKILS itself — only makes the module safely
+# importable for testing.
+if __name__ == "__main__":
+    threading.Thread(target=_poll_focused_window, daemon=True).start()
+    decision_logger.start_background_pruning()
 
-callback = WinEventProcType(on_focus_change)
-hook = user32.SetWinEventHook(
-    win32con.EVENT_SYSTEM_FOREGROUND, win32con.EVENT_SYSTEM_FOREGROUND,
-    0, callback, 0, 0, win32con.WINEVENT_OUTOFCONTEXT)
+    callback = WinEventProcType(on_focus_change)
+    hook = user32.SetWinEventHook(
+        win32con.EVENT_SYSTEM_FOREGROUND, win32con.EVENT_SYSTEM_FOREGROUND,
+        0, callback, 0, 0, win32con.WINEVENT_OUTOFCONTEXT)
 
-name_hook = user32.SetWinEventHook(win32con.EVENT_OBJECT_NAMECHANGE,
-    win32con.EVENT_OBJECT_NAMECHANGE,0,callback,0,0,win32con.WINEVENT_OUTOFCONTEXT)
-auto.InitializeUIAutomationInCurrentThread()  # once, before the message loop — needed by decide_with_content()
-print("CKILS is watching in the background. Press Ctrl+C in this window to stop.")
-win32gui.PumpMessages()
+    name_hook = user32.SetWinEventHook(win32con.EVENT_OBJECT_NAMECHANGE,
+        win32con.EVENT_OBJECT_NAMECHANGE,0,callback,0,0,win32con.WINEVENT_OUTOFCONTEXT)
+    auto.InitializeUIAutomationInCurrentThread()  # once, before the message loop — needed by decide_with_content()
+    print("CKILS is watching in the background. Press Ctrl+C in this window to stop.")
+    win32gui.PumpMessages()
