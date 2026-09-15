@@ -1818,6 +1818,69 @@ correctly leaves alone), the trust/history mechanism, and the `preceding_auto` o
 
 ---
 
+## 2026-09-14/15 — A second Claude.ai placeholder, and Google Docs' title-fallback re-asserting mid-typing
+
+**Second Claude.ai placeholder found live:** `"Write your prompt to Claude"` (fixed 2026-09-13) only
+appears on a brand-new chat. Continuing an *existing* conversation shows different wording —
+`"Write a message..."` — confirmed live in `logs/decisions.jsonl`, reached via OCR (not accessible
+text) at 71% confidence, above threshold, repeatedly flipping a real Hebrew CV conversation back to
+English every time the box emptied. Added to `PLACEHOLDER_TEXT_PREFIXES`, plus a dedicated regression
+test using the exact real string. Also considered and correctly ruled out: Claude.ai's empty-chat
+welcome heading (`"How can I help you today?"` in the log, seen in English) — initially suspected as
+the same bug family, but the user confirmed directly it's localized to the browser/account's own
+language, not a hardcoded English string — reading it as English when it IS shown in English (and
+Hebrew when shown in Hebrew) is a correct read, not a placeholder bug. No fix needed.
+
+**User reported the keyboard changing language while actively mid-sentence.** The specific window
+(Claude.ai) had already been closed by the time this was investigated, so that exact instance couldn't
+be pinned down directly — but the log surfaced a real, related, independently-confirmed bug in the same
+session: the `google_docs_title` fallback (Google Docs' body text is a confirmed dead end to read, see
+2026-09-03 — the document's own title is the only usable signal) was being re-derived and re-applied
+**every time Tier 3 ran** — every focus/title event, plus the 3-second poll thread — as if it were live,
+time-varying content. Since the title never changes for the whole visit, this provided zero new
+information each time yet was treated exactly like a fresh, confident correction: capable of silently
+overriding real mid-typing work (an English term inside an otherwise-Hebrew document) the moment any
+unrelated, brief focus event reset the manual-override protection (`overridden` is cleared the instant
+focus leaves ANY thread, even momentarily). Two tabs of two different CVs sharing one Chrome thread_id
+were also seen alternating within 2 seconds in the log, compounding the effect.
+
+**Fix:** a new `google_docs_title_already_applied` set tracks which thread_ids have already received
+their one title-derived read this visit — same spirit as the existing learned-defaults layers (a
+one-time default, not a continuously-reasserted correction). Reset at the exact same two spots
+`content_decision` already resets (a real focus change away from the thread, or a real title change on
+the same thread) — so switching to a *different* Google Docs tab still gets its own fresh read; only
+re-checking the *same, still-open* document stops repeating. **Verified directly** with three new
+regression tests: first read applies and marks the thread as answered; a second read for the same
+visit — even with the user's own manual override as the current fallback, the exact real scenario —
+returns the fallback untouched; a title change (simulating a tab switch) gets a fresh read again.
+25 tests pass total.
+
+---
+
+## 2026-09-15 — Real bug: Google Calendar's own English tile wrapper diluting Hebrew events
+
+User reported Google Calendar kept showing English even though the whole calendar is Hebrew. Found
+directly in `logs/decisions.jsonl`: event/task tile accessible text glues the real, user-typed title to
+a comma-separated wrapper of English UI fields — a time range, the calendar's own possessive name
+("Liran's calender" — Google's actual wording, not a typo introduced here), location status, RSVP/task
+status, and the date. Confirmed live, e.g. `'6:30pm to 7pm, לאסוף חבילה מהדואר, Liran's calender, No location,
+September 15, 2026'` → classified English at 70% confidence, even though the actual event title
+(`לאסוף חבילה מהדואר`) is unambiguously Hebrew — the wrapper is simply longer than the real content. Same bug
+category as WhatsApp's sender/status wrapper (2026-09-11), a different app's own wrapper shape.
+
+**Fix:** new `_strip_calendar_metadata()`, chained after the existing `_strip_message_metadata()` on
+whatever text was finally selected — strips the task-prefix, time range, month-name date, RSVP/task
+status words, "No location", the "`<Name>'s calend[a/e]r`" possessive, and a trailing "Event is being
+created." note some Google Calendar tiles carry, then collapses leftover comma debris. **Verified
+directly**, same discipline as the WhatsApp fix: re-ran all three real captured strings (a plain event,
+an event with an RSVP status, and a task tile) through the actual `predict_language` model after
+stripping — all three now correctly call Hebrew at 77–92% confidence, up from a wrong English call (one
+task-tile capture was already correctly Hebrew before this fix, since its Hebrew title happened to
+outweigh the wrapper on its own — confirmed that case gets even more confident afterward, not broken).
+5 new regression tests; 30 total pass.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

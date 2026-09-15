@@ -10,6 +10,7 @@ see that guard's own comment for why.
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import rule_engine
 import decision_logger
@@ -34,6 +35,16 @@ class PlaceholderRejectionTests(unittest.TestCase):
         self.assertFalse(
             rule_engine._looks_like_real_content(
                 "Write your prompt to Claude", title="Claude"))
+
+    def test_claude_existing_conversation_placeholder_rejected(self):
+        # Real bug (2026-09-14): Claude.ai's placeholder wording is DIFFERENT
+        # once you're continuing an existing conversation ("Write a
+        # message...") vs. starting a brand-new one ("Write your prompt to
+        # Claude") — confirmed live, reached via OCR and kept flipping a real
+        # Hebrew CV conversation back to English every time the box emptied.
+        # The exact real capture (confidence 0.71 — above threshold — is what
+        # actually flipped the real conversation back to English each time).
+        self.assertIsNotNone(rule_engine._rejected_as_ui_noise("Write a message..."))
 
     def test_real_message_not_rejected_as_placeholder(self):
         # A real, unrelated long message must NOT get caught by the same check.
@@ -98,6 +109,41 @@ class MessageMetadataStrippingTests(unittest.TestCase):
         self.assertNotIn("Read", stripped)
 
 
+class CalendarMetadataStrippingTests(unittest.TestCase):
+    """Real bug (2026-09-15): Google Calendar event/task tiles glue the real,
+    user-typed title to a comma-separated wrapper of English fields (time
+    range, calendar's own possessive name, location, RSVP/task status, date)
+    — often longer than a short Hebrew title, flipping the classification to
+    English. Exact strings captured live from logs/decisions.jsonl."""
+
+    def test_strips_event_tile_wrapper(self):
+        raw = "6:30pm to 7pm, לאסוף חבילה מהדואר, Liran's calender, No location, September 15, 2026"
+        self.assertEqual(rule_engine._strip_calendar_metadata(raw), "לאסוף חבילה מהדואר")
+
+    def test_strips_event_tile_with_rsvp_status_and_trailing_note(self):
+        raw = ("8am to 9am, לקנות מצרכים לשבת, Liran's calender, Accepted, No location, "
+               "September 11, 2026 Event is being created.")
+        self.assertEqual(rule_engine._strip_calendar_metadata(raw), "לקנות מצרכים לשבת")
+
+    def test_strips_task_tile_wrapper(self):
+        raw = ("task: לסיים לקרוא את הפרק הבא בספר ולהכין סיכום קצר לפני הפגישה, "
+               "Not completed, September 11, 2026, 10:30am")
+        self.assertEqual(
+            rule_engine._strip_calendar_metadata(raw),
+            "לסיים לקרוא את הפרק הבא בספר ולהכין סיכום קצר לפני הפגישה")
+
+    def test_reclassifies_event_tile_correctly_after_stripping(self):
+        raw = "6:30pm to 7pm, לאסוף חבילה מהדואר, Liran's calender, No location, September 15, 2026"
+        stripped = rule_engine._strip_calendar_metadata(raw)
+        label, proba = rule_engine.predict_language(stripped)
+        self.assertEqual(label, "hebrew")
+        self.assertGreaterEqual(proba[label], rule_engine.CONTENT_CONFIDENCE_THRESHOLD)
+
+    def test_leaves_unrelated_text_untouched(self):
+        text = "Search or start a new chat chat-list-filters Archived Chat list"
+        self.assertEqual(rule_engine._strip_calendar_metadata(text), text)
+
+
 # Fake uiautomation-style Control objects — just enough surface area
 # (BoundingRectangle, GetParentControl, GetFirstChildControl,
 # GetNextSiblingControl) for _find_larger_sibling_rect to walk, without
@@ -114,8 +160,9 @@ class _FakeRect:
 
 
 class _FakeControl:
-    def __init__(self, rect, parent=None):
+    def __init__(self, rect, parent=None, name=""):
         self.BoundingRectangle = rect
+        self.Name = name
         self._parent = parent
         self._children = []
 
@@ -146,9 +193,15 @@ class SiblingRedirectTests(unittest.TestCase):
     lock in that this fix correctly does nothing there instead of misfiring."""
 
     def test_redirects_from_header_to_large_sibling_body(self):
-        parent = _FakeControl(rect=_FakeRect(-574, 78, -11, 1069))
-        header = _FakeControl(rect=_FakeRect(-574, 78, -11, 144), parent=parent)  # 66px tall
-        body = _FakeControl(rect=_FakeRect(-574, 144, -11, 1069), parent=parent)  # 925px tall
+        # Positive, monitor-agnostic coordinates deliberately (not the real
+        # negative multi-monitor ones captured live) — _is_onscreen() depends
+        # on the ACTUAL current virtual screen bounds (win32api.GetSystemMetrics
+        # at import time), which varies by machine/monitor arrangement; a fixed
+        # negative-coordinate rect would only be "on screen" on a matching
+        # multi-monitor setup, making this test flaky across machines.
+        parent = _FakeControl(rect=_FakeRect(100, 78, 700, 1069))
+        header = _FakeControl(rect=_FakeRect(100, 78, 700, 144), parent=parent)  # 66px tall
+        body = _FakeControl(rect=_FakeRect(100, 144, 700, 1069), parent=parent)  # 925px tall
         parent._children = [header, body]
         _link_siblings(parent._children)
 
@@ -158,11 +211,12 @@ class SiblingRedirectTests(unittest.TestCase):
     def test_no_redirect_when_only_small_siblings_exist(self):
         # The "Start my video" toolbar-button case: short control, but its
         # siblings are other short toolbar buttons, not a real content pane.
-        parent = _FakeControl(rect=_FakeRect(-1920, 1003, -600, 1076))
+        # Positive coordinates deliberately — see the note in the test above.
+        parent = _FakeControl(rect=_FakeRect(0, 1003, 1320, 1076))
         buttons = [
-            _FakeControl(rect=_FakeRect(-1908, 1003, -1776, 1076), parent=parent),
-            _FakeControl(rect=_FakeRect(-1776, 1003, -1629, 1076), parent=parent),
-            _FakeControl(rect=_FakeRect(-1538, 1003, -1343, 1076), parent=parent),
+            _FakeControl(rect=_FakeRect(12, 1003, 144, 1076), parent=parent),
+            _FakeControl(rect=_FakeRect(144, 1003, 291, 1076), parent=parent),
+            _FakeControl(rect=_FakeRect(382, 1003, 577, 1076), parent=parent),
         ]
         parent._children = buttons
         _link_siblings(parent._children)
@@ -181,6 +235,78 @@ class SiblingRedirectTests(unittest.TestCase):
 
         result = rule_engine._find_larger_sibling_rect(header)
         self.assertIsNone(result)
+
+
+class GoogleDocsTitleOneTimeDefaultTests(unittest.TestCase):
+    """Real bug (2026-09-15): Google Docs' body text is a confirmed dead end to
+    read, so the only signal decide_with_content has is the document's own
+    TITLE — which never changes for the whole visit. It was being re-derived
+    and re-applied every time Tier 3 ran (every focus/title event, plus the
+    3-second poll thread) as if it were live content, capable of silently
+    overriding real mid-typing work (e.g. an English term inside an otherwise-
+    Hebrew document) the moment an unrelated focus blip reset the manual-
+    override protection. Fixed to behave as a one-time default per visit,
+    same spirit as the learned-defaults layers."""
+
+    def setUp(self):
+        rule_engine.google_docs_title_already_applied.clear()
+
+    def tearDown(self):
+        rule_engine.google_docs_title_already_applied.clear()
+
+    @staticmethod
+    def _fake_offscreen_doc_control():
+        # Real captured shape: Google Docs reports its focused control's rect
+        # in document-scroll coordinates, often far outside any real monitor.
+        return _FakeControl(rect=_FakeRect(1076, -13318, 1921, -13292), name="")
+
+    def test_first_read_uses_the_title_and_marks_it_applied(self):
+        hwnd = 12345
+        title = "קורות חיים - לירן - Google Docs"
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=hwnd), \
+             patch.object(rule_engine.auto, "GetFocusedControl", return_value=self._fake_offscreen_doc_control()):
+            hkl, reason = rule_engine.decide_with_content(hwnd, None, title, "chrome.exe", thread_id=999)
+
+        self.assertEqual(hkl, rule_engine.Hebrew_HKL)
+        self.assertEqual(reason["source"], "google_docs_title")
+        self.assertIn(999, rule_engine.google_docs_title_already_applied)
+
+    def test_second_read_same_visit_does_not_reassert(self):
+        # Reproduces the exact real scenario: the first read applies Hebrew
+        # from the title, then the poll thread re-checks a few seconds later
+        # while the user's own manual English override is the current
+        # fallback — this must NOT get silently overwritten back to Hebrew.
+        hwnd = 12345
+        title = "קורות חיים - לירן - Google Docs"
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=hwnd), \
+             patch.object(rule_engine.auto, "GetFocusedControl", return_value=self._fake_offscreen_doc_control()):
+            rule_engine.decide_with_content(hwnd, None, title, "chrome.exe", thread_id=999)
+            hkl, reason = rule_engine.decide_with_content(
+                hwnd, rule_engine.English_HKL, title, "chrome.exe", thread_id=999)
+
+        self.assertEqual(hkl, rule_engine.English_HKL)  # fallback returned untouched
+        self.assertIsNone(reason)
+
+    def test_new_visit_after_title_change_gets_a_fresh_read(self):
+        # Switching to a DIFFERENT Google Docs tab (same shared Chrome
+        # thread_id, confirmed real quirk) must still get its own one-time
+        # title-derived read — this fix must not disable the mechanism
+        # entirely, only stop it repeating within the same still-open
+        # document. on_focus_change resets google_docs_title_already_applied
+        # on any title change for a thread (see rule_engine.py) BEFORE calling
+        # decide_with_content — simulated directly here since this test
+        # targets decide_with_content in isolation, not the full event path.
+        hwnd = 12345
+        rule_engine.google_docs_title_already_applied.add(999)  # "קורות חיים" already answered
+        rule_engine.google_docs_title_already_applied.discard(999)  # on_focus_change's title-change reset
+        new_title = "Resume - Liran Martfel - Google Docs"
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=hwnd), \
+             patch.object(rule_engine.auto, "GetFocusedControl", return_value=self._fake_offscreen_doc_control()):
+            hkl, reason = rule_engine.decide_with_content(hwnd, None, new_title, "chrome.exe", thread_id=999)
+
+        self.assertEqual(hkl, rule_engine.English_HKL)
+        self.assertEqual(reason["source"], "google_docs_title")
+        self.assertIn(999, rule_engine.google_docs_title_already_applied)  # now marked for THIS title
 
 
 class TrustHistoryTests(unittest.TestCase):
