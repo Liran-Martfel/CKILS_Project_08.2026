@@ -113,9 +113,3 @@ python ckils/week2/test_regressions.py
 
 One test class per real bug fixed, each one reproducing the exact failure that was found — not a
 synthetic approximation of it.
-
-## Learning platform
-
-A companion lesson-by-lesson guide (built alongside this code) walks through every concept used
-here, from "hello Win32" through the override guard:
-https://claude.ai/code/artifact/f6d5d3c8-41c7-467e-b4d6-16313baaa78c
