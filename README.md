@@ -1,88 +1,87 @@
 # CKILS — Contextual Keyboard Input Locale Switcher
 
 A Windows background tool that automatically switches your keyboard's typing language (Hebrew ⇄
-English) based on which app or window has focus — so you stop manually pressing Alt+Shift and
-stop typing gibberish into the wrong layout.
+English) based on what you're actually looking at and typing — so you stop manually pressing
+Alt+Shift, and stop typing whole sentences into the wrong layout before noticing.
 
-This is a hands-on learning project: a proof of concept being built from scratch in Python, one
-weekly milestone at a time, as a way to learn both coding and how a real Windows system-level tool
-comes together.
+This is a hands-on learning project: a proof of concept built from scratch in Python, one weekly
+milestone at a time, as a way to learn both coding and how a real Windows system-level tool comes
+together in practice — bugs, packaging, and all.
+
+## The problem
+
+If you type in more than one language, you know the drill: you switch to a different app, forget
+your keyboard is still set to the other language, and type a full sentence of gibberish before
+noticing. Then you delete it, switch layouts by hand, and retype. It happens constantly — in
+chats, documents, search bars, calendars — and it adds up to real lost time and real mistakes.
 
 ## The master goal
 
-The rule-based version below is the learning foundation, not the finish line. This project is only
-truly done once CKILS is **AI-driven**: recognizing the screen (image/vision) and how the user is
-typing, and deciding the right language switch from that understanding directly — no per-app rule
-map required at that point.
+The rule-based layers below are the learning foundation, not the finish line. This project is
+only truly done once CKILS is **AI-driven**: reading the screen and deciding the right language
+from that understanding directly, with no hand-written per-app rule table required at all.
 
-## How it works today
+## How it works
 
-- Watches Windows focus changes (`SetWinEventHook` / `EVENT_SYSTEM_FOREGROUND`) to know the moment
-  you switch apps or windows.
-- Reads the actual on-screen text of the focused control (UI Automation + OCR) and decides the
-  language with a model trained from scratch on real usage — no hand-written per-app rule table.
-- Remembers its own confident decisions per app (`learned_defaults.json`) as an instant first guess
-  for a brand-new, still-empty window — self-taught, not hand-authored.
-- Switches that window's keyboard layout automatically (`WM_INPUTLANGCHANGEREQUEST`).
-- Respects a manual override instantly and invisibly: if you switch the language yourself, CKILS
-  leaves that window alone — no timer, no button — and quietly resumes automatic control the
-  moment you move to a different window.
+CKILS layers three decision tiers, from simplest to most advanced, each one only stepping in
+where the one before it isn't enough:
 
-## Project status
+1. **Fast path — learned defaults.** An instant first guess for a window, built entirely from
+   CKILS's own past confident decisions (per app, and per exact app+title) — never a hand-written
+   rule. A key only gets *trusted* once it has enough history and that history actually agrees
+   with itself (≥3 samples, ≥80% agreement) — a browser's whole-app guess or a chat app's one
+   shared generic title naturally never earns trust, automatically, with no app named anywhere in
+   the code.
+2. **Content-aware correction (Tier 3).** Runs in the background after every switch: UI Automation
+   locates the real focused control, reads its text (via accessible text where available, OCR via
+   Tesseract otherwise), and a classifier trained from scratch on real usage decides the language
+   — correcting the fast path's guess if it disagrees and is confident.
+3. **Manual override, always respected.** If you switch the language yourself, CKILS leaves that
+   window alone immediately — no timer, no button — and quietly resumes automatic control the
+   moment you move to a different window. A manual override also teaches the trust system
+   directly, the same way a confident automatic decision does.
 
-- **Week 1 — done.** Focus-change detection, resolving the focused window to its process.
-- **Week 2 — done.** Rule-based auto-switching, the manual-override guard, and switch-latency
-  measurement (well under 1ms per switch, charter target is under 150ms) — all verified working
-  end to end.
-- **Week 3 — done.** Title-based rules for multi-window apps (Tier 2), catching browser tab
-  switches with no focus change at all (via `EVENT_OBJECT_NAMECHANGE`), and a real-app check —
-  confirmed on Chrome, Edge, and Firefox (independent of browser engine).
-- **Week 4 — done.** All five of the charter's test cases (TC-01–TC-05) pass. **SC-01 (environment
-  coverage) passes at 7/10 (70%)** — Chrome, Edge, Firefox, Word, Windows Terminal, Google
-  Docs/Gmail, and Teams all confirmed working; Calculator and Windows Settings are confirmed
-  *incompatible* (both wrapped by `ApplicationFrameHost.exe` — an architectural limit, not a CKILS
-  bug), and Notepad remains quirky. SC-04, SC-06, and **SC-09 (8-hour stability)** all pass — the
-  process survived an extended real run with zero crashes. SC-08 is correctly scoped out. Two real
-  findings surfaced from actually living with it: local-app/terminal workflows expose a real limit
-  of pure rule-based switching (a lived case *for* the master goal), and switch reliability
-  degrades over very long continuous uptime, though a fresh restart fully restores it. **Decision,
-  applying the charter's own framework: Go with Conditions** — window/app-level switching is the
-  proven foundation; those two findings plus Tier 3 itself are the conditions carried into
-  Weeks 5-6.
-- **Week 5 — wired in, real-world testing next.** The master goal above, built end to end: **5.1**
-  (UI Automation pinpoints the exact focused control) confirmed working. **5.2** (OCR reads the
-  text inside that control) — real finding: Windows' own built-in OCR has no Hebrew support at
-  all, on any machine (confirmed via `Get-WindowsCapability`), so this runs on **Tesseract**
-  instead (free, open-source, Apache 2.0), reading English and Hebrew in one call, confirmed
-  working on real captures of both. **5.3** — a real labeled dataset (228 rows) built from the
-  user's own OCR captures plus a smaller supplemental batch, balanced ~50/50 Hebrew/English.
-  **5.4** — a classifier trained from scratch (TF-IDF character n-grams + logistic regression,
-  100% held-out accuracy, correct and appropriately-calibrated on genuinely novel test cases
-  including out-of-vocabulary words and out-of-scope scripts). **5.5** — wired directly into
-  `rule_engine.py`, then confirmed working live and iterated through several real bugs found only by
-  actually using it: a severe latency issue (fixed by running content-awareness in a background
-  thread instead of blocking the switch), a COM per-thread initialization bug, a race condition
-  between concurrent correction threads, and a tug-of-war bug where a hand-written rule kept undoing
-  the model's own confident decisions. **5.6** — that last finding led to removing the hand-written
-  `RULES` table entirely: CKILS now learns its own instant-guess defaults purely from its own
-  confident decisions (`learned_defaults.json`), never from a person's assumption about what an app
-  "should" be. Still open: UI Automation unreliably lands on the wrong small element (a button, a
-  clock) instead of real article text on some complex web apps (Google Docs, Gemini), starving the
-  model of good input there specifically — under active investigation.
+Every real language change (automatic or manual) is written to a local decision log —
+timestamped, with the exact text read, the reasoning, and a screenshot cropped to just the region
+read — specifically so a wrong guess can be diagnosed from evidence instead of guesswork.
 
-**Overall progress, honestly:** against the original charter (the rule-based POC, Weeks 1-4),
-this is roughly **90%** done — 7 of 8 Must criteria confirmed passing, with only the 8-hour
-stability run left. Against the project's actual **master goal** (AI-driven, no rule table at
-all), it's closer to **65-70%** — the full AI decision pipeline is built and wired into the live
-switching path; what's left is real-world testing (accuracy in daily use, and specifically
-latency against the charter's 150ms target for this new path).
+## Current status
+
+The core switching pipeline (all three tiers) is built, wired end to end, and has been running
+against real daily use. That real use has surfaced — and fixed — a steady stream of genuine bugs
+in how various apps expose their on-screen content: Zoom's chat panel reading its own header
+instead of the conversation, WhatsApp and Claude.ai's own empty-input placeholders being
+misread as real typed content, Google Calendar's event tiles diluting a real Hebrew title with
+English scaffolding text, and Google Docs periodically re-asserting a stale title-based guess
+over live typing. Each fix is backed by a regression test built from the real failure it
+addresses — 30 tests currently, covering every bug found so far (`ckils/week2/test_regressions.py`).
+
+**Known open limitations:**
+- Zoom's main call window can still occasionally read the wrong on-screen element (a toolbar
+  button) instead of the chat pane — a deeper fix (searching the window's full UI tree rather than
+  trusting whatever's "focused") is designed but not yet built.
+- No proactive language guess yet for a brand-new page with zero learned history (e.g. the first
+  visit to a new YouTube video) — the keyboard simply stays at its last physical state until Tier
+  3 catches up from real content.
+
+The full, honest development history — every real bug found, how it was diagnosed, what was tried
+and rejected, and why — lives in [`PROJECT_JOURNEY.md`](PROJECT_JOURNEY.md).
+
+## The language model
+
+The classifier is a small model trained from scratch (TF-IDF character n-grams + logistic
+regression) on 228 real labeled examples captured from actual usage — not a public dataset, not
+hand-written examples. It measures at **98% held-out accuracy**. The raw labeled dataset is kept
+local-only (real captured text from real usage isn't something that belongs in a public repo);
+the trained model file (`ckils/week2/language_model.joblib`) is what ships and is what CKILS
+actually runs on.
 
 ## Repo layout
 
-- `ckils/week1/`, `ckils/week2/`, … — the actual working code, one file per lesson.
-- `Welcome_page_explaining.md` — the full project explainer: problem, hypothesis, architecture,
-  scope, success criteria.
-- `PROJECT_JOURNEY.md` — a running log of the project from kickoff to completion.
+- `ckils/week1/`, `ckils/week2/` — the working code, one file per lesson; `rule_engine.py` is the
+  live entry point, `decision_logger.py` the diagnostic log, `test_regressions.py` the test suite.
+- [`PROJECT_JOURNEY.md`](PROJECT_JOURNEY.md) — the full development log: every real bug, fix, and
+  design decision, in order, with reasoning.
 - `POC - Proof Of Concept - theory.docx` — the original project charter/spec.
 
 ## Build & run
@@ -90,18 +89,30 @@ latency against the charter's 150ms target for this new path).
 Requirements: Windows 10/11, Python 3.10+, with the packages in `ckils/week2/` installed
 (`pywin32`, `psutil`, `uiautomation`, `pytesseract`, `Pillow`, `scikit-learn`, `joblib`) inside a
 virtual environment, plus [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) installed
-separately (`winget install --id UB-Mannheim.TesseractOCR -e`).
+separately:
 
-To run it, no configuration needed — no rules to edit, CKILS decides from real on-screen content
-and learns its own per-app defaults as it goes:
+```
+winget install --id UB-Mannheim.TesseractOCR -e
+```
+
+Run from source — no configuration needed, CKILS decides from real on-screen content and learns
+its own per-app defaults as it goes:
 
 ```
 python ckils/week2/rule_engine.py
 ```
 
-Alt-Tab between apps and type real Hebrew/English text to see it decide. A packaged standalone
-`CKILS.exe` (via PyInstaller, bundling everything except Tesseract itself) also exists — see
-`PROJECT_JOURNEY.md` for the build command.
+A packaged standalone `CKILS.exe` (via PyInstaller, bundling everything except Tesseract itself)
+can also be built — see `PROJECT_JOURNEY.md` for the build command.
+
+## Testing
+
+```
+python ckils/week2/test_regressions.py
+```
+
+One test class per real bug fixed, each one reproducing the exact failure that was found — not a
+synthetic approximation of it.
 
 ## Learning platform
 
