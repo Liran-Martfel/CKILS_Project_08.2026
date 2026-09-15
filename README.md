@@ -84,26 +84,35 @@ actually runs on.
   design decision, in order, with reasoning.
 - `POC - Proof Of Concept - theory.docx` — the original project charter/spec.
 
-## Build & run
+## Running it
 
-Requirements: Windows 10/11, Python 3.10+, with the packages in `ckils/week2/` installed
-(`pywin32`, `psutil`, `uiautomation`, `pytesseract`, `Pillow`, `scikit-learn`, `joblib`) inside a
-virtual environment, plus [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) installed
-separately:
+Either way, one thing is required first on the machine that runs CKILS —
+[Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki), a separate free program that
+CKILS uses to read on-screen text. It's not bundled; install it once:
 
 ```
 winget install --id UB-Mannheim.TesseractOCR -e
 ```
 
-Run from source — no configuration needed, CKILS decides from real on-screen content and learns
-its own per-app defaults as it goes:
+**Just want to run it? Use the packaged exe — no Python required.**
+A standalone `CKILS.exe` (built via PyInstaller, with the trained model and OCR data bundled
+inside it) is the thing to actually double-click and run — no setup, no configuration, it decides
+from real on-screen content and learns its own per-app defaults as it goes. It isn't checked into
+this repo (a built binary doesn't belong in source control), so if you don't already have a copy,
+build it yourself with the command in `PROJECT_JOURNEY.md`, or ask whoever shared this repo with
+you for the `.exe` file directly.
+
+**Want to read or change the code? Run the source directly.**
+`rule_engine.py` is the actual source — the same code the exe is built from, just runnable
+straight from Python for development:
+
+Requirements: Windows 10/11, Python 3.10+, with the packages in `ckils/week2/` installed
+(`pywin32`, `psutil`, `uiautomation`, `pytesseract`, `Pillow`, `scikit-learn`, `joblib`) inside a
+virtual environment.
 
 ```
 python ckils/week2/rule_engine.py
 ```
-
-A packaged standalone `CKILS.exe` (via PyInstaller, bundling everything except Tesseract itself)
-can also be built — see `PROJECT_JOURNEY.md` for the build command.
 
 ## Testing
 
