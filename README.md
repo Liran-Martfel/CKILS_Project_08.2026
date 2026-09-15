@@ -94,13 +94,14 @@ CKILS uses to read on-screen text. It's not bundled; install it once:
 winget install --id UB-Mannheim.TesseractOCR -e
 ```
 
-**Just want to run it? Use the packaged exe — no Python required.**
-A standalone `CKILS.exe` (built via PyInstaller, with the trained model and OCR data bundled
-inside it) is the thing to actually double-click and run — no setup, no configuration, it decides
-from real on-screen content and learns its own per-app defaults as it goes. It isn't checked into
-this repo (a built binary doesn't belong in source control), so if you don't already have a copy,
-build it yourself with the command in `PROJECT_JOURNEY.md`, or ask whoever shared this repo with
-you for the `.exe` file directly.
+**Just want to run it? Download the exe — no Python required.**
+
+**→ [Download CKILS.exe](https://github.com/Liran-Martfel/CKILS_Project_08.2026/releases/latest)**
+
+A standalone build (via PyInstaller, with the trained model and OCR data bundled inside it) —
+double-click it, no setup, no configuration. It decides from real on-screen content and learns
+its own per-app defaults as it goes. It isn't checked into the repo itself (a built binary doesn't
+belong in source control); the link above is a GitHub Release, built fresh from this same source.
 
 **Want to read or change the code? Run the source directly.**
 `rule_engine.py` is the actual source — the same code the exe is built from, just runnable
