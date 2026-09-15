@@ -22,3 +22,6 @@ ckils/week2/logs/
 ckils/week2/build/
 ckils/week2/dist/
 ckils/week2/*.spec
+
+# Clean, never-run exe copy prepared for handing off to other users
+ckils/week2/CKILS_release/

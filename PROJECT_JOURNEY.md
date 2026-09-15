@@ -1740,8 +1740,9 @@ Zoom, Chrome's own accessibility tree for the page collapses almost every elemen
 full-page-sized bounding rect, so no sibling-redirect trick was possible *or* needed here — the
 control being focused was already the right one). The actual bug: its accessible Name glues the real
 message together with English UI metadata on both ends — a `"You: "` sender prefix, and a trailing
-`"HH:MM Delivered/Read/Sent Open message options ..."` status/action footer, e.g. one real, confirmed
-capture: `'You: בטח אחי נדבר מחר על התוכנית 16:36 Delivered Open message o'`. That English wrapper
+`"HH:MM Delivered/Read/Sent Open message options ..."` status/action footer — same shape as one real,
+confirmed capture (wording changed here; this is example content, not a transcript of a real
+conversation): `'You: בטח אחי נדבר מחר על התוכנית 16:36 Delivered Open message o'`. That English wrapper
 diluted an unambiguously Hebrew message down to 56% confidence — below `CONTENT_CONFIDENCE_THRESHOLD`
 — so nothing corrected.
 
@@ -1863,10 +1864,12 @@ User reported Google Calendar kept showing English even though the whole calenda
 directly in `logs/decisions.jsonl`: event/task tile accessible text glues the real, user-typed title to
 a comma-separated wrapper of English UI fields — a time range, the calendar's own possessive name
 ("Liran's calender" — Google's actual wording, not a typo introduced here), location status, RSVP/task
-status, and the date. Confirmed live, e.g. `'6:30pm to 7pm, לאסוף חבילה מהדואר, Liran's calender, No location,
-September 15, 2026'` → classified English at 70% confidence, even though the actual event title
-(`לאסוף חבילה מהדואר`) is unambiguously Hebrew — the wrapper is simply longer than the real content. Same bug
-category as WhatsApp's sender/status wrapper (2026-09-11), a different app's own wrapper shape.
+status, and the date. Confirmed live — same shape shown here with wording changed, since this is
+example content, not a transcript of a real calendar: `'6:30pm to 7pm, לאסוף חבילה מהדואר, Liran's
+calender, No location, September 15, 2026'` → classified English at 70% confidence, even though the
+actual event title (`לאסוף חבילה מהדואר`) is unambiguously Hebrew — the wrapper is simply longer than
+the real content. Same bug category as WhatsApp's sender/status wrapper (2026-09-11), a different app's
+own wrapper shape.
 
 **Fix:** new `_strip_calendar_metadata()`, chained after the existing `_strip_message_metadata()` on
 whatever text was finally selected — strips the task-prefix, time range, month-name date, RSVP/task

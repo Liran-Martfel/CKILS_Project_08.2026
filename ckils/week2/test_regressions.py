@@ -50,7 +50,7 @@ class PlaceholderRejectionTests(unittest.TestCase):
         # A real, unrelated long message must NOT get caught by the same check.
         self.assertTrue(
             rule_engine._looks_like_real_content(
-                "בטח אחי נדבר מחר על התוכנית, נדבר מחר", title="WhatsApp"))
+                "בטח אחי נדבר מחר על התוכנית ונסגור הכל", title="WhatsApp"))
 
 
 class UiNoiseRejectionTests(unittest.TestCase):
@@ -76,8 +76,9 @@ class MessageMetadataStrippingTests(unittest.TestCase):
     """Real bug (2026-09-11): a real, unambiguously Hebrew WhatsApp message
     was glued to English UI metadata (sender prefix + timestamp/status/action
     footer), diluting classifier confidence from ~84% Hebrew down to 56%
-    English — below threshold, so nothing corrected. Exact string captured
-    live from logs/decisions.jsonl at the time."""
+    English — below threshold, so nothing corrected. String shape preserved
+    from the real live capture; wording changed (see PROJECT_JOURNEY.md for
+    why — this is example content, not a transcript of a real conversation)."""
 
     def test_strips_sender_prefix_and_status_footer(self):
         raw = "You: בטח אחי נדבר מחר על התוכנית 16:36 Delivered Open message o"
@@ -114,7 +115,8 @@ class CalendarMetadataStrippingTests(unittest.TestCase):
     user-typed title to a comma-separated wrapper of English fields (time
     range, calendar's own possessive name, location, RSVP/task status, date)
     — often longer than a short Hebrew title, flipping the classification to
-    English. Exact strings captured live from logs/decisions.jsonl."""
+    English. String shapes preserved from the real live capture; wording
+    changed (this is example content, not a transcript of a real calendar)."""
 
     def test_strips_event_tile_wrapper(self):
         raw = "6:30pm to 7pm, לאסוף חבילה מהדואר, Liran's calender, No location, September 15, 2026"
