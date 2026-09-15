@@ -99,8 +99,12 @@ class MessageMetadataStrippingTests(unittest.TestCase):
         self.assertEqual(rule_engine._strip_message_metadata(text), text)
 
     def test_does_not_over_strip_a_real_link_preview_message(self):
-        # A different real message, ending in a status footer but with no "You:"
-        # prefix — only the trailing footer should go, the URL content must stay.
+        # Real shape (a link-preview message, status footer, no "You:" prefix)
+        # — only the trailing footer should go, the URL content must stay.
+        # example.com is the reserved documentation domain (RFC 2606) —
+        # deliberately not a real site, unlike the URL this was first written
+        # against, which turned out to belong to an unrelated project of the
+        # user's and had no business being an example in this public repo.
         raw = ("example-link-preview.example.com "
                "https://example-link-preview.example.com/ "
                "17:49 Read Open message options React Forward media")
