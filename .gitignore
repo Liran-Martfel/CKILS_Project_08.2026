@@ -25,3 +25,9 @@ ckils/week2/*.spec
 
 # Clean, never-run exe copy prepared for handing off to other users
 ckils/week2/CKILS_release/
+
+# Raw training data: real captured text from the user's actual daily usage
+# (collect_data.py's own output) - the trained model (language_model.joblib)
+# is the compiled artifact that ships and is meant to be shared; this raw
+# corpus stays local-only.
+ckils/week2/training_data.csv
