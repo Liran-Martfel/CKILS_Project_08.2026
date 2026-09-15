@@ -252,6 +252,20 @@ SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 # you leave and return.
 content_decision = {}  # thread_id -> the last confident Tier 3 decision, if any
 
+# Real bug found live: Google Docs' body text is a confirmed dead end to read
+# (see _google_docs_title_text below) — the ONLY signal decide_with_content can
+# use there is the document's own title, which never changes for the whole
+# visit. But it was being re-derived and re-applied EVERY time Tier 3 ran
+# (every focus/title event, plus the poll thread every 3 seconds) as if it
+# were live, time-varying content — repeatedly force-reasserting the same
+# static guess with zero new information each time, capable of overriding
+# real mid-typing work (e.g. an English term inside an otherwise-Hebrew
+# document) the moment ANY brief, unrelated focus event reset the manual-
+# override protection. Fixed by treating a title-derived read as a genuine
+# one-time default for this visit, same spirit as the learned-defaults
+# layers — not something Tier 3 keeps re-asserting once already answered.
+google_docs_title_already_applied = set()  # thread_ids already given their one title-derived read this visit
+
 # Real bug found live: Chrome shares ONE thread_id across every tab in the same
 # window — confirmed directly (hwnd=197900 thread=18984 identical across Google
 # Docs, Gemini, and multiple PDF tabs in the same log). Without this, a content
@@ -382,7 +396,14 @@ GENERIC_ACCESSIBLE_TEXT_MARKERS = ["מכיל", "דפים"]
 # history is what kept overriding the real (Hebrew) content via the fast path
 # faster than Tier 3 could correct it — not a flaw in the trust mechanism
 # itself, just contaminated input reaching it in the first place.
-PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude"]
+# Real finding, same day: Claude.ai has a SECOND, differently-worded empty-box
+# placeholder — "Write a message..." — shown once you're continuing an
+# existing conversation, as opposed to "Write your prompt to Claude" on a
+# brand-new chat. Neither prefix matches the other, so this one slipped
+# through via OCR (accessible_text wasn't even involved this time) and kept
+# flipping a real Hebrew CV conversation back to English every time the box
+# went empty, confirmed live in logs/decisions.jsonl.
+PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude", "Write a message"]
 UI_CHROME_MARKERS = ["Workplace"]
 
 
@@ -423,6 +444,39 @@ def _strip_message_metadata(text):
     text = MESSAGE_SENDER_PREFIX_PATTERN.sub("", text)
     text = MESSAGE_METADATA_SUFFIX_PATTERN.sub("", text)
     return text.strip()
+
+
+# Real finding: Google Calendar's event/task tiles glue the real, user-typed
+# title together with a comma-separated wrapper of English UI fields — a time
+# range, the calendar's own possessive name ("Liran's calender" — Google's own
+# wording, not a typo introduced here), location status, RSVP/task status, and
+# the date, e.g. confirmed live: 'task: לסיים לקרוא את הפרק הבא ... , Not
+# completed, September 11, 2026, 10:30am' and '6:30pm to 7pm, לאסוף חבילה מהדואר,
+# Liran's calender, No location, September 15, 2026'. That wrapper is often
+# LONGER than a short Hebrew title, so it can outweigh the real content and
+# flip the classification to English even though the actual event/task text is
+# unambiguously Hebrew. Same category as _strip_message_metadata — strip the
+# known wrapper, keep the real content in between.
+CALENDAR_TASK_PREFIX_PATTERN = re.compile(r"^task:\s*", re.IGNORECASE)
+CALENDAR_TIME_RANGE_PATTERN = re.compile(r"\b\d{1,2}(:\d{2})?\s*(am|pm)(\s+to\s+\d{1,2}(:\d{2})?\s*(am|pm))?\b", re.IGNORECASE)
+CALENDAR_DATE_PATTERN = re.compile(
+    r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}\b")
+CALENDAR_STATUS_PATTERN = re.compile(r"\b(Not completed|Completed|Accepted|Declined|Maybe)\b", re.IGNORECASE)
+CALENDAR_NO_LOCATION_PATTERN = re.compile(r"\bNo location\b", re.IGNORECASE)
+CALENDAR_OWNER_CALENDAR_PATTERN = re.compile(r"\b\w+'s\s+calend?er\b", re.IGNORECASE)
+CALENDAR_TRAILING_NOTE_PATTERN = re.compile(r"\bEvent is being created\.?", re.IGNORECASE)
+
+
+def _strip_calendar_metadata(text):
+    text = CALENDAR_TASK_PREFIX_PATTERN.sub("", text)
+    text = CALENDAR_TIME_RANGE_PATTERN.sub("", text)
+    text = CALENDAR_DATE_PATTERN.sub("", text)
+    text = CALENDAR_STATUS_PATTERN.sub("", text)
+    text = CALENDAR_NO_LOCATION_PATTERN.sub("", text)
+    text = CALENDAR_OWNER_CALENDAR_PATTERN.sub("", text)
+    text = CALENDAR_TRAILING_NOTE_PATTERN.sub("", text)
+    text = re.sub(r"[\s,]*,[\s,]*", ", ", text)  # collapse comma debris left by removed fields
+    return text.strip(" ,")
 
 
 def _looks_like_real_content(accessible_text, title):
@@ -552,9 +606,14 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
             print(f"  [content] read from accessible text, no OCR needed: {text[:60]!r}")
     elif not _is_onscreen(rect):
         title_text = _google_docs_title_text(title)
+        if title_text is not None and thread_id in google_docs_title_already_applied:
+            if DEBUG:
+                print("  [content] Google Docs title already used as this visit's one-time default — not re-asserting")
+            return fallback_hkl, None
         if title_text is not None:
             text = title_text
             source = "google_docs_title"
+            google_docs_title_already_applied.add(thread_id)
             if DEBUG:
                 print(f"  [content] Google Docs body unreadable, using document title instead: {text!r}")
         else:
@@ -587,12 +646,13 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
         return fallback_hkl, None
 
     stripped_text = _strip_message_metadata(text)
+    stripped_text = _strip_calendar_metadata(stripped_text)
     if stripped_text != text and DEBUG:
-        print(f"  [content] stripped sender/status wrapper: {text[:60]!r} -> {stripped_text[:60]!r}")
+        print(f"  [content] stripped known UI wrapper: {text[:60]!r} -> {stripped_text[:60]!r}")
     text = stripped_text
     if not text:
         if DEBUG:
-            print("  [content] nothing left after stripping message metadata")
+            print("  [content] nothing left after stripping known UI wrapper")
         return fallback_hkl, None
 
     # Real finding: Zoom's own product-branding text ("zoom. Workplace ...")
@@ -671,6 +731,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             overridden.discard(previous_thread)
             last_set.pop(previous_thread, None)
         content_decision.pop(previous_thread, None)  # fresh window = learned default first, again
+        google_docs_title_already_applied.discard(previous_thread)
         # Real bug found live: unlike content_decision (a per-visit "sticky"
         # value that SHOULD reset the moment you leave), decision_logger's
         # last-auto-decision record is meant to answer "what did CKILS decide
@@ -702,6 +763,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     # see last_title_by_thread above for why this matters.
     if last_title_by_thread.get(thread_id) != title:
         content_decision.pop(thread_id, None)
+        google_docs_title_already_applied.discard(thread_id)
         last_title_by_thread[thread_id] = title
 
     # Layered fallback, most specific first: this visit's own decision (if Tier 3
