@@ -430,12 +430,13 @@ SHORTCUT_HINT_PATTERN = re.compile(r"(Ctrl|Alt|Shift|Cmd)\s*\+\s*(Ctrl|Alt|Shift
 # entirely" problem) — but its accessible Name glues the real message text
 # together with English UI metadata on both ends: a "You: " sender prefix,
 # and a trailing "HH:MM Delivered/Read/Sent Open message options ..." status/
-# action footer, e.g. 'You: בטח אחי נדבר מחר על התוכנית 16:36 Delivered Open
-# message o'. That English wrapper dilutes a real, unambiguously-Hebrew
-# message down to 56% confidence — below CONTENT_CONFIDENCE_THRESHOLD — so
-# nothing gets corrected even though the actual message content is obvious.
-# Unlike the reject-the-whole-string checks above, this only strips the known
-# wrapper and keeps the real content in between.
+# action footer, e.g. (shape preserved, wording changed from the real live
+# capture) 'You: בטח אחי נדבר מחר על התוכנית 16:36 Delivered Open message o'.
+# That English wrapper dilutes a real, unambiguously-Hebrew message down to
+# ~56% confidence — below CONTENT_CONFIDENCE_THRESHOLD — so nothing gets
+# corrected even though the actual message content is obvious. Unlike the
+# reject-the-whole-string checks above, this only strips the known wrapper
+# and keeps the real content in between.
 MESSAGE_SENDER_PREFIX_PATTERN = re.compile(r"^You:\s*")
 MESSAGE_METADATA_SUFFIX_PATTERN = re.compile(r"\s*\d{1,2}:\d{2}\s+(Delivered|Read|Sent)\b.*$", re.IGNORECASE)
 
@@ -450,9 +451,10 @@ def _strip_message_metadata(text):
 # title together with a comma-separated wrapper of English UI fields — a time
 # range, the calendar's own possessive name ("Liran's calender" — Google's own
 # wording, not a typo introduced here), location status, RSVP/task status, and
-# the date, e.g. confirmed live: 'task: לסיים לקרוא את הפרק הבא ... , Not
-# completed, September 11, 2026, 10:30am' and '6:30pm to 7pm, לאסוף חבילה מהדואר,
-# Liran's calender, No location, September 15, 2026'. That wrapper is often
+# the date, e.g. (shape preserved, wording changed from the real live capture)
+# 'task: לסיים לקרוא את הפרק הבא בספר ... , Not completed, September 11,
+# 2026, 10:30am' and '6:30pm to 7pm, לאסוף חבילה מהדואר, Liran's calender,
+# No location, September 15, 2026'. That wrapper is often
 # LONGER than a short Hebrew title, so it can outweigh the real content and
 # flip the classification to English even though the actual event/task text is
 # unambiguously Hebrew. Same category as _strip_message_metadata — strip the
