@@ -414,6 +414,15 @@ PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude", "W
 # copy, not something a person is reading or typing.
 UI_CHROME_MARKERS = ["Workplace", "וביטקוין בזמן-אמת ב-TradingView"]
 
+# Real finding: on a Hebrew-titled YouTube video, OCR repeatedly read nothing
+# but YouTube's own logo/wordmark — always English, regardless of the video's
+# real language — with stray OCR artifacts around it ('> YouTube', 'YouTube"'
+# with a smart quote). This kept winning and forcing English back over real
+# Hebrew content nearby. Matched precisely (not a bare "YouTube" substring
+# check) so a real comment or title that happens to mention YouTube by name
+# isn't wrongly rejected too — only the logo-only read is.
+YOUTUBE_LOGO_ONLY_PATTERN = re.compile(r"^[>\s]*YouTube[\"“”']*$")
+
 
 def _rejected_as_ui_noise(text):
     """Applied to whatever text was FINALLY selected, regardless of source
@@ -424,6 +433,8 @@ def _rejected_as_ui_noise(text):
         return "app UI chrome"
     if any(text.startswith(prefix) for prefix in PLACEHOLDER_TEXT_PREFIXES):
         return "an empty-field placeholder"
+    if YOUTUBE_LOGO_ONLY_PATTERN.match(text.strip()):
+        return "YouTube's own logo/wordmark, not real content"
     return None
 
 # Real finding: clicking Gemini's "New chat" button (שיחה חדשה) briefly put

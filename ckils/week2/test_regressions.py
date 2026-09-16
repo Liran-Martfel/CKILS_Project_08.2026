@@ -75,6 +75,19 @@ class UiNoiseRejectionTests(unittest.TestCase):
             rule_engine._rejected_as_ui_noise(
                 "גרפי מניות, מדדים, חוזים עתידיים, מט\"ח וביטקוין בזמן-אמת ב-TradingView"))
 
+    def test_youtube_logo_only_rejected(self):
+        # Real bug: OCR repeatedly read nothing but YouTube's own logo/
+        # wordmark on a Hebrew-titled video, forcing English over real
+        # Hebrew content. Exact real captures, including OCR artifacts.
+        self.assertIsNotNone(rule_engine._rejected_as_ui_noise("YouTube“"))
+        self.assertIsNotNone(rule_engine._rejected_as_ui_noise("> YouTube"))
+        self.assertIsNotNone(rule_engine._rejected_as_ui_noise("YouTube"))
+
+    def test_real_comment_mentioning_youtube_not_rejected(self):
+        # Must NOT catch real content that happens to mention YouTube by name.
+        self.assertIsNone(
+            rule_engine._rejected_as_ui_noise("I loved this YouTube video, thanks for sharing!"))
+
     def test_real_content_not_rejected(self):
         self.assertIsNone(rule_engine._rejected_as_ui_noise("היי, מה קורה מחר?"))
 
