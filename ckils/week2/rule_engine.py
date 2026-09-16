@@ -404,7 +404,15 @@ GENERIC_ACCESSIBLE_TEXT_MARKERS = ["מכיל", "דפים"]
 # flipping a real Hebrew CV conversation back to English every time the box
 # went empty, confirmed live in logs/decisions.jsonl.
 PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude", "Write a message"]
-UI_CHROME_MARKERS = ["Workplace"]
+# Real finding, from auditing every manual override on record: TradingView's
+# own site tagline ("גרפי מניות, מדדים, חוזים עתידיים, מט"ח וביטקוין בזמן-אמת
+# ב-TradingView" — "Real-time stock charts, indices, futures, forex, and
+# Bitcoin on TradingView") is exposed as accessible text regardless of what
+# ticker is actually on screen, always in Hebrew, and kept forcing Hebrew over
+# real English ticker symbols (NVDA, QQQ, XAUUSD, ...) 10 times in the log.
+# Same category as Zoom's "Workplace" branding text above — fixed marketing
+# copy, not something a person is reading or typing.
+UI_CHROME_MARKERS = ["Workplace", "וביטקוין בזמן-אמת ב-TradingView"]
 
 
 def _rejected_as_ui_noise(text):

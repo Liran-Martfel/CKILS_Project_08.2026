@@ -68,6 +68,13 @@ class UiNoiseRejectionTests(unittest.TestCase):
     def test_whatsapp_placeholder_rejected_via_ocr_path_too(self):
         self.assertIsNotNone(rule_engine._rejected_as_ui_noise("Type a message"))
 
+    def test_tradingview_tagline_rejected(self):
+        # Real bug found by auditing every manual override on record: this
+        # exact tagline kept forcing Hebrew over real English ticker symbols.
+        self.assertIsNotNone(
+            rule_engine._rejected_as_ui_noise(
+                "גרפי מניות, מדדים, חוזים עתידיים, מט\"ח וביטקוין בזמן-אמת ב-TradingView"))
+
     def test_real_content_not_rejected(self):
         self.assertIsNone(rule_engine._rejected_as_ui_noise("היי, מה קורה מחר?"))
 

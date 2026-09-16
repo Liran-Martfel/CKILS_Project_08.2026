@@ -1884,6 +1884,29 @@ outweigh the wrapper on its own — confirmed that case gets even more confident
 
 ---
 
+## 2026-09-16 — Full override audit finds a real trend, and one new bug (TradingView)
+
+Before shipping to anyone else, audited every decision and every manual override on record in
+`ckils_decisions.db` (36,407 decisions, 214 overrides total, spanning 2026-09-03 to today) rather
+than relying on the bug list alone. **Real, measured improvement:** override rate (overrides ÷
+applied decisions) was **5.67%** in the week before the trust-history mechanism and decision
+logger landed (Sep 3–8: 137 overrides / 2,416 applied), and is **0.25%** since (Sep 9–16: 77
+overrides / 30,549 applied) — a **22.5x reduction**, measured directly from real usage, not
+estimated.
+
+Breaking down the remaining 77 overrides by app surfaced one genuinely new bug: **TradingView.exe,
+10 overrides**, every one preceded by TradingView's own Hebrew site tagline ("גרפי מניות, מדדים,
+חוזים עתידיים, מט\"ח וביטקוין בזמן-אמת ב-TradingView") being read as accessible text and forcing
+Hebrew over real English ticker symbols (NVDA, QQQ, XAUUSD, ...) — same bug family as Zoom's
+"Workplace" branding text: fixed marketing copy, not something a person is reading or typing.
+Never caught before because TradingView was never specifically tested. **Fixed** by adding the
+tagline to `UI_CHROME_MARKERS`. The rest of the remaining overrides matched already-known,
+already-understood gaps: Zoom's main call window (7, the documented unfixed case) and a Claude.ai
+conversation that genuinely mixes English and Hebrew within one page (the page-level-granularity
+limitation from 2026-09-13, still not built). 31 tests pass.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
