@@ -31,6 +31,13 @@ class PlaceholderRejectionTests(unittest.TestCase):
             rule_engine._looks_like_real_content(
                 "Type a message to Ron Katz", title="WhatsApp"))
 
+    def test_whatsapp_contact_search_placeholder_rejected(self):
+        # Real bug (2026-09-16): a THIRD, distinct WhatsApp placeholder (the
+        # contact-search box, not the message-compose box) forced English
+        # back over a real Hebrew message that had just been read correctly.
+        self.assertIsNotNone(
+            rule_engine._rejected_as_ui_noise("Search name, number or @username"))
+
     def test_claude_placeholder_rejected(self):
         self.assertFalse(
             rule_engine._looks_like_real_content(
@@ -112,6 +119,37 @@ class MessageMetadataStrippingTests(unittest.TestCase):
         label, proba = rule_engine.predict_language(stripped)
         self.assertEqual(label, "hebrew")
         self.assertGreaterEqual(proba[label], rule_engine.CONTENT_CONFIDENCE_THRESHOLD)
+
+    def test_strips_other_contacts_sender_prefix_and_context_menu_footer(self):
+        # Real bug (2026-09-16): a message from someone else (not "You")
+        # wasn't stripped at all - different sender-name prefix, different
+        # footer shape ("Context menu for message from <name> React").
+        raw = ("Noa Levy: התכוונתי להגיע בבוקר ואז החלטתי לבוא בערב "
+               "09:44 Context menu for message from Noa Levy React")
+        self.assertEqual(
+            rule_engine._strip_message_metadata(raw),
+            "התכוונתי להגיע בבוקר ואז החלטתי לבוא בערב")
+
+    def test_reclassifies_other_contacts_message_correctly_after_stripping(self):
+        raw = ("Noa Levy: התכוונתי להגיע בבוקר ואז החלטתי לבוא בערב "
+               "09:44 Context menu for message from Noa Levy React")
+        stripped = rule_engine._strip_message_metadata(raw)
+        label, proba = rule_engine.predict_language(stripped)
+        self.assertEqual(label, "hebrew")
+        self.assertGreaterEqual(proba[label], rule_engine.CONTENT_CONFIDENCE_THRESHOLD)
+
+    def test_does_not_strip_a_leading_time_as_a_sender_prefix(self):
+        # The generalized sender-prefix pattern must NOT catch a calendar
+        # time range ("6:30pm...") or a URL scheme ("https://...") just
+        # because they contain an early colon - both stay letters-only-free.
+        raw = "6:30pm to 7pm, לאסוף חבילה מהדואר, Liran's calender, No location, September 15, 2026"
+        self.assertEqual(rule_engine._strip_message_metadata(raw), raw)
+
+    def test_does_not_strip_a_url_scheme_as_a_sender_prefix(self):
+        raw = ("example-link-preview.example.com https://example-link-preview.example.com/ "
+               "17:49 Read Open message options React Forward media")
+        stripped = rule_engine._strip_message_metadata(raw)
+        self.assertTrue(stripped.startswith("example-link-preview.example.com"))
 
     def test_leaves_unrelated_text_untouched(self):
         # No "You:" prefix, no HH:MM+status footer — must pass through as-is.

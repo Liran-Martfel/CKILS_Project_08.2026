@@ -403,7 +403,14 @@ GENERIC_ACCESSIBLE_TEXT_MARKERS = ["מכיל", "דפים"]
 # through via OCR (accessible_text wasn't even involved this time) and kept
 # flipping a real Hebrew CV conversation back to English every time the box
 # went empty, confirmed live in logs/decisions.jsonl.
-PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude", "Write a message"]
+# Real finding, 2026-09-16: WhatsApp has a THIRD, different empty-box
+# placeholder — the contact-search box's "Search name, number or @username"
+# — distinct from the message-compose box's "Type a message". Confirmed live:
+# switched to Hebrew correctly from a real message, then a poll cycle 20
+# seconds later happened to read this placeholder instead and forced English
+# right back, before a later real message corrected it again.
+PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude", "Write a message",
+                              "Search name, number or @username"]
 # Real finding, from auditing every manual override on record: TradingView's
 # own site tagline ("גרפי מניות, מדדים, חוזים עתידיים, מט"ח וביטקוין בזמן-אמת
 # ב-TradingView" — "Real-time stock charts, indices, futures, forex, and
@@ -456,8 +463,25 @@ SHORTCUT_HINT_PATTERN = re.compile(r"(Ctrl|Alt|Shift|Cmd)\s*\+\s*(Ctrl|Alt|Shift
 # corrected even though the actual message content is obvious. Unlike the
 # reject-the-whole-string checks above, this only strips the known wrapper
 # and keeps the real content in between.
-MESSAGE_SENDER_PREFIX_PATTERN = re.compile(r"^You:\s*")
-MESSAGE_METADATA_SUFFIX_PATTERN = re.compile(r"\s*\d{1,2}:\d{2}\s+(Delivered|Read|Sent)\b.*$", re.IGNORECASE)
+#
+# Real finding, 2026-09-16: a message from someone else (not "You") shows
+# their own name as the prefix instead — confirmed live: 'Noa Levy:
+# התכוונתי להגיע בבוקר ואז החלטתי לבוא בערב 09:44 Context menu for message from Noa
+# Levy React' — a completely different, unstripped wrapper shape (a real
+# contact name, not literally "You", and a "Context menu for message from
+# <name> React" footer instead of "Delivered/Read/Sent") that scored only
+# ~59% English and was correctly never applied, but for the wrong reason
+# (luck, not a real fix) — the real content never even got a chance to be
+# read as Hebrew. Generalized the sender prefix to any short, letters-only
+# name (not just "You") and added the new footer shape. The prefix pattern
+# is deliberately restricted to letters/spaces only, and short (≤30 chars)
+# — real names look like that; a URL like 'https://...' or a time like
+# '6:30pm' never matches, so this can't accidentally eat real content that
+# happens to contain an early colon (confirmed directly against the exact
+# link-preview and calendar-event strings already covered by other tests).
+MESSAGE_SENDER_PREFIX_PATTERN = re.compile(r"^[A-Za-z֐-׿][A-Za-z֐-׿ ]{0,29}:\s*")
+MESSAGE_METADATA_SUFFIX_PATTERN = re.compile(
+    r"\s*\d{1,2}:\d{2}\s+(Delivered|Read|Sent|Context menu for message from)\b.*$", re.IGNORECASE)
 
 
 def _strip_message_metadata(text):

@@ -1941,6 +1941,31 @@ learning system for the latter is a real, distinct idea for later — not yet de
 
 ---
 
+## 2026-09-16 — Two more real WhatsApp bugs, found live minutes after fixing YouTube
+
+User reported switching to Hebrew correctly in WhatsApp after clicking a real message, then it
+reverting to English shortly after. Traced live: WhatsApp has a **third**, distinct empty-box
+placeholder — `"Search name, number or @username"` (the contact-search box), separate from the
+message-compose box's `"Type a message"` already covered. A poll cycle landed on it 20 seconds
+after a correct Hebrew read and forced English right back, before a later real message corrected it
+again. **Fixed** by adding it to `PLACEHOLDER_TEXT_PREFIXES`.
+
+Digging into the same window of data surfaced a second, related gap: a message from **someone
+else** (not "You") wasn't stripped at all — `'Noa Levy: התכוונתי להגיע בבוקר ואז החלטתי לבוא בערב 09:44
+Context menu for message from Noa Levy React'` — a different sender-prefix shape (a real
+contact name, not literally "You") and a different footer shape ("Context menu for message from
+<name> React", not "Delivered/Read/Sent"). It scored just under the confidence threshold and was
+never applied — accidentally harmless, not correctly handled. **Fixed** by generalizing
+`MESSAGE_SENDER_PREFIX_PATTERN` to match any short, letters-only name (not just "You") and adding
+the new footer shape to `MESSAGE_METADATA_SUFFIX_PATTERN`. The generalized prefix pattern was
+deliberately restricted to letters/spaces only, capped at 30 characters — verified directly against
+both the existing calendar-time and URL-scheme test cases (`"6:30pm..."`, `"https://..."`) to
+confirm neither gets mistaken for a sender-name prefix just because it contains an early colon; both
+have their own dedicated regression tests now specifically guarding against that. 38 tests pass
+(was 33).
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
