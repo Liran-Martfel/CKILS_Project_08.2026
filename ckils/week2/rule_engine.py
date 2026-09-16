@@ -953,7 +953,17 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
 # single-purpose app (Notepad, an editor) just gets one redundant, cheap,
 # deduped-against-in-flight-checks Tier 3 read every interval; an app with
 # this exact gap gets the re-check it would otherwise never receive.
-UNTRUSTED_POLL_SECONDS = 3.0
+#
+# Real complaint, 2026-09-16: on a brand-new page with no learned history yet
+# (see the YouTube/general-web finding the same day), the wait between polls
+# is exactly how long a wrong/stale keyboard state visibly persists once a
+# read didn't land well. Halved from 3.0s to give it roughly twice as many
+# chances per minute to land on a good read. This does NOT fix the root cause
+# (OCR/UI-Automation landing on the wrong element in the first place) — it
+# only shortens how long you're stuck in that state once it happens. Honest
+# cost: this roughly doubles how often the background poll's OCR read runs
+# for whatever window is currently focused, even when nothing has changed.
+UNTRUSTED_POLL_SECONDS = 1.5
 
 
 def _poll_focused_window():

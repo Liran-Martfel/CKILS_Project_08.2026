@@ -1907,10 +1907,56 @@ limitation from 2026-09-13, still not built). 31 tests pass.
 
 ---
 
+## 2026-09-16 — YouTube's own logo forcing English; poll interval halved; a real distinction worth writing down
+
+**User report:** a Hebrew-titled YouTube video sometimes didn't switch at all, and switching in
+general could take a while or need leaving and returning multiple times. Traced live in the DB:
+OCR was repeatedly reading nothing but YouTube's own logo/wordmark ("YouTube", with OCR artifacts
+like `"> YouTube"` or a stray smart quote) — always English regardless of the actual video, and it
+kept winning over real Hebrew content nearby. Same bug family as Zoom's "Workplace" text and
+TradingView's tagline. **Fixed** with a precise regex (not a bare substring check, so real content
+that happens to mention YouTube by name isn't wrongly caught too) — verified with a dedicated test
+for exactly that case. 33 tests pass.
+
+**The user then clarified the slowness complaint was broader than YouTube specifically** — general
+web browsing, not one site. Root-caused as a different, already-known, harder gap: a brand-new
+page with no learned history gets no proactive guess at all (keyboard just sits at its last
+state), and correcting it depends on Tier 3 actually landing on the real content instead of a
+wrong small element — the same still-open category as the Zoom main-window case, just showing up
+more broadly. Applied the cheap available mitigation: halved `UNTRUSTED_POLL_SECONDS` (3.0 → 1.5),
+roughly doubling how many chances per minute a stuck window gets to land on a good read. Explicitly
+**not** a fix for the root cause (wrong-element focus) — only shortens how long a wrong state
+visibly persists once it happens. Honest cost: roughly doubles background OCR polling frequency for
+whatever window is currently focused, even when nothing changed.
+
+**Worth writing down precisely, since it came up directly:** the classifier does not, and cannot,
+learn to fix "landed on the wrong element" — that's not a task it performs. It only classifies
+text it's already been handed; *which* text it's handed is decided entirely by a separate,
+non-learning mechanism (UI Automation's `GetFocusedControl()` plus the sibling-redirect/rejection
+heuristics). When that upstream step lands on the wrong thing, the classifier's answer is correct
+for the (wrong) input it received — not a model-accuracy failure. The only thing that genuinely
+learns over time today is the trust-history system, and it only learns *which language an app/page
+tends to be*, never *which control on screen actually has the real content*. A second, separate
+learning system for the latter is a real, distinct idea for later — not yet designed or built.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
 not designed in detail yet, just captured.
+
+**2026-09-16 — A second learning system: which control actually has the real content**
+
+Everything CKILS learns today is about *language* — which app/page tends to be Hebrew or English.
+Nothing learns *where to look* — that's fixed, hand-written logic (the sibling-redirect heuristic,
+the rejection lists), fixed one app at a time as real cases surface (Zoom's header, YouTube's logo,
+TradingView's tagline, ...). The idea: a second, separate learned memory — per app (or per app+
+control-shape), remember *which specific control reliably had real content last time*, the same
+"trust built from evidence, not hand-named" spirit as the language trust system, but pointed at
+"where," not "what language." Would directly address the still-open wrong-element-focus problem
+(Zoom's main window, general web browsing) without hand-fixing every app one string at a time.
+Not designed in any real detail — just the germ of the idea, written down before it's lost.
 
 **2026-09-13 — Page-language guess for a brand-new YouTube page**
 
