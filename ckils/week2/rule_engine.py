@@ -582,6 +582,75 @@ def _find_larger_sibling_rect(control):
         return None
 
 
+# Real gap, confirmed live and diagnosed with diagnose_zoom_tree.py: in Zoom's
+# main "Zoom Meeting" call window, the focused control can instead be a
+# toolbar button (e.g. "Start my video") whose siblings are just other
+# toolbar buttons — no larger sibling exists, so _find_larger_sibling_rect
+# above correctly finds nothing, but the real chat pane still isn't read,
+# because it lives in a completely different branch of the tree entirely
+# (a cousin, not a sibling — several levels away under a different parent).
+# Reaching it means searching the WHOLE window, not just next to the focused
+# control.
+#
+# Real risk found and designed around before shipping, not after: Zoom's main
+# window has SEVERAL large panes at once — a video gallery and a screen-share
+# container, both comparable in size to the actual chat pane, both plausible
+# false positives for "largest pane in the window." What distinguishes the
+# real chat pane in the live tree dump is that Zoom draws it as pixels with NO
+# accessible children at all (a true leaf), while the video gallery and share
+# container both contain further named child elements (participant tiles, a
+# "Share Content" child). Requiring "no children" specifically, not just
+# "large," is what excludes those two candidates. Structural, not app-named —
+# nothing here checks exe_name or title, and this only ever runs after the
+# sibling search already found nothing, which real evidence so far shows is
+# rare.
+WHOLE_WINDOW_SEARCH_MIN_HEIGHT = 300
+WHOLE_WINDOW_SEARCH_NODE_CAP = 500
+WHOLE_WINDOW_SEARCH_MAX_DEPTH = 12
+
+
+def _find_largest_leaf_pane_in_window(hwnd):
+    try:
+        root = auto.ControlFromHandle(hwnd)
+    except Exception:
+        return None
+
+    best = None
+    visited = 0
+
+    def walk(control, depth):
+        nonlocal best, visited
+        if control is None or depth > WHOLE_WINDOW_SEARCH_MAX_DEPTH or visited >= WHOLE_WINDOW_SEARCH_NODE_CAP:
+            return
+        visited += 1
+        try:
+            child = control.GetFirstChildControl()
+        except Exception:
+            return
+        if child is None:
+            # A true leaf — no children at all — is exactly the shape Zoom's
+            # own pixel-drawn chat pane has, unlike the video gallery or the
+            # share container (both have named child elements of their own).
+            try:
+                rect = control.BoundingRectangle
+                if (rect.height() >= WHOLE_WINDOW_SEARCH_MIN_HEIGHT
+                        and _is_onscreen(rect)
+                        and (best is None or rect.height() * rect.width() > best.height() * best.width())):
+                    best = rect
+            except Exception:
+                pass
+            return
+        while child is not None:
+            walk(child, depth + 1)
+            try:
+                child = child.GetNextSiblingControl()
+            except Exception:
+                break
+
+    walk(root, 0)
+    return best
+
+
 # Real finding, confirmed directly with diagnose_textpattern.py on real documents
 # with real content: Google Docs does not expose its actual body text through
 # ANY UI Automation mechanism — not the bounding rectangle (document-scroll
@@ -675,6 +744,13 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
                 source = "ocr_sibling"
                 if DEBUG:
                     print(f"  [content] focused control looks like a thin header ({rect.height()}px) — reading its larger sibling pane instead")
+            else:
+                window_rect = _find_largest_leaf_pane_in_window(hwnd)
+                if window_rect is not None:
+                    ocr_rect = window_rect
+                    source = "ocr_window_search"
+                    if DEBUG:
+                        print(f"  [content] no larger sibling either — found a large leaf pane elsewhere in the window instead")
         try:
             right = min(ocr_rect.right, ocr_rect.left + MAX_OCR_WIDTH)
             bottom = min(ocr_rect.bottom, ocr_rect.top + MAX_OCR_HEIGHT)

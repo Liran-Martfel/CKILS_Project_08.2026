@@ -1966,6 +1966,37 @@ have their own dedicated regression tests now specifically guarding against that
 
 ---
 
+## 2026-09-16 — Zoom's main-window gap finally closed: search the whole window, not just siblings
+
+The last known open item from 2026-09-11: Zoom's main "Zoom Meeting" call window can leave the
+focused control on a toolbar button (e.g. "Start my video") whose siblings are just other toolbar
+buttons — `_find_larger_sibling_rect` correctly finds nothing there, but the real chat pane still
+never gets read, because it lives in a completely different branch of the tree (a cousin, not a
+sibling, several levels away under a different parent). Reaching it needs searching the whole
+window, not just next door.
+
+**Added `_find_largest_leaf_pane_in_window()`** as a further fallback, tried only after the sibling
+search already found nothing: walks the entire window tree (capped at 500 nodes / 12 levels deep,
+same discipline as `diagnose_zoom_tree.py`, so this can't run away on a deeply-nested tree like a
+web page) looking for the largest on-screen pane.
+
+**A real risk found and designed around before shipping, not after**, re-examining the original
+`diagnose_zoom_tree.py` dump from 2026-09-11: Zoom's main window has *several* large panes at
+once — a video gallery and a screen-share container, both comparable in size to the real chat pane,
+and the share container is actually **larger in raw area** than the chat pane. A naive "pick the
+biggest pane in the window" rule would have picked the wrong one. What actually distinguishes the
+real chat pane in the live tree: Zoom draws it as pixels with **no accessible children at all** — a
+true leaf — while the video gallery and share container both contain their own child elements
+(participant tiles, a "Share Content" child). Requiring "no children," not just "large," is what
+correctly excludes both traps. Structural, not app-named, same as every other fix in this family.
+
+**Verified directly** with a fake three-pane tree reproducing the exact trap (a large non-leaf
+"share container" with more raw area than a smaller true-leaf "chat pane") — confirms the leaf-only
+rule picks the smaller-but-correct candidate over the larger-but-wrong one. 40 tests pass (was 38).
+Not yet confirmed against the real, live Zoom window — that's the next real-world check.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

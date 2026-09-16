@@ -301,6 +301,63 @@ class SiblingRedirectTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class WholeWindowSearchTests(unittest.TestCase):
+    """Real bug (2026-09-16), diagnosed with diagnose_zoom_tree.py: Zoom's main
+    call window can leave the focused control on a toolbar button whose
+    siblings are just other toolbar buttons — no larger sibling exists, but
+    the real chat pane still isn't read, because it lives in a completely
+    different branch of the tree (a cousin, not a sibling, several levels
+    away). Also locks in a real risk found while designing the fix: a video
+    gallery and a screen-share container are BOTH large enough in the real
+    tree to be false positives, and the share container is even LARGER in raw
+    area than the real chat pane — only requiring the candidate to be a true
+    leaf (no children at all), matching exactly how Zoom draws real pixel-
+    based chat content (unlike the gallery/share panes, which both have their
+    own child elements), correctly excludes both."""
+
+    def setUp(self):
+        self._orig_control_from_handle = rule_engine.auto.ControlFromHandle
+
+    def tearDown(self):
+        rule_engine.auto.ControlFromHandle = self._orig_control_from_handle
+
+    def test_finds_the_leaf_pane_even_when_larger_non_leaf_panes_exist(self):
+        root = _FakeControl(rect=_FakeRect(0, 0, 2000, 1000))
+
+        video_gallery = _FakeControl(rect=_FakeRect(0, 0, 200, 900), parent=root)
+        video_gallery._children = [_FakeControl(rect=_FakeRect(0, 0, 200, 150), parent=video_gallery)]
+
+        # Largest raw area of any candidate here — but has a child (a nested,
+        # unrelated small element), so it must be excluded despite the size.
+        share_container = _FakeControl(rect=_FakeRect(200, 0, 1200, 900), parent=root)
+        share_container._children = [_FakeControl(rect=_FakeRect(200, 0, 400, 50), parent=share_container)]
+
+        # Smaller raw area than share_container, but a true leaf — this is
+        # the one that must win.
+        chat_body_leaf = _FakeControl(rect=_FakeRect(1200, 0, 1700, 900), parent=root)
+
+        root._children = [video_gallery, share_container, chat_body_leaf]
+        _link_siblings(root._children)
+        _link_siblings(video_gallery._children)
+        _link_siblings(share_container._children)
+
+        rule_engine.auto.ControlFromHandle = lambda hwnd: root
+
+        result = rule_engine._find_largest_leaf_pane_in_window(hwnd=12345)
+        self.assertIs(result, chat_body_leaf.BoundingRectangle)
+
+    def test_returns_none_when_nothing_qualifies(self):
+        root = _FakeControl(rect=_FakeRect(0, 0, 500, 500))
+        small = _FakeControl(rect=_FakeRect(0, 0, 100, 100), parent=root)
+        root._children = [small]
+        _link_siblings(root._children)
+
+        rule_engine.auto.ControlFromHandle = lambda hwnd: root
+
+        result = rule_engine._find_largest_leaf_pane_in_window(hwnd=12345)
+        self.assertIsNone(result)
+
+
 class GoogleDocsTitleOneTimeDefaultTests(unittest.TestCase):
     """Real bug (2026-09-15): Google Docs' body text is a confirmed dead end to
     read, so the only signal decide_with_content has is the document's own

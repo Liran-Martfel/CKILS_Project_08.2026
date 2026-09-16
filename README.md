@@ -49,20 +49,25 @@ read — specifically so a wrong guess can be diagnosed from evidence instead of
 
 The core switching pipeline (all three tiers) is built, wired end to end, and has been running
 against real daily use. That real use has surfaced — and fixed — a steady stream of genuine bugs
-in how various apps expose their on-screen content: Zoom's chat panel reading its own header
-instead of the conversation, WhatsApp and Claude.ai's own empty-input placeholders being
-misread as real typed content, Google Calendar's event tiles diluting a real Hebrew title with
-English scaffolding text, and Google Docs periodically re-asserting a stale title-based guess
-over live typing. Each fix is backed by a regression test built from the real failure it
-addresses — 30 tests currently, covering every bug found so far (`ckils/week2/test_regressions.py`).
+in how various apps expose their on-screen content: Zoom's chat panel reading its own header (and,
+more recently, its main call window landing on a toolbar button) instead of the conversation,
+WhatsApp, Claude.ai, and YouTube's own UI chrome (placeholders, logos, taglines) being misread as
+real typed content, Google Calendar's event tiles diluting a real Hebrew title with English
+scaffolding text, and Google Docs periodically re-asserting a stale title-based guess over live
+typing. Real usage data also shows the reliability trend directly: override rate — how often a
+decision needed manual correction — dropped from 5.67% before the trust-history mechanism landed
+to under 0.3% since. Each fix is backed by a regression test built from the real failure it
+addresses — 40 tests currently, covering every bug found so far (`ckils/week2/test_regressions.py`).
 
 **Known open limitations:**
-- Zoom's main call window can still occasionally read the wrong on-screen element (a toolbar
-  button) instead of the chat pane — a deeper fix (searching the window's full UI tree rather than
-  trusting whatever's "focused") is designed but not yet built.
 - No proactive language guess yet for a brand-new page with zero learned history (e.g. the first
   visit to a new YouTube video) — the keyboard simply stays at its last physical state until Tier
   3 catches up from real content.
+- Nothing in CKILS learns *where* to look on screen — only *what language things tend to be* once
+  it's already looking in a good spot. Every "wrong element focused" fix (Zoom's header, Zoom's
+  toolbar button, ...) has been a targeted, hand-diagnosed structural fix, not something that
+  generalizes on its own to an app not yet encountered. A second, separate learning system for
+  "which control reliably has real content" is a real idea for later, not yet designed.
 
 The full, honest development history — every real bug found, how it was diagnosed, what was tried
 and rejected, and why — lives in [`PROJECT_JOURNEY.md`](PROJECT_JOURNEY.md).
