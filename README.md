@@ -56,8 +56,11 @@ real typed content, Google Calendar's event tiles diluting a real Hebrew title w
 scaffolding text, and Google Docs periodically re-asserting a stale title-based guess over live
 typing. Real usage data also shows the reliability trend directly: override rate — how often a
 decision needed manual correction — dropped from 5.67% before the trust-history mechanism landed
-to under 0.3% since. Each fix is backed by a regression test built from the real failure it
-addresses — 40 tests currently, covering every bug found so far (`ckils/week2/test_regressions.py`).
+to under 0.3% since. A real live run also surfaced a genuine performance bug: the background safety
+poll was re-running full OCR on an already-settled window every ~1.5 seconds forever, burning
+sustained CPU — fixed with per-window backoff once a read has repeated unchanged a few times in a
+row. Each fix is backed by a regression test built from the real failure it addresses — 43 tests
+currently, covering every bug found so far (`ckils/week2/test_regressions.py`).
 
 **Known open limitations:**
 - No proactive language guess yet for a brand-new page with zero learned history (e.g. the first

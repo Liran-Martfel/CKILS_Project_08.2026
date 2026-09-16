@@ -1997,6 +1997,42 @@ Not yet confirmed against the real, live Zoom window — that's the next real-wo
 
 ---
 
+## 2026-09-16 — A real performance bug: the untrusted poll was hammering OCR nonstop
+
+User report: switching to Hebrew in Google felt slow, and the same slowness showed up while simply
+typing a message elsewhere — a sign this wasn't a decision-logic bug in one app, but something
+affecting the whole system.
+
+**Found from real evidence, not guesswork:** `Get-Process` on the running CKILS process showed
+**1,354 CPU-seconds used over ~4 hours 8 minutes of runtime** — a sustained ~9% average for a tool
+that should be idle almost all the time. The live debug log showed why: `_poll_focused_window` (the
+timer added 2026-09-08 to catch apps like WhatsApp that fire no Windows event when their content
+changes) was re-running a full Tesseract OCR read on a completely static Chrome tab **every ~1.5
+seconds, forever**, each read taking 550–770ms, landing on the exact same answer ("no change")
+every single time. Nothing about the poll's design ever slowed down or stopped once a window's
+content had clearly settled — it had no concept of "already answered this enough times."
+
+**Fixed with per-`(thread_id, title)` backoff.** New `_poll_apply_content_correction()` wraps
+`apply_content_correction()` for the poll path specifically (event-driven checks — a real focus or
+title change — are untouched and always get a fresh, full-speed look). `apply_content_correction()`
+now returns whether it actually applied a change; the wrapper tracks consecutive unchanged results
+per key in `poll_unchanged_streak`, and once a key hits `POLL_BACKOFF_STREAK_THRESHOLD` (3) in a
+row, it becomes ineligible for re-polling for `POLL_BACKOFF_SECONDS` (20s) via `poll_next_allowed`.
+Any real change immediately clears both — so the WhatsApp-shape case this poll exists for (content
+changes with no Windows event at all) is still caught, just not hammered nonstop on windows that
+have already settled. Stale backoff state for an old title is also cleared at the same point
+`content_decision` already gets cleared on a real title change, so switching Chrome tabs doesn't
+inherit a previous tab's backoff.
+
+**Honest tradeoff, stated up front:** if a window backs off and then its content changes silently
+within that 20s window (the specific WhatsApp gap), the worst-case delay to catch it goes from at
+most 1.5s to at most 20s. Judged acceptable because a genuinely different conversation almost always
+produces a different result the instant it's checked, which immediately resets the key back to fast
+polling — the slow case is the exception, not the norm. 43 tests pass (was 40). Not yet re-measured
+against a fresh multi-hour run to confirm the CPU drop directly — that's the next real-world check.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

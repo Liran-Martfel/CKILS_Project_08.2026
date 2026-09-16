@@ -282,6 +282,25 @@ last_title_by_thread = {}  # thread_id -> last-seen window title
 # NAMECHANGE event skips spawning a redundant, racing one.
 content_check_in_progress = set()
 
+# Real bug found live, 2026-09-16: the untrusted poll below (see
+# UNTRUSTED_POLL_SECONDS) re-ran a full Tesseract OCR read on whatever window was
+# focused every single tick, forever — even once it had already confirmed the exact
+# same answer many times in a row. Confirmed directly from a live 4+ hour run: one
+# static Chrome tab got re-OCR'd every ~1.5s nonstop, ~600ms per read, "no change"
+# every time, for over 1,300 CPU-seconds total. That sustained background OCR load
+# is a real, measurable resource cost, and very plausibly what made switching feel
+# slow everywhere (including typing into an unrelated app) — not a decision-logic
+# bug, a performance one. Fixed by backing off, per (thread_id, title), once a read
+# has come back unchanged several times in a row; any real event for that key
+# (title change, different tab, different window) starts it fresh at full speed —
+# so the WhatsApp-style "content changes with no Windows event" case this poll
+# exists for is still caught, just not hammered nonstop on windows that already
+# settled.
+POLL_BACKOFF_STREAK_THRESHOLD = 3   # this many identical "no change" polls in a row before backing off
+POLL_BACKOFF_SECONDS = 20.0         # how slowly to re-check a settled window, instead of every UNTRUSTED_POLL_SECONDS
+poll_unchanged_streak = {}  # (thread_id, title) -> consecutive "no change" poll results
+poll_next_allowed = {}      # (thread_id, title) -> earliest time.time() this key may be poll-checked again
+
 # Tier 3 (Week 5): refines — or, for an app with no learned default yet, supplies — the switch decision
 # using the actual on-screen text, via UI Automation + OCR + the model trained in 5.4.
 CONTENT_CONFIDENCE_THRESHOLD = 0.65
@@ -885,6 +904,9 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     if last_title_by_thread.get(thread_id) != title:
         content_decision.pop(thread_id, None)
         google_docs_title_already_applied.discard(thread_id)
+        old_key = (thread_id, last_title_by_thread.get(thread_id))
+        poll_unchanged_streak.pop(old_key, None)
+        poll_next_allowed.pop(old_key, None)
         last_title_by_thread[thread_id] = title
 
     # Layered fallback, most specific first: this visit's own decision (if Tier 3
@@ -1000,11 +1022,11 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         if corrected_hkl == fallback_hkl or corrected_hkl is None:
             if DEBUG:
                 print(f"  [content] {exe_name}: no change ({elapsed_ms:.0f} ms)")
-            return
+            return False
         if win32gui.GetForegroundWindow() != hwnd:
             if DEBUG:
                 print(f"  [content] {exe_name}: decision arrived too late, focus moved on ({elapsed_ms:.0f} ms)")
-            return
+            return False
         # Real bug found live: Chrome's hwnd doesn't change between tabs, so the
         # check above alone can't tell "still the same window" apart from "same
         # window, but you've since switched to a different tab." Re-check the
@@ -1013,11 +1035,11 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         if win32gui.GetWindowText(hwnd) != title:
             if DEBUG:
                 print(f"  [content] {exe_name}: decision is for a different tab now, discarding ({elapsed_ms:.0f} ms)")
-            return
+            return False
         if thread_id in overridden:
             if DEBUG:
                 print(f"  [content] {exe_name}: user has manually overridden this window, leaving it alone ({elapsed_ms:.0f} ms)")
-            return
+            return False
 
         win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, corrected_hkl)
         last_set[thread_id] = corrected_hkl
@@ -1040,6 +1062,7 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         save_learned_default(exe_name, language_name)  # this app in general
         save_page_learned_default(exe_name, title, language_name)  # this exact page — both genuinely AI-learned
         print(f"{exe_name}: content-aware correction to {hex(corrected_hkl)} ({elapsed_ms:.0f} ms)")
+        return True
     finally:
         content_check_in_progress.discard(check_key)
 
@@ -1080,12 +1103,35 @@ def _poll_focused_window():
         check_key = (thread_id, title)
         if check_key in content_check_in_progress:
             continue  # a check for this same title (from an event or a previous tick) is already in flight
+        if time.time() < poll_next_allowed.get(check_key, 0.0):
+            continue  # this exact window+title has already settled — see poll_unchanged_streak below
         content_check_in_progress.add(check_key)
         threading.Thread(
-            target=apply_content_correction,
-            args=(hwnd, thread_id, exe_name, last_set.get(thread_id), title),
+            target=_poll_apply_content_correction,
+            args=(hwnd, thread_id, exe_name, last_set.get(thread_id), title, check_key),
             daemon=True
         ).start()
+
+
+def _poll_apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title, check_key):
+    # Thin wrapper around apply_content_correction just for the poll path — tracks
+    # whether this specific (thread_id, title) keeps coming back unchanged so this
+    # timer can stop hammering it with full OCR reads once it has (see
+    # poll_unchanged_streak/poll_next_allowed above). Event-driven checks (a real
+    # focus or title change) go straight to apply_content_correction and never
+    # touch this bookkeeping — a real event always deserves a fresh, full-speed look.
+    try:
+        changed = apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title)
+    except Exception:
+        changed = False
+    if changed:
+        poll_unchanged_streak.pop(check_key, None)
+        poll_next_allowed.pop(check_key, None)
+    else:
+        streak = poll_unchanged_streak.get(check_key, 0) + 1
+        poll_unchanged_streak[check_key] = streak
+        if streak >= POLL_BACKOFF_STREAK_THRESHOLD:
+            poll_next_allowed[check_key] = time.time() + POLL_BACKOFF_SECONDS
 
 
 # Real gap found while adding regression tests: everything below this point used

@@ -9,6 +9,7 @@ see that guard's own comment for why.
 """
 import shutil
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -502,6 +503,67 @@ class DecisionLoggerOverrideLinkTests(unittest.TestCase):
         self.assertEqual(override_entry["event_type"], "manual_override")
         self.assertIsNotNone(override_entry["preceding_auto"])
         self.assertEqual(override_entry["preceding_auto"]["new_language"], "hebrew")
+
+
+class PollBackoffTests(unittest.TestCase):
+    """Real bug found live, 2026-09-16: the untrusted poll re-ran a full
+    Tesseract OCR read on whatever window was focused every ~1.5s, forever,
+    even once it had already confirmed the identical answer many times in a
+    row. Confirmed directly from a live 4+ hour run: one static Chrome tab
+    got re-OCR'd nonstop, ~600ms per read, over 1,300 CPU-seconds total, with
+    "no change" every single time. Fixed with per-(thread_id, title) backoff:
+    _poll_apply_content_correction (the poll path's wrapper around
+    apply_content_correction) tracks consecutive unchanged results and, past
+    a threshold, makes that exact key ineligible for re-polling for a while."""
+
+    def setUp(self):
+        rule_engine.poll_unchanged_streak.clear()
+        rule_engine.poll_next_allowed.clear()
+
+    def tearDown(self):
+        rule_engine.poll_unchanged_streak.clear()
+        rule_engine.poll_next_allowed.clear()
+
+    def test_repeated_unchanged_results_trigger_backoff(self):
+        check_key = (999, "Static Page - Google Chrome")
+        with patch.object(rule_engine, "apply_content_correction", return_value=False):
+            for _ in range(rule_engine.POLL_BACKOFF_STREAK_THRESHOLD):
+                rule_engine._poll_apply_content_correction(
+                    12345, 999, "chrome.exe", rule_engine.English_HKL,
+                    "Static Page - Google Chrome", check_key)
+
+        self.assertEqual(
+            rule_engine.poll_unchanged_streak[check_key],
+            rule_engine.POLL_BACKOFF_STREAK_THRESHOLD)
+        self.assertIn(check_key, rule_engine.poll_next_allowed)
+        self.assertGreater(rule_engine.poll_next_allowed[check_key], time.time())
+
+    def test_below_threshold_does_not_back_off_yet(self):
+        check_key = (999, "Static Page - Google Chrome")
+        with patch.object(rule_engine, "apply_content_correction", return_value=False):
+            for _ in range(rule_engine.POLL_BACKOFF_STREAK_THRESHOLD - 1):
+                rule_engine._poll_apply_content_correction(
+                    12345, 999, "chrome.exe", rule_engine.English_HKL,
+                    "Static Page - Google Chrome", check_key)
+
+        self.assertNotIn(check_key, rule_engine.poll_next_allowed)
+
+    def test_a_real_change_resets_any_existing_backoff(self):
+        # Reproduces the WhatsApp-shape case this poll exists for: a window
+        # backs off after settling, then its content genuinely changes with
+        # no Windows event (the poll is the only thing that ever notices) —
+        # that real change must immediately clear the backoff, not extend it.
+        check_key = (999, "WhatsApp Business - Google Chrome")
+        rule_engine.poll_unchanged_streak[check_key] = rule_engine.POLL_BACKOFF_STREAK_THRESHOLD
+        rule_engine.poll_next_allowed[check_key] = time.time() + rule_engine.POLL_BACKOFF_SECONDS
+
+        with patch.object(rule_engine, "apply_content_correction", return_value=True):
+            rule_engine._poll_apply_content_correction(
+                12345, 999, "chrome.exe", rule_engine.English_HKL,
+                "WhatsApp Business - Google Chrome", check_key)
+
+        self.assertNotIn(check_key, rule_engine.poll_unchanged_streak)
+        self.assertNotIn(check_key, rule_engine.poll_next_allowed)
 
 
 if __name__ == "__main__":
