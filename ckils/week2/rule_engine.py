@@ -856,6 +856,8 @@ WinEventProcType = ctypes.WINFUNCTYPE(
     None, ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD, ctypes.wintypes.HWND,
     ctypes.wintypes.LONG, ctypes.wintypes.LONG, ctypes.wintypes.DWORD, ctypes.wintypes.DWORD)
 
+pending_override = {}  # thread_id -> (hkl_seen, first_seen_time) — an unconfirmed mismatch, not yet trusted
+
 def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl):
     """Real bug found live, 2026-09-17 ("ping-pong" complaint): manual-override
     detection used to live ONLY inside on_focus_change, which only runs on a
@@ -869,6 +871,22 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl):
     (_poll_focused_window) can detect this the moment it happens, not only
     when the user happens to trigger a focus event afterward.
 
+    Real regression found live, same day, right after shipping the above: a
+    single mismatched read isn't reliable proof of a manual override.
+    win32api.PostMessage(WM_INPUTLANGCHANGEREQUEST) is fire-and-forget — it
+    doesn't guarantee Windows has actually applied the switch by the time the
+    very next check runs, especially right after a slow Tier 3 correction
+    (confirmed live taking 700ms-3+ seconds under load, far past the 0.3s
+    SWITCH_GRACE window). Confirmed directly from the overrides table: the
+    exact same Code.exe thread falsely "overrode" to Hebrew four separate
+    times in one session while the user was just typing, each time freezing
+    further correction and even feeding the bad reading into the trust
+    history as if it were real. Fixed by requiring the SAME mismatch to be
+    seen on two independent checks before it's trusted (pending_override) —
+    a real manual switch is still caught within about one extra tick; a
+    one-off propagation-lag reading resolves itself on the next check
+    instead of ever being committed as fact.
+
     Returns True if a manual override was detected (and fully recorded,
     same as before) — the caller should treat this tick as "leave it alone"
     rather than run any further automatic correction.
@@ -877,7 +895,19 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl):
         return False
     just_switched = time.time() - last_switch_time.get(thread_id, 0) < SWITCH_GRACE
     if actual_hkl == last_set[thread_id] or just_switched:
+        pending_override.pop(thread_id, None)  # matches again on its own — was propagation lag, not a real override
         return False
+
+    pending_hkl, _ = pending_override.get(thread_id, (None, None))
+    if pending_hkl != actual_hkl:
+        # First time seeing this exact mismatch — note it, but a single
+        # snapshot isn't enough to commit to. Let the caller's normal
+        # correction path run this tick instead of freezing on one bad read.
+        pending_override[thread_id] = (actual_hkl, time.time())
+        return False
+
+    # Same mismatch confirmed independently on a second check — trust it now.
+    pending_override.pop(thread_id, None)
     overridden.add(thread_id)
     last_set[thread_id] = actual_hkl  # treat the user's manual choice as the new "last known" state
     log_override(exe_name, title, thread_id, actual_hkl)  # real, free evidence a recent decision was wrong
@@ -913,6 +943,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             last_set.pop(previous_thread, None)
         content_decision.pop(previous_thread, None)  # fresh window = learned default first, again
         google_docs_title_already_applied.discard(previous_thread)
+        pending_override.pop(previous_thread, None)  # an unconfirmed mismatch from THIS visit shouldn't leak into the next
         # Real bug found live: unlike content_decision (a per-visit "sticky"
         # value that SHOULD reset the moment you leave), decision_logger's
         # last-auto-decision record is meant to answer "what did CKILS decide

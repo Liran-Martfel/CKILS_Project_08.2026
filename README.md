@@ -62,9 +62,12 @@ sustained CPU — fixed with per-window backoff once a read has repeated unchang
 row (confirmed after the fact: sustained CPU dropped from ~9% to under 1%). A separate real bug
 meant a manual language correction could be silently undone by the next background check unless you
 forced a fresh focus event by alt-tabbing away and back — fixed by making the background poll detect
-a manual override on its own, within one poll interval, no "ping-pong" required. Each fix is backed
-by a regression test built from the real failure it addresses — 48 tests currently, covering every
-bug found so far (`ckils/week2/test_regressions.py`).
+a manual override on its own, within one poll interval, no "ping-pong" required. That fix itself then
+surfaced a same-day regression — a single mismatched keyboard reading (Windows hadn't yet applied
+CKILS's own pending switch) was being trusted as proof of a manual override on the spot, silently
+freezing correction — fixed by requiring the same mismatch twice, on two independent checks, before
+it's trusted. Each fix is backed by a regression test built from the real failure it addresses — 50
+tests currently, covering every bug found so far (`ckils/week2/test_regressions.py`).
 
 **Known open limitations:**
 - No proactive language guess yet for a brand-new page with zero learned history (e.g. the first

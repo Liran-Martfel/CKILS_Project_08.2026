@@ -582,11 +582,13 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         rule_engine.last_set.clear()
         rule_engine.last_switch_time.clear()
         rule_engine.overridden.clear()
+        rule_engine.pending_override.clear()
 
     def tearDown(self):
         rule_engine.last_set.clear()
         rule_engine.last_switch_time.clear()
         rule_engine.overridden.clear()
+        rule_engine.pending_override.clear()
 
     def test_nothing_to_compare_against_is_not_an_override(self):
         result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
@@ -609,9 +611,42 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         self.assertFalse(result)
         self.assertNotIn(999, rule_engine.overridden)
 
-    def test_detects_a_silent_manual_switch(self):
+    def test_a_single_mismatch_is_not_yet_trusted(self):
+        # Real regression found live, 2026-09-17, right after shipping the
+        # fix above: PostMessage(WM_INPUTLANGCHANGEREQUEST) is fire-and-
+        # forget, so a single mismatched read shortly after a slow Tier 3
+        # correction can just be Windows not having caught up yet — not a
+        # real manual override. Confirmed from the real overrides table: the
+        # same Code.exe thread falsely "overrode" to Hebrew four times in one
+        # session while the user was only typing. A single reading must NOT
+        # commit to an override.
         rule_engine.last_set[999] = rule_engine.English_HKL
         rule_engine.last_switch_time[999] = time.time() - 10  # well past the switch grace
+        result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
+
+        self.assertFalse(result)
+        self.assertNotIn(999, rule_engine.overridden)
+        self.assertIn(999, rule_engine.pending_override)  # noted, not yet trusted
+
+    def test_a_mismatch_that_resolves_itself_is_never_trusted(self):
+        # The propagation-lag case: the first read catches Windows mid-way
+        # through applying CKILS's own correction; by the next check it's
+        # caught up and matches again. Must never become a committed override.
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        rule_engine.last_switch_time[999] = time.time() - 10
+        rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
+
+        result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.English_HKL)
+
+        self.assertFalse(result)
+        self.assertNotIn(999, rule_engine.overridden)
+        self.assertNotIn(999, rule_engine.pending_override)
+
+    def test_the_same_mismatch_confirmed_twice_is_a_real_override(self):
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        rule_engine.last_switch_time[999] = time.time() - 10
+        rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
+
         with patch.object(rule_engine, "log_override"), \
              patch.object(rule_engine, "save_learned_default"), \
              patch.object(rule_engine, "save_page_learned_default"), \
@@ -621,12 +656,13 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertIn(999, rule_engine.overridden)
         self.assertEqual(rule_engine.last_set[999], rule_engine.Hebrew_HKL)
+        self.assertNotIn(999, rule_engine.pending_override)
 
-    def test_poll_loop_detects_a_silent_override_before_running_tier3(self):
+    def test_poll_loop_detects_a_silent_override_confirmed_over_two_ticks(self):
         # Reproduces the exact real scenario: the user manually switches with
-        # no focus/title event at all, then the poll's very next tick must
-        # record it as an override and skip spawning a Tier 3 check that
-        # would otherwise fight it right back.
+        # no focus/title event at all, then the SAME reading confirmed on a
+        # second poll tick must record it as an override — a single tick
+        # must not, and must still allow a normal correction attempt.
         rule_engine.last_set[999] = rule_engine.English_HKL
         rule_engine.last_switch_time[999] = time.time() - 10
         hwnd = 12345
@@ -640,13 +676,15 @@ class ManualOverrideDetectionTests(unittest.TestCase):
              patch.object(rule_engine, "save_page_learned_default"), \
              patch.object(rule_engine.decision_logger, "log_manual_override"), \
              patch.object(rule_engine.threading, "Thread") as mock_thread, \
-             patch.object(rule_engine.time, "sleep", side_effect=[None, StopIteration]):
+             patch.object(rule_engine.time, "sleep", side_effect=[None, None, StopIteration]):
             mock_process.return_value.name.return_value = "chrome.exe"
             with self.assertRaises(StopIteration):
                 rule_engine._poll_focused_window()
 
         self.assertIn(999, rule_engine.overridden)
-        mock_thread.assert_not_called()  # no Tier 3 check should have been spawned this tick
+        # First tick was a normal (unconfirmed) reading and still queued a Tier 3
+        # check; only the second, confirming tick should have skipped one.
+        self.assertEqual(mock_thread.call_count, 1)
 
 
 if __name__ == "__main__":

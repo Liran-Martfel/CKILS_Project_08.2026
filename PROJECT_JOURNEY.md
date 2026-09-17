@@ -2070,6 +2070,34 @@ it.
 
 ---
 
+## 2026-09-17 — A regression from the fix above: a single mismatched read isn't proof of an override
+
+Found the same day, live, right after shipping the poll-based override detection: VS Code
+(`Code.exe`) silently flipped to Hebrew while the user was only typing — reproduced four separate
+times in one session, confirmed directly from the real `overrides` table (`Code.exe`, thread 15080,
+`overridden_to_hkl` = Hebrew, at four different timestamps with no Alt+Shift involved).
+
+**Root cause:** `win32api.PostMessage(WM_INPUTLANGCHANGEREQUEST)` is fire-and-forget — it doesn't
+guarantee Windows has actually applied the switch by the time the very next check runs. Tier 3
+corrections can take 700ms to 3+ seconds under load (confirmed directly in the debug log), which can
+easily outlast `SWITCH_GRACE` (0.3s). The poll-based override check added earlier that same day now
+runs this comparison every ~1.5 seconds, giving this narrow propagation-lag window far more chances
+to be hit than before — a single stale read (Windows hasn't caught up to CKILS's own correction yet)
+was being treated as proof positive of a manual override, freezing further correction *and* feeding
+the bad reading into the trust history as if it were real.
+
+**Fixed by requiring the same mismatch to be confirmed on two independent checks before it's
+trusted.** New `pending_override` dict remembers an unconfirmed mismatch; if the next check shows the
+keyboard matching again, it was just lag and the pending note is cleared, no override recorded; only
+if the *same* mismatch is seen again does it commit as a real override. Critically, an unconfirmed
+first reading no longer short-circuits correction — it falls through to the normal path and CKILS
+keeps actively trying to fix the language, rather than freezing on one bad read. A genuine manual
+switch is still caught within about one extra tick (~1.5–3s total); a propagation-lag blip now
+self-corrects instead of ever being committed as fact. Pending state is cleared the moment a window
+is left, same lifetime as the other per-visit state. 50 tests pass (was 48).
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
