@@ -66,8 +66,12 @@ a manual override on its own, within one poll interval, no "ping-pong" required.
 surfaced a same-day regression — a single mismatched keyboard reading (Windows hadn't yet applied
 CKILS's own pending switch) was being trusted as proof of a manual override on the spot, silently
 freezing correction — fixed by requiring the same mismatch twice, on two independent checks, before
-it's trusted. Each fix is backed by a regression test built from the real failure it addresses — 50
-tests currently, covering every bug found so far (`ckils/week2/test_regressions.py`).
+it's trusted. The whole-window search added for Zoom also turned out to occasionally pick the entire
+browser window itself (tab strip and bookmarks bar included) as "content" on other apps — confirmed
+live with a purpose-built diagnostic tool — fixed by rejecting any candidate that spans essentially
+the whole window, since real content is never that. Each fix is backed by a regression test built
+from the real failure it addresses — 52 tests currently, covering every bug found so far
+(`ckils/week2/test_regressions.py`).
 
 **Known open limitations:**
 - No proactive language guess yet for a brand-new page with zero learned history (e.g. the first

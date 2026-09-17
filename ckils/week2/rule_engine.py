@@ -626,11 +626,27 @@ def _find_larger_sibling_rect(control):
 WHOLE_WINDOW_SEARCH_MIN_HEIGHT = 300
 WHOLE_WINDOW_SEARCH_NODE_CAP = 500
 WHOLE_WINDOW_SEARCH_MAX_DEPTH = 12
+# Real bug found live, 2026-09-17, confirmed with diagnose_window_search.py
+# against the actual live window (not guessed): on a Chrome/Claude.ai tab,
+# this search picked a "leaf" spanning the ENTIRE window — (0,0) to the full
+# window width/height, tab strip and bookmarks bar included — because it had
+# no UI-Automation children of its own, while the real chat content (which
+# does have children) was excluded by the leaf-only rule. The subsequent OCR
+# crop (always the top-left corner) then read the browser's own tab
+# strip/bookmarks bar instead of the page — confirmed directly: the read
+# text was garbage, and the bookmarks bar happened to have Hebrew-named
+# folders, flipping the whole tab to Hebrew with nothing Hebrew actually on
+# the page. A candidate that covers essentially the whole window is
+# structurally never "the real content" — Zoom's real chat pane (the case
+# this search was built for) was always a meaningfully smaller, bounded
+# region, never edge-to-edge with the window itself.
+WHOLE_WINDOW_SEARCH_MAX_WINDOW_COVERAGE = 0.98  # a candidate this close to full window size/position is rejected
 
 
 def _find_largest_leaf_pane_in_window(hwnd):
     try:
         root = auto.ControlFromHandle(hwnd)
+        window_rect = root.BoundingRectangle
     except Exception:
         return None
 
@@ -652,8 +668,14 @@ def _find_largest_leaf_pane_in_window(hwnd):
             # share container (both have named child elements of their own).
             try:
                 rect = control.BoundingRectangle
+                spans_whole_window = (
+                    window_rect.width() > 0 and window_rect.height() > 0
+                    and rect.width() >= window_rect.width() * WHOLE_WINDOW_SEARCH_MAX_WINDOW_COVERAGE
+                    and rect.height() >= window_rect.height() * WHOLE_WINDOW_SEARCH_MAX_WINDOW_COVERAGE
+                )
                 if (rect.height() >= WHOLE_WINDOW_SEARCH_MIN_HEIGHT
                         and _is_onscreen(rect)
+                        and not spans_whole_window
                         and (best is None or rect.height() * rect.width() > best.height() * best.width())):
                     best = rect
             except Exception:

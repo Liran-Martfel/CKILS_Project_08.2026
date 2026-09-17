@@ -2098,6 +2098,41 @@ is left, same lifetime as the other per-visit state. 50 tests pass (was 48).
 
 ---
 
+## 2026-09-17 — The whole-window search (built for Zoom) was reading the browser's own tab strip
+
+User report: Claude.ai flipped to Hebrew mid-conversation with nothing Hebrew visible on the page —
+screenshot showed a completely English chat, but the browser's bookmarks bar had several
+Hebrew-named folders.
+
+**Diagnosed with real evidence, not guessing:** wrote `diagnose_window_search.py`, a small tool that
+calls the actual live `_find_largest_leaf_pane_in_window()` against the real foreground window (same
+method as the original Zoom diagnosis) instead of reasoning about it in the abstract. Run live against
+the exact Claude.ai tab that had just misfired, it showed precisely what was happening:
+
+```
+_find_largest_leaf_pane_in_window PICKED: rect=(0,0,1920,1079) size=1920x1079
+Actual OCR crop region (top-left corner, capped): (0,0,400,150)
+OCR read from that region: '‏�� ��‎'
+```
+
+The picked "leaf" was the **entire browser window** — literally `(0,0)` to the full window size,
+tab strip and bookmarks bar included — because it had no UI-Automation children of its own, while
+every real content pane in the tree (confirmed in the same run: many `Pane`/`Group` controls at
+almost the same size and position) has children and was excluded by the leaf-only rule added for
+Zoom. The OCR crop always reads the *top-left corner* of whatever pane it's given — for this
+candidate, that's literally the tab strip and bookmarks bar. The user's bookmarks bar happens to have
+Hebrew-named folders, so a few garbled characters from that bar were enough to flip the whole tab.
+
+**Fixed by rejecting any leaf-pane candidate that spans essentially the entire window**
+(`WHOLE_WINDOW_SEARCH_MAX_WINDOW_COVERAGE = 0.98`, comparing the candidate's size against the window's
+own `BoundingRectangle`). Real content — including Zoom's actual chat pane, the case this search was
+originally built for — is always meaningfully smaller than the window itself; a candidate that
+*is* the window is structurally never real content, regardless of the leaf-only rule. 52 tests pass
+(was 50), including a case proving the fix correctly returns "nothing qualifies" rather than falling
+back to the whole-window pane when it's the only candidate available.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

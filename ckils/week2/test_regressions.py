@@ -358,6 +358,49 @@ class WholeWindowSearchTests(unittest.TestCase):
         result = rule_engine._find_largest_leaf_pane_in_window(hwnd=12345)
         self.assertIsNone(result)
 
+    def test_rejects_a_leaf_that_spans_the_entire_window(self):
+        # Real bug found live, 2026-09-17, confirmed with
+        # diagnose_window_search.py against the actual live window: on a
+        # Chrome/Claude.ai tab, this search picked a leaf spanning (0,0) to
+        # the full window size — tab strip and bookmarks bar included —
+        # because it had no UI-Automation children, while the real chat
+        # content (which does have children) was excluded by the leaf-only
+        # rule. The subsequent OCR crop then read the browser's own tab
+        # strip/bookmarks bar (which happened to have Hebrew-named folders)
+        # instead of the page, flipping the tab to Hebrew with nothing
+        # Hebrew actually on screen. A candidate covering essentially the
+        # whole window must never win — real content is always meaningfully
+        # smaller than the window itself.
+        root = _FakeControl(rect=_FakeRect(0, 0, 1920, 1079))
+
+        # The exact real shape: a leaf with no children spanning (almost)
+        # the entire window — must be rejected even though it's a true leaf
+        # and easily the largest candidate by raw area.
+        whole_window_leaf = _FakeControl(rect=_FakeRect(0, 0, 1920, 1079), parent=root)
+
+        # Smaller than the whole-window leaf, but a real, meaningfully
+        # bounded true leaf — this is the one that must win.
+        real_content_leaf = _FakeControl(rect=_FakeRect(400, 180, 1900, 1000), parent=root)
+
+        root._children = [whole_window_leaf, real_content_leaf]
+        _link_siblings(root._children)
+
+        rule_engine.auto.ControlFromHandle = lambda hwnd: root
+
+        result = rule_engine._find_largest_leaf_pane_in_window(hwnd=12345)
+        self.assertIs(result, real_content_leaf.BoundingRectangle)
+
+    def test_still_returns_none_when_only_the_whole_window_leaf_qualifies(self):
+        root = _FakeControl(rect=_FakeRect(0, 0, 1920, 1079))
+        whole_window_leaf = _FakeControl(rect=_FakeRect(0, 0, 1920, 1079), parent=root)
+        root._children = [whole_window_leaf]
+        _link_siblings(root._children)
+
+        rule_engine.auto.ControlFromHandle = lambda hwnd: root
+
+        result = rule_engine._find_largest_leaf_pane_in_window(hwnd=12345)
+        self.assertIsNone(result)
+
 
 class GoogleDocsTitleOneTimeDefaultTests(unittest.TestCase):
     """Real bug (2026-09-15): Google Docs' body text is a confirmed dead end to
