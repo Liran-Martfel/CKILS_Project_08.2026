@@ -2028,8 +2028,45 @@ inherit a previous tab's backoff.
 within that 20s window (the specific WhatsApp gap), the worst-case delay to catch it goes from at
 most 1.5s to at most 20s. Judged acceptable because a genuinely different conversation almost always
 produces a different result the instant it's checked, which immediately resets the key back to fast
-polling — the slow case is the exception, not the norm. 43 tests pass (was 40). Not yet re-measured
-against a fresh multi-hour run to confirm the CPU drop directly — that's the next real-world check.
+polling — the slow case is the exception, not the norm. 43 tests pass (was 40).
+
+**Confirmed for real afterward:** CPU use over the next ~2 hours of actual runtime dropped to under
+1% average — down from the ~9% measured before this fix.
+
+---
+
+## 2026-09-17 — The real "ping-pong" bug: manual overrides were only ever detected on a focus event
+
+User report, precisely stated: switching the language yourself sometimes doesn't stick — CKILS
+switches it back — until you alt-tab away and back (sometimes several times) to force it to notice.
+Also reported: a language switch mid-sentence with no real trigger (a separate, one-off content
+misread — see the Chrome "Sending multi-page feedback" case discussed live, not fixed here since it
+was correctly identified as a distinct, one-off UI-noise case, not this bug), and recovery afterward
+taking far longer than it should.
+
+**Root cause, found by re-reading the override-detection code, not by guessing:** the check that
+notices "the physical keyboard doesn't match what CKILS last set — this must be a manual override"
+lived *only* inside `on_focus_change`, which only runs when a real Windows focus or title-change
+event fires. Switching the language yourself with Alt+Shift while staying in the exact same
+window — no focus change, no title change — fires no such event at all. The untrusted poll
+(`_poll_focused_window`), which runs independently every ~1.5 seconds regardless of events, had no
+override-detection logic of its own — it went straight to `apply_content_correction()`, which only
+*respects* an override already recorded in `overridden`, never *detects* a new one. Result: a silent
+manual correction could be undone by the very next poll tick, and the only way to make CKILS
+actually notice was to force a real focus event by alt-tabbing away and back — exactly the
+"ping-pong" the user described.
+
+**Fixed by extracting `_detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl)`**
+out of `on_focus_change`'s inline logic (behavior unchanged there) and calling it from
+`_poll_focused_window` as well, on every tick, before any Tier 3 check is even considered. Now a
+silent manual switch is caught within one poll interval (≤1.5s) instead of waiting for the user to
+force an event — no ping-pong required. 48 tests pass (was 43).
+
+**Scope, stated honestly:** this fixes the specific mechanism behind "my manual correction gets
+fought and I have to alt-tab to make it stick." It does not fix the separate class of problem where
+Tier 3 misreads transient UI text as real content in the first place (the Chrome feedback-dialog
+case) — those remain one-off, case-by-case fixes as they're found, same as every UI-noise fix before
+it.
 
 ---
 

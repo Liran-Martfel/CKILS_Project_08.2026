@@ -59,8 +59,12 @@ decision needed manual correction — dropped from 5.67% before the trust-histor
 to under 0.3% since. A real live run also surfaced a genuine performance bug: the background safety
 poll was re-running full OCR on an already-settled window every ~1.5 seconds forever, burning
 sustained CPU — fixed with per-window backoff once a read has repeated unchanged a few times in a
-row. Each fix is backed by a regression test built from the real failure it addresses — 43 tests
-currently, covering every bug found so far (`ckils/week2/test_regressions.py`).
+row (confirmed after the fact: sustained CPU dropped from ~9% to under 1%). A separate real bug
+meant a manual language correction could be silently undone by the next background check unless you
+forced a fresh focus event by alt-tabbing away and back — fixed by making the background poll detect
+a manual override on its own, within one poll interval, no "ping-pong" required. Each fix is backed
+by a regression test built from the real failure it addresses — 48 tests currently, covering every
+bug found so far (`ckils/week2/test_regressions.py`).
 
 **Known open limitations:**
 - No proactive language guess yet for a brand-new page with zero learned history (e.g. the first

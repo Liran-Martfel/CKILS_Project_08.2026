@@ -566,5 +566,88 @@ class PollBackoffTests(unittest.TestCase):
         self.assertNotIn(check_key, rule_engine.poll_next_allowed)
 
 
+class ManualOverrideDetectionTests(unittest.TestCase):
+    """Real bug found live, 2026-09-17 (the "ping-pong" complaint): manual
+    override detection lived only inside on_focus_change, which only runs on
+    a genuine Windows focus/title event. Switching the language yourself with
+    Alt+Shift while staying in the exact same window (no title change) fires
+    no such event, so the untrusted poll's very next Tier 3 check had no idea
+    an override had just happened and could silently switch it right back —
+    the only way to make CKILS notice was to alt-tab away and back, forcing a
+    real event. Fixed by extracting detection into
+    _detect_and_record_manual_override and calling it from both the event
+    path (on_focus_change) and the poll path (_poll_focused_window)."""
+
+    def setUp(self):
+        rule_engine.last_set.clear()
+        rule_engine.last_switch_time.clear()
+        rule_engine.overridden.clear()
+
+    def tearDown(self):
+        rule_engine.last_set.clear()
+        rule_engine.last_switch_time.clear()
+        rule_engine.overridden.clear()
+
+    def test_nothing_to_compare_against_is_not_an_override(self):
+        result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
+        self.assertFalse(result)
+        self.assertNotIn(999, rule_engine.overridden)
+
+    def test_matching_actual_layout_is_not_an_override(self):
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        rule_engine.last_switch_time[999] = time.time() - 10
+        result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.English_HKL)
+        self.assertFalse(result)
+        self.assertNotIn(999, rule_engine.overridden)
+
+    def test_does_not_misfire_right_after_our_own_switch(self):
+        # Within SWITCH_GRACE of CKILS's own last switch, a mismatch is just
+        # the OS not having propagated it yet — not a real manual override.
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        rule_engine.last_switch_time[999] = time.time()
+        result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
+        self.assertFalse(result)
+        self.assertNotIn(999, rule_engine.overridden)
+
+    def test_detects_a_silent_manual_switch(self):
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        rule_engine.last_switch_time[999] = time.time() - 10  # well past the switch grace
+        with patch.object(rule_engine, "log_override"), \
+             patch.object(rule_engine, "save_learned_default"), \
+             patch.object(rule_engine, "save_page_learned_default"), \
+             patch.object(rule_engine.decision_logger, "log_manual_override"):
+            result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
+
+        self.assertTrue(result)
+        self.assertIn(999, rule_engine.overridden)
+        self.assertEqual(rule_engine.last_set[999], rule_engine.Hebrew_HKL)
+
+    def test_poll_loop_detects_a_silent_override_before_running_tier3(self):
+        # Reproduces the exact real scenario: the user manually switches with
+        # no focus/title event at all, then the poll's very next tick must
+        # record it as an override and skip spawning a Tier 3 check that
+        # would otherwise fight it right back.
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        rule_engine.last_switch_time[999] = time.time() - 10
+        hwnd = 12345
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=hwnd), \
+             patch.object(rule_engine.win32gui, "GetWindowText", return_value="Some Title"), \
+             patch.object(rule_engine.win32process, "GetWindowThreadProcessId", return_value=(999, 4321)), \
+             patch.object(rule_engine.psutil, "Process") as mock_process, \
+             patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=rule_engine.Hebrew_HKL), \
+             patch.object(rule_engine, "log_override"), \
+             patch.object(rule_engine, "save_learned_default"), \
+             patch.object(rule_engine, "save_page_learned_default"), \
+             patch.object(rule_engine.decision_logger, "log_manual_override"), \
+             patch.object(rule_engine.threading, "Thread") as mock_thread, \
+             patch.object(rule_engine.time, "sleep", side_effect=[None, StopIteration]):
+            mock_process.return_value.name.return_value = "chrome.exe"
+            with self.assertRaises(StopIteration):
+                rule_engine._poll_focused_window()
+
+        self.assertIn(999, rule_engine.overridden)
+        mock_thread.assert_not_called()  # no Tier 3 check should have been spawned this tick
+
+
 if __name__ == "__main__":
     unittest.main()

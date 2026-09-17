@@ -856,6 +856,47 @@ WinEventProcType = ctypes.WINFUNCTYPE(
     None, ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD, ctypes.wintypes.HWND,
     ctypes.wintypes.LONG, ctypes.wintypes.LONG, ctypes.wintypes.DWORD, ctypes.wintypes.DWORD)
 
+def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl):
+    """Real bug found live, 2026-09-17 ("ping-pong" complaint): manual-override
+    detection used to live ONLY inside on_focus_change, which only runs on a
+    genuine Windows focus/title event. Switching the language yourself with
+    Alt+Shift while staying in the exact same window (no title change) fires
+    no such event — so the untrusted poll's very next Tier 3 check had no way
+    to know you'd just corrected it, and could silently switch it right back.
+    The only way to make CKILS notice was to alt-tab away and back, forcing a
+    real event so on_focus_change would finally see the mismatch. Extracted
+    so both the event path (on_focus_change) and the poll path
+    (_poll_focused_window) can detect this the moment it happens, not only
+    when the user happens to trigger a focus event afterward.
+
+    Returns True if a manual override was detected (and fully recorded,
+    same as before) — the caller should treat this tick as "leave it alone"
+    rather than run any further automatic correction.
+    """
+    if thread_id not in last_set:
+        return False
+    just_switched = time.time() - last_switch_time.get(thread_id, 0) < SWITCH_GRACE
+    if actual_hkl == last_set[thread_id] or just_switched:
+        return False
+    overridden.add(thread_id)
+    last_set[thread_id] = actual_hkl  # treat the user's manual choice as the new "last known" state
+    log_override(exe_name, title, thread_id, actual_hkl)  # real, free evidence a recent decision was wrong
+    # A manual override is the user telling CKILS, with certainty, what this
+    # app/page should be — feed it into the same trust history a confident
+    # Tier 3 decision uses, so this stops being a one-time log entry only a
+    # monthly human review ever sees. One override is still just one data
+    # point under the same TRUST_MIN_SAMPLES/TRUST_AGREEMENT_THRESHOLD rule as
+    # everything else, so it can't single-handedly overwrite an otherwise
+    # well-established default.
+    override_language = HKL_TO_LANGUAGE_NAME.get(actual_hkl)
+    if override_language is not None:
+        save_learned_default(exe_name, override_language)
+        save_page_learned_default(exe_name, title, override_language)
+    decision_logger.log_manual_override(exe_name, title, thread_id, override_language)
+    print(f"{exe_name}: manual override detected, leaving it alone")
+    return True
+
+
 def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
     global previous_thread
     # The instant focus leaves a window we were overriding, forget it ever happened —
@@ -925,25 +966,8 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         actual_hkl = win32api.GetKeyboardLayout(thread_id)
         if DEBUG:
             print(f"  [debug] {exe_name} hwnd={hwnd} thread={thread_id} title={title!r} actual={hex(actual_hkl)} last={hex(last_set.get(thread_id, -1))}")
-        # ignore mismatches caused by our own switch not having propagated yet
-        just_switched = time.time() - last_switch_time.get(thread_id, 0) < SWITCH_GRACE
-        if thread_id in last_set and actual_hkl != last_set[thread_id] and not just_switched:
-            overridden.add(thread_id)
-            last_set[thread_id] = actual_hkl  # treat the user's manual choice as the new "last known" state
-            log_override(exe_name, title, thread_id, actual_hkl)  # real, free evidence a recent decision was wrong
-            # A manual override is the user telling CKILS, with certainty, what
-            # this app/page should be — feed it into the same trust history a
-            # confident Tier 3 decision uses, so this stops being a one-time
-            # log entry only a monthly human review ever sees. One override is
-            # still just one data point under the same TRUST_MIN_SAMPLES/
-            # TRUST_AGREEMENT_THRESHOLD rule as everything else, so it can't
-            # single-handedly overwrite an otherwise well-established default.
-            override_language = HKL_TO_LANGUAGE_NAME.get(actual_hkl)
-            if override_language is not None:
-                save_learned_default(exe_name, override_language)
-                save_page_learned_default(exe_name, title, override_language)
-            decision_logger.log_manual_override(exe_name, title, thread_id, override_language)
-            print(f"{exe_name}: manual override detected, leaving it alone")
+        if _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl):
+            pass
         else:
             # This is the fast path — unchanged from Weeks 2-4, still sub-millisecond.
             # Tier 3 (below) never blocks this; it only corrects it afterward if needed.
@@ -1099,6 +1123,22 @@ def _poll_focused_window():
             exe_name = psutil.Process(pid).name()
         except Exception:
             continue  # window vanished or info unavailable between calls — just skip this tick
+
+        # Real bug found live, 2026-09-17: a manual Alt+Shift switch that doesn't
+        # also change focus or title fires no Windows event at all, so this poll
+        # used to have no idea it had just happened — it would go ahead and read
+        # content, and could silently switch the language right back, undoing
+        # the user's own correction. Checking for it here, on every tick, means
+        # the very next poll after a silent manual switch (well within
+        # UNTRUSTED_POLL_SECONDS) notices and records it — not "whenever the
+        # user happens to alt-tab away and back."
+        if thread_id in last_set:
+            try:
+                actual_hkl = win32api.GetKeyboardLayout(thread_id)
+            except Exception:
+                actual_hkl = None
+            if actual_hkl is not None and _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl):
+                continue  # just recorded a fresh override — don't immediately fight it with a Tier 3 read
 
         check_key = (thread_id, title)
         if check_key in content_check_in_progress:
