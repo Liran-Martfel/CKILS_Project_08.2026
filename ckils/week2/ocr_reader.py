@@ -1,3 +1,11 @@
+"""
+The OCR layer CKILS's Tier 3 depends on. Defines read_region(), which
+screenshots a screen rectangle and runs Tesseract over it reading both
+English and Hebrew at once — this is what rule_engine.py calls whenever
+accessible text isn't available and it has to actually look at the pixels.
+Also runnable directly for a quick manual check: click into anything, and
+it reads back whatever's under the currently focused control.
+"""
 import os
 import time
 import uiautomation as auto
@@ -13,6 +21,12 @@ TESSDATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tessdat
 
 
 def read_region(left, top, right, bottom):
+    """Screenshots the given screen rectangle and returns whatever text
+    Tesseract reads from it, checking both English and Hebrew in one pass.
+    Coordinates are absolute screen coordinates (not window-relative), and
+    all_screens=True is required for correct results on any monitor other
+    than the primary one.
+    """
     # all_screens=True matters on multi-monitor setups — without it, a rectangle on any
     # monitor except the primary one (often at negative coordinates) grabs solid black.
     img = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)

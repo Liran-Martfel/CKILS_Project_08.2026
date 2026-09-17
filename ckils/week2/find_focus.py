@@ -1,3 +1,11 @@
+"""
+Diagnostic tool: prints the focused control's name/type/rect, importing
+Windows' native OCR engine (winrt.windows.media.ocr) alongside it. Built
+while investigating whether Windows' built-in OCR could replace Tesseract
+for speed — that investigation (see PROJECT_JOURNEY.md) confirmed Windows'
+OcrEngine has no Hebrew recognizer available, ruling it out; this file
+predates that conclusion and was the starting point for checking it.
+"""
 import asyncio
 import time
 import uiautomation as auto

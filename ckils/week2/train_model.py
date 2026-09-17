@@ -1,3 +1,14 @@
+"""
+Trains language_model.joblib — the classifier predict_language.py loads and
+rule_engine.py's Tier 3 actually runs on. Reads real labeled examples from
+training_data.csv (captured from real usage, kept local-only, never
+committed — see .gitignore) and fits a TF-IDF character n-gram + logistic
+regression model, robust to OCR noise since it works on character shapes,
+not whole words. Deliberately NOT run automatically or on a schedule: the
+project's policy is to only retrain after a human reviews the newly
+captured data first (see review_decisions.py) — blindly retraining on
+whatever was captured would just teach the model to repeat its own mistakes.
+"""
 import csv
 import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -10,6 +21,9 @@ MODEL_FILE = "language_model.joblib"
 
 
 def load_data():
+    """Reads DATA_FILE's labeled rows into two parallel lists: texts and
+    their corresponding "hebrew"/"english" labels.
+    """
     texts, labels = [], []
     with open(DATA_FILE, encoding="utf-8") as f:
         for row in csv.DictReader(f):
@@ -19,6 +33,10 @@ def load_data():
 
 
 def main():
+    """Loads the labeled data, splits it into train/test sets, fits the
+    vectorizer + classifier, prints a held-out accuracy report, and saves
+    the trained bundle to MODEL_FILE.
+    """
     texts, labels = load_data()
     print(f"Loaded {len(texts)} labeled examples.")
 

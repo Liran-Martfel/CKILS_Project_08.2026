@@ -1,3 +1,12 @@
+"""
+Diagnostic tool built specifically to settle whether Google Docs' body text
+is readable through UI Automation's TextPattern interface at all (visible
+ranges, the full document range, and the current selection). The answer
+this tool confirmed live — no, on every one of those — is why rule_engine.py
+gives up on reading Google Docs' body and falls back to the document's own
+title instead (see _google_docs_title_text). Not something you'd run
+routinely; it exists to have settled that question once, with real evidence.
+"""
 import time
 import uiautomation as auto
 

@@ -1,3 +1,32 @@
+"""
+CKILS's main engine and live entry point (`python rule_engine.py`, and what
+the packaged exe actually runs). Watches Windows focus/title-change events
+and a background poll, and switches the active window's keyboard input
+language (Hebrew <-> English) automatically, in three layered tiers:
+
+1. Fast path (learned defaults) — an instant guess for a window, built from
+   CKILS's own past confident decisions, applied the moment focus changes
+   (see on_focus_change). No AI involved; just counted history that has to
+   earn trust before it's used (see _trust).
+2. Content-aware correction (Tier 3) — runs afterward in a background
+   thread (see apply_content_correction/decide_with_content): reads the
+   focused control's real on-screen text (accessible text, OCR, or a
+   Google Docs title as a last resort) and asks the trained classifier what
+   language it is, correcting the fast path's guess if it disagrees and is
+   confident.
+3. Manual override, always respected — if the user switches the language
+   themselves, CKILS leaves that window alone until they move on (see
+   _detect_and_record_manual_override), and feeds the correction back into
+   what the trust system learns.
+
+Every real decision (automatic or manual) is written to a persistent log
+via decision_logger, for later diagnosis and the monthly review-assisted
+retrain (review_decisions.py). This module is safely importable by
+test_regressions.py — everything that hooks real Windows events or blocks
+on PumpMessages() is guarded behind `if __name__ == "__main__":` at the
+bottom, so importing it just to reach its pure functions never starts a
+live listener.
+"""
 import ctypes, ctypes.wintypes
 import win32.lib.win32con
 import win32api, win32con, win32gui, win32process, psutil
@@ -25,6 +54,10 @@ DEBUG = True
 # across runs (learned_defaults.json, page_learned_defaults.json, the decisions
 # database) need the exe's own real, permanent folder instead.
 def _persistent_dir():
+    """Returns the folder anything meant to persist across runs should live
+    in: the real exe's own folder when frozen (packaged), or this script's
+    own folder when running from source.
+    """
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
@@ -95,6 +128,9 @@ learned_defaults_lock = threading.Lock()  # multiple correction threads could wr
 
 
 def load_learned_defaults():
+    """Loads the app-level learned-defaults dict from disk, or {} if the
+    file doesn't exist yet (a brand-new install with no history at all).
+    """
     if not os.path.exists(LEARNED_DEFAULTS_FILE):
         return {}
     with open(LEARNED_DEFAULTS_FILE, encoding="utf-8") as f:
@@ -102,6 +138,9 @@ def load_learned_defaults():
 
 
 def save_learned_default(exe_name, language_name):
+    """Appends one more confident observation (language_name) to exe_name's
+    trust history and persists it to disk immediately.
+    """
     with learned_defaults_lock:
         history = _history_of(learned_defaults.get(exe_name))
         history.append(language_name)
@@ -125,10 +164,16 @@ page_learned_defaults_lock = threading.Lock()
 
 
 def _page_key(exe_name, title):
+    """Builds the dict key page_learned_defaults uses for one exact
+    (app, window title) combination.
+    """
     return f"{exe_name}||{title}"
 
 
 def load_page_learned_defaults():
+    """Loads the page-level learned-defaults dict from disk, or {} if the
+    file doesn't exist yet.
+    """
     if not os.path.exists(PAGE_LEARNED_DEFAULTS_FILE):
         return {}
     with open(PAGE_LEARNED_DEFAULTS_FILE, encoding="utf-8") as f:
@@ -136,6 +181,9 @@ def load_page_learned_defaults():
 
 
 def save_page_learned_default(exe_name, title, language_name):
+    """Appends one more confident observation (language_name) to this exact
+    (app, title) page's trust history and persists it to disk immediately.
+    """
     with page_learned_defaults_lock:
         key = _page_key(exe_name, title)
         history = _history_of(page_learned_defaults.get(key))
@@ -158,6 +206,10 @@ decisions_db_lock = threading.Lock()
 
 
 def init_decisions_db():
+    """Creates the decisions/overrides tables in DECISIONS_DB_FILE if they
+    don't already exist. Safe to call repeatedly — also used to self-heal a
+    corrupted/missing schema (see _run_logged_write).
+    """
     with decisions_db_lock:
         conn = sqlite3.connect(DECISIONS_DB_FILE)
         conn.execute("""
@@ -191,6 +243,11 @@ def init_decisions_db():
 
 
 def _run_logged_write(sql, params):
+    """Runs one write (sql, params) against DECISIONS_DB_FILE. If it fails
+    (e.g. a missing/corrupted table), re-initializes the schema and retries
+    once before giving up quietly — a logging failure must never be allowed
+    to crash the actual language-switching logic that calls this.
+    """
     # Real bug found live: a 0-byte/corrupted db file (from the exe being force-
     # killed mid-write during earlier testing) raised "no such table", and since
     # nothing caught it, it crashed the entire background correction thread —
@@ -219,6 +276,11 @@ def _run_logged_write(sql, params):
 
 
 def log_decision(exe_name, title, thread_id, source, text, predicted_label, confidence, applied):
+    """Records one Tier 3 classification attempt to the decisions table,
+    regardless of whether it was confident enough to actually apply — this
+    is the raw material review_decisions.py later mines for cases worth a
+    human's attention.
+    """
     _run_logged_write(
         "INSERT INTO decisions (timestamp, exe_name, title, thread_id, source, text, predicted_label, confidence, applied) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -228,6 +290,9 @@ def log_decision(exe_name, title, thread_id, source, text, predicted_label, conf
 
 
 def log_override(exe_name, title, thread_id, overridden_to_hkl):
+    """Records one confirmed manual override to the overrides table — real,
+    free evidence that a preceding automatic decision was wrong.
+    """
     _run_logged_write(
         "INSERT INTO overrides (timestamp, exe_name, title, thread_id, overridden_to_hkl) VALUES (?, ?, ?, ?, ?)",
         (datetime.datetime.now().isoformat(), exe_name, title, thread_id, overridden_to_hkl)
@@ -334,6 +399,12 @@ SCREEN_BOTTOM = SCREEN_TOP + win32api.GetSystemMetrics(79)   # + SM_CYVIRTUALSCR
 
 
 def _is_onscreen(rect):
+    """True if rect overlaps the real virtual screen bounds (across every
+    monitor) at all — used to reject control rectangles reported in some
+    other coordinate space entirely (e.g. Google Docs' document-scroll
+    coordinates), which would otherwise waste an OCR call on a guaranteed-
+    blank capture.
+    """
     return (rect.right > SCREEN_LEFT and rect.left < SCREEN_RIGHT
             and rect.bottom > SCREEN_TOP and rect.top < SCREEN_BOTTOM)
 
@@ -366,6 +437,11 @@ TRUST_AGREEMENT_THRESHOLD = 0.8
 
 
 def _history_of(value):
+    """Normalizes a learned_defaults/page_learned_defaults entry into a
+    plain list of past language observations, oldest first — handles both
+    the current {"history": [...]} shape and a bare legacy string value
+    (see the back-compat note below) uniformly for _trust() to consume.
+    """
     # Back-compat: every key in the user's real, already-accumulated JSON
     # files today is a bare string ("chrome.exe": "hebrew") — the single most
     # recent decision, no history. Treating that as a 1-length history means
@@ -382,6 +458,13 @@ def _history_of(value):
 
 
 def _trust(history):
+    """Returns the majority language ("hebrew"/"english") if history has at
+    least TRUST_MIN_SAMPLES observations AND at least
+    TRUST_AGREEMENT_THRESHOLD of them agree — otherwise None, meaning "not
+    enough evidence either way, don't use this as a default yet." This is
+    the sole mechanism that decides whether a learned key is trustworthy;
+    nothing here names any specific app.
+    """
     if len(history) < TRUST_MIN_SAMPLES:
         return None
     hebrew_count = history.count("hebrew")
@@ -504,6 +587,11 @@ MESSAGE_METADATA_SUFFIX_PATTERN = re.compile(
 
 
 def _strip_message_metadata(text):
+    """Strips a chat app's own English sender-name prefix and
+    delivery-status/action-menu suffix from text, keeping only the real
+    message content in between (see the real findings above for the exact
+    wrapper shapes this handles).
+    """
     text = MESSAGE_SENDER_PREFIX_PATTERN.sub("", text)
     text = MESSAGE_METADATA_SUFFIX_PATTERN.sub("", text)
     return text.strip()
@@ -532,6 +620,11 @@ CALENDAR_TRAILING_NOTE_PATTERN = re.compile(r"\bEvent is being created\.?", re.I
 
 
 def _strip_calendar_metadata(text):
+    """Strips Google Calendar's English tile wrapper (time range, date,
+    RSVP/task status, "No location", the calendar's own possessive name)
+    from text, keeping only the real, user-typed event/task title (see the
+    real findings above for the exact wrapper shapes this handles).
+    """
     text = CALENDAR_TASK_PREFIX_PATTERN.sub("", text)
     text = CALENDAR_TIME_RANGE_PATTERN.sub("", text)
     text = CALENDAR_DATE_PATTERN.sub("", text)
@@ -544,6 +637,13 @@ def _strip_calendar_metadata(text):
 
 
 def _looks_like_real_content(accessible_text, title):
+    """True if a control's accessible Name is plausibly real, user-relevant
+    content rather than UI boilerplate — long enough, not just an echo of
+    the window title, not a generic status marker, not carrying a keyboard-
+    shortcut hint, and not an empty-field placeholder. Only guards the
+    accessible-text path; _rejected_as_ui_noise applies similar checks to
+    whatever text was finally selected regardless of source.
+    """
     if len(accessible_text) < MIN_ACCESSIBLE_TEXT_LENGTH:
         return False
     # Real finding: some apps (confirmed: "Segment Studio Checklist", Gemini's
@@ -575,6 +675,12 @@ LARGE_SIBLING_MIN_HEIGHT = 300
 
 
 def _find_larger_sibling_rect(control):
+    """If control looks like a thin header pane, looks among its siblings
+    for a meaningfully taller one sitting directly below it (the real
+    content body, in the Zoom-header shape this was built for) and returns
+    its bounding rectangle. Returns None if control has no parent, or no
+    qualifying sibling exists.
+    """
     try:
         parent = control.GetParentControl()
         if parent is None:
@@ -644,6 +750,17 @@ WHOLE_WINDOW_SEARCH_MAX_WINDOW_COVERAGE = 0.98  # a candidate this close to full
 
 
 def _find_largest_leaf_pane_in_window(hwnd):
+    """Searches the ENTIRE window tree (not just siblings of whatever's
+    focused) for the largest true-leaf pane — a control with no
+    UI-Automation children at all, the shape real pixel-drawn content (like
+    Zoom's chat pane) has. Rejects candidates shorter than
+    WHOLE_WINDOW_SEARCH_MIN_HEIGHT, off-screen, or spanning essentially the
+    entire window (see WHOLE_WINDOW_SEARCH_MAX_WINDOW_COVERAGE — real
+    content is never the whole window, e.g. a browser's own tab strip).
+    Bounded by WHOLE_WINDOW_SEARCH_NODE_CAP/MAX_DEPTH so this can't run away
+    on a huge, deeply-nested tree like a web page. Returns the winning
+    rectangle, or None if nothing qualifies.
+    """
     try:
         root = auto.ControlFromHandle(hwnd)
         window_rect = root.BoundingRectangle
@@ -654,6 +771,10 @@ def _find_largest_leaf_pane_in_window(hwnd):
     visited = 0
 
     def walk(control, depth):
+        """Depth-first visits control and every descendant, recording the
+        largest qualifying true-leaf pane seen so far in the enclosing
+        best/visited variables.
+        """
         nonlocal best, visited
         if control is None or depth > WHOLE_WINDOW_SEARCH_MAX_DEPTH or visited >= WHOLE_WINDOW_SEARCH_NODE_CAP:
             return
@@ -705,6 +826,12 @@ GOOGLE_DOCS_GENERIC_TITLES = ["מסמך ללא שם", "Untitled document"]
 
 
 def _google_docs_title_text(title):
+    """Extracts the real, user-authored document title from a Google Docs
+    window title (the part before " - Google Docs"), or None if this isn't
+    a Google Docs window or the title is generic/empty ("Untitled
+    document"). Used only as a last-resort signal once the document body
+    has been confirmed unreadable — see the real finding above.
+    """
     if " - Google Docs" not in title:
         return None
     doc_title = title.split(" - Google Docs")[0].strip()
@@ -950,6 +1077,15 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl):
 
 
 def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
+    """The Windows event callback (registered below via SetWinEventHook)
+    that fires on every real foreground-window change and window-title
+    change. Resets per-visit state when focus genuinely moves to a
+    different thread/title, computes this window's target language from
+    the layered fallback (sticky Tier 3 decision -> trusted page default ->
+    trusted app default), applies it instantly via the fast path unless a
+    manual override is detected, and kicks off a background Tier 3 check to
+    confirm/correct it from real content.
+    """
     global previous_thread
     # The instant focus leaves a window we were overriding, forget it ever happened —
     # its next visit starts completely fresh, learned default applied automatically.
@@ -1083,6 +1219,15 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
 
 
 def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
+    """Runs Tier 3 (decide_with_content) in the calling thread and, if it
+    confidently disagrees with fallback_hkl, applies the correction — but
+    only if the same window/tab is still focused and not manually
+    overridden by the time the (potentially slow) read finishes. Called
+    from a fresh background thread by both on_focus_change and the poll.
+    Returns True if a correction was actually applied, False otherwise
+    (used by the poll path to track when a window has settled — see
+    _poll_apply_content_correction).
+    """
     # Held for the whole function, not just the OCR part — this is what actually
     # stops two corrections for the same window from racing on last_set/overridden.
     check_key = (thread_id, title)
@@ -1167,6 +1312,14 @@ UNTRUSTED_POLL_SECONDS = 1.5
 
 
 def _poll_focused_window():
+    """Background timer loop, started once at startup: every
+    UNTRUSTED_POLL_SECONDS, checks whatever window currently has focus for
+    (a) a silent manual override with no accompanying focus/title event,
+    and (b) content that may have changed with no accompanying event either
+    (the WhatsApp-shape gap this poll exists for) — deduping against
+    in-flight checks and honoring each key's backoff state (see
+    poll_next_allowed) so an already-settled window isn't hammered forever.
+    """
     while True:
         time.sleep(UNTRUSTED_POLL_SECONDS)
         try:
@@ -1207,6 +1360,12 @@ def _poll_focused_window():
 
 
 def _poll_apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title, check_key):
+    """Poll-only wrapper around apply_content_correction: runs the same
+    correction, then updates check_key's backoff bookkeeping based on
+    whether anything actually changed — a real change resets the streak to
+    full speed, while repeated no-ops push this key toward a slower
+    re-check interval (see poll_unchanged_streak/poll_next_allowed).
+    """
     # Thin wrapper around apply_content_correction just for the poll path — tracks
     # whether this specific (thread_id, title) keeps coming back unchanged so this
     # timer can stop hammering it with full OCR reads once it has (see

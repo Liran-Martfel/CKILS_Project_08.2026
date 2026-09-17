@@ -1,3 +1,12 @@
+"""
+Week 1, lesson 2 — the first WORKING focus watcher. Registers a real Windows
+event hook (SetWinEventHook) and prints every window's title and owning
+process name each time focus changes (e.g. Alt-Tab). This is the direct
+ancestor of rule_engine.py's on_focus_change/PumpMessages setup — everything
+CKILS does later (deciding a language, switching a keyboard layout) hangs
+off this same "notice a focus change" mechanism, just with real actions
+attached instead of a print statement.
+"""
 import ctypes
 import ctypes.wintypes
 import win32api
@@ -7,6 +16,10 @@ from week1.focus_watcher import WinEventProcType, user32
 
 
 def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
+    """Windows calls this automatically every time a different window becomes
+    foreground (per the EVENT_SYSTEM_FOREGROUND hook registered below).
+    Looks up and prints that window's title and owning process name.
+    """
     title = win32gui.GetWindowText(hwnd)
     # GetWindowThreadProcessId returns TWO values: (thread_id, process_id).
     # We only need the second one — the underscore is a Python convention

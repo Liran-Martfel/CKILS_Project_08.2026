@@ -1,3 +1,13 @@
+"""
+CKILS's diagnostic memory: a persistent, timestamped log of every real
+language decision (automatic or manual), each with the reasoning behind it
+and a screenshot cropped to exactly the region read — so a wrong guess can
+be diagnosed from real evidence later instead of guessed at. rule_engine.py
+calls log_auto_change/log_manual_override on every real decision;
+review_decisions.py later reads this data back to find cases worth a human's
+attention. Old entries and their screenshots are pruned automatically after
+RETENTION_DAYS so this doesn't grow forever.
+"""
 import os
 import sys
 import json
@@ -13,6 +23,10 @@ from PIL import ImageGrab
 # folder instead. Duplicated here (not imported from rule_engine) to avoid a
 # circular import, same pattern ocr_reader.py already uses for its own paths.
 def _persistent_dir():
+    """Returns the folder decision logs/screenshots should actually live in:
+    the real exe's own folder when frozen (packaged), or this script's own
+    folder when running from source — never a temporary extraction path.
+    """
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
@@ -39,11 +53,20 @@ _last_auto_lock = threading.Lock()
 
 
 def _safe_filename_part(text, max_len=40):
+    """Sanitizes text (typically an exe name) into something safe to embed
+    in a filename — non-alphanumeric characters become underscores, and the
+    result is capped at max_len characters ("unknown" if nothing is left).
+    """
     kept = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in text)
     return kept[:max_len] or "unknown"
 
 
 def _capture_screenshot(rect, exe_name, event_type):
+    """Screenshots exactly rect (left, top, right, bottom) and saves it under
+    SCREENSHOTS_DIR with a timestamped, sanitized filename. Returns the
+    saved file's path relative to LOGS_DIR (for embedding in a log entry),
+    or None if rect is missing/invalid or the capture fails.
+    """
     # Cropped to the actual read region (or window rect for a fast-path
     # switch), not the full screen — smaller files and avoids capturing
     # unrelated on-screen content (e.g. another app, or other people's video
@@ -67,6 +90,9 @@ def _capture_screenshot(rect, exe_name, event_type):
 
 
 def _append(entry):
+    """Appends one JSON entry as a new line to LOG_FILE, under a lock so
+    concurrent decision threads never interleave partial writes.
+    """
     with _log_lock:
         try:
             with open(LOG_FILE, "a", encoding="utf-8") as f:
@@ -116,6 +142,11 @@ def log_manual_override(exe_name, title, thread_id, new_language):
 
 
 def prune_old_logs():
+    """Drops every log entry older than RETENTION_DAYS and deletes any
+    screenshot no longer referenced by a surviving entry (including
+    screenshots referenced only via another entry's preceding_auto). Keeps
+    the log and screenshots folder from growing forever.
+    """
     cutoff = datetime.datetime.now() - datetime.timedelta(days=RETENTION_DAYS)
     if not os.path.exists(LOG_FILE):
         return
@@ -167,11 +198,16 @@ _PRUNE_INTERVAL_SECONDS = 6 * 60 * 60
 
 
 def _prune_loop():
+    """Calls prune_old_logs() forever, once every _PRUNE_INTERVAL_SECONDS."""
     while True:
         time.sleep(_PRUNE_INTERVAL_SECONDS)
         prune_old_logs()
 
 
 def start_background_pruning():
+    """Prunes once immediately (so a long-overdue backlog doesn't wait for
+    the first interval to elapse), then starts the periodic background
+    pruning thread. Called once at CKILS startup.
+    """
     prune_old_logs()  # once immediately at startup, then every 6 hours
     threading.Thread(target=_prune_loop, daemon=True).start()

@@ -24,15 +24,18 @@ class PlaceholderRejectionTests(unittest.TestCase):
     prompt to Claude") on 2026-09-13 — same fix, different apps."""
 
     def test_whatsapp_placeholder_rejected(self):
+        """Whatsapp placeholder rejected."""
         self.assertFalse(
             rule_engine._looks_like_real_content("Type a message", title="WhatsApp"))
 
     def test_whatsapp_placeholder_with_contact_name_rejected(self):
+        """Whatsapp placeholder with contact name rejected."""
         self.assertFalse(
             rule_engine._looks_like_real_content(
                 "Type a message to Ron Katz", title="WhatsApp"))
 
     def test_whatsapp_contact_search_placeholder_rejected(self):
+        """Whatsapp contact search placeholder rejected."""
         # Real bug (2026-09-16): a THIRD, distinct WhatsApp placeholder (the
         # contact-search box, not the message-compose box) forced English
         # back over a real Hebrew message that had just been read correctly.
@@ -40,11 +43,13 @@ class PlaceholderRejectionTests(unittest.TestCase):
             rule_engine._rejected_as_ui_noise("Search name, number or @username"))
 
     def test_claude_placeholder_rejected(self):
+        """Claude placeholder rejected."""
         self.assertFalse(
             rule_engine._looks_like_real_content(
                 "Write your prompt to Claude", title="Claude"))
 
     def test_claude_existing_conversation_placeholder_rejected(self):
+        """Claude existing conversation placeholder rejected."""
         # Real bug (2026-09-14): Claude.ai's placeholder wording is DIFFERENT
         # once you're continuing an existing conversation ("Write a
         # message...") vs. starting a brand-new one ("Write your prompt to
@@ -55,6 +60,7 @@ class PlaceholderRejectionTests(unittest.TestCase):
         self.assertIsNotNone(rule_engine._rejected_as_ui_noise("Write a message..."))
 
     def test_real_message_not_rejected_as_placeholder(self):
+        """Real message not rejected as placeholder."""
         # A real, unrelated long message must NOT get caught by the same check.
         self.assertTrue(
             rule_engine._looks_like_real_content(
@@ -70,13 +76,16 @@ class UiNoiseRejectionTests(unittest.TestCase):
     directly instead of only reachable through a live OCR read."""
 
     def test_zoom_workplace_branding_rejected(self):
+        """Zoom workplace branding rejected."""
         self.assertIsNotNone(
             rule_engine._rejected_as_ui_noise("zoom. Workplace communication, redefined."))
 
     def test_whatsapp_placeholder_rejected_via_ocr_path_too(self):
+        """Whatsapp placeholder rejected via ocr path too."""
         self.assertIsNotNone(rule_engine._rejected_as_ui_noise("Type a message"))
 
     def test_tradingview_tagline_rejected(self):
+        """Tradingview tagline rejected."""
         # Real bug found by auditing every manual override on record: this
         # exact tagline kept forcing Hebrew over real English ticker symbols.
         self.assertIsNotNone(
@@ -84,6 +93,7 @@ class UiNoiseRejectionTests(unittest.TestCase):
                 "גרפי מניות, מדדים, חוזים עתידיים, מט\"ח וביטקוין בזמן-אמת ב-TradingView"))
 
     def test_youtube_logo_only_rejected(self):
+        """Youtube logo only rejected."""
         # Real bug: OCR repeatedly read nothing but YouTube's own logo/
         # wordmark on a Hebrew-titled video, forcing English over real
         # Hebrew content. Exact real captures, including OCR artifacts.
@@ -92,11 +102,13 @@ class UiNoiseRejectionTests(unittest.TestCase):
         self.assertIsNotNone(rule_engine._rejected_as_ui_noise("YouTube"))
 
     def test_real_comment_mentioning_youtube_not_rejected(self):
+        """Real comment mentioning youtube not rejected."""
         # Must NOT catch real content that happens to mention YouTube by name.
         self.assertIsNone(
             rule_engine._rejected_as_ui_noise("I loved this YouTube video, thanks for sharing!"))
 
     def test_real_content_not_rejected(self):
+        """Real content not rejected."""
         self.assertIsNone(rule_engine._rejected_as_ui_noise("היי, מה קורה מחר?"))
 
 
@@ -109,12 +121,14 @@ class MessageMetadataStrippingTests(unittest.TestCase):
     why — this is example content, not a transcript of a real conversation)."""
 
     def test_strips_sender_prefix_and_status_footer(self):
+        """Strips sender prefix and status footer."""
         raw = "You: בטח אחי נדבר מחר על התוכנית 16:36 Delivered Open message o"
         self.assertEqual(
             rule_engine._strip_message_metadata(raw),
             "בטח אחי נדבר מחר על התוכנית")
 
     def test_reclassifies_correctly_after_stripping(self):
+        """Reclassifies correctly after stripping."""
         raw = "You: בטח אחי נדבר מחר על התוכנית 16:36 Delivered Open message o"
         stripped = rule_engine._strip_message_metadata(raw)
         label, proba = rule_engine.predict_language(stripped)
@@ -122,6 +136,7 @@ class MessageMetadataStrippingTests(unittest.TestCase):
         self.assertGreaterEqual(proba[label], rule_engine.CONTENT_CONFIDENCE_THRESHOLD)
 
     def test_strips_other_contacts_sender_prefix_and_context_menu_footer(self):
+        """Strips other contacts sender prefix and context menu footer."""
         # Real bug (2026-09-16): a message from someone else (not "You")
         # wasn't stripped at all - different sender-name prefix, different
         # footer shape ("Context menu for message from <name> React").
@@ -132,6 +147,7 @@ class MessageMetadataStrippingTests(unittest.TestCase):
             "התכוונתי להגיע בבוקר ואז החלטתי לבוא בערב")
 
     def test_reclassifies_other_contacts_message_correctly_after_stripping(self):
+        """Reclassifies other contacts message correctly after stripping."""
         raw = ("Noa Levy: התכוונתי להגיע בבוקר ואז החלטתי לבוא בערב "
                "09:44 Context menu for message from Noa Levy React")
         stripped = rule_engine._strip_message_metadata(raw)
@@ -140,6 +156,7 @@ class MessageMetadataStrippingTests(unittest.TestCase):
         self.assertGreaterEqual(proba[label], rule_engine.CONTENT_CONFIDENCE_THRESHOLD)
 
     def test_does_not_strip_a_leading_time_as_a_sender_prefix(self):
+        """Does not strip a leading time as a sender prefix."""
         # The generalized sender-prefix pattern must NOT catch a calendar
         # time range ("6:30pm...") or a URL scheme ("https://...") just
         # because they contain an early colon - both stay letters-only-free.
@@ -147,17 +164,20 @@ class MessageMetadataStrippingTests(unittest.TestCase):
         self.assertEqual(rule_engine._strip_message_metadata(raw), raw)
 
     def test_does_not_strip_a_url_scheme_as_a_sender_prefix(self):
+        """Does not strip a url scheme as a sender prefix."""
         raw = ("example-link-preview.example.com https://example-link-preview.example.com/ "
                "17:49 Read Open message options React Forward media")
         stripped = rule_engine._strip_message_metadata(raw)
         self.assertTrue(stripped.startswith("example-link-preview.example.com"))
 
     def test_leaves_unrelated_text_untouched(self):
+        """Leaves unrelated text untouched."""
         # No "You:" prefix, no HH:MM+status footer — must pass through as-is.
         text = "Search or start a new chat chat-list-filters Archived Chat list"
         self.assertEqual(rule_engine._strip_message_metadata(text), text)
 
     def test_does_not_over_strip_a_real_link_preview_message(self):
+        """Does not over strip a real link preview message."""
         # Real shape (a link-preview message, status footer, no "You:" prefix)
         # — only the trailing footer should go, the URL content must stay.
         # example.com is the reserved documentation domain (RFC 2606) —
@@ -182,15 +202,18 @@ class CalendarMetadataStrippingTests(unittest.TestCase):
     changed (this is example content, not a transcript of a real calendar)."""
 
     def test_strips_event_tile_wrapper(self):
+        """Strips event tile wrapper."""
         raw = "6:30pm to 7pm, לאסוף חבילה מהדואר, Liran's calender, No location, September 15, 2026"
         self.assertEqual(rule_engine._strip_calendar_metadata(raw), "לאסוף חבילה מהדואר")
 
     def test_strips_event_tile_with_rsvp_status_and_trailing_note(self):
+        """Strips event tile with rsvp status and trailing note."""
         raw = ("8am to 9am, לקנות מצרכים לשבת, Liran's calender, Accepted, No location, "
                "September 11, 2026 Event is being created.")
         self.assertEqual(rule_engine._strip_calendar_metadata(raw), "לקנות מצרכים לשבת")
 
     def test_strips_task_tile_wrapper(self):
+        """Strips task tile wrapper."""
         raw = ("task: לסיים לקרוא את הפרק הבא בספר ולהכין סיכום קצר לפני הפגישה, "
                "Not completed, September 11, 2026, 10:30am")
         self.assertEqual(
@@ -198,6 +221,7 @@ class CalendarMetadataStrippingTests(unittest.TestCase):
             "לסיים לקרוא את הפרק הבא בספר ולהכין סיכום קצר לפני הפגישה")
 
     def test_reclassifies_event_tile_correctly_after_stripping(self):
+        """Reclassifies event tile correctly after stripping."""
         raw = "6:30pm to 7pm, לאסוף חבילה מהדואר, Liran's calender, No location, September 15, 2026"
         stripped = rule_engine._strip_calendar_metadata(raw)
         label, proba = rule_engine.predict_language(stripped)
@@ -205,6 +229,7 @@ class CalendarMetadataStrippingTests(unittest.TestCase):
         self.assertGreaterEqual(proba[label], rule_engine.CONTENT_CONFIDENCE_THRESHOLD)
 
     def test_leaves_unrelated_text_untouched(self):
+        """Leaves unrelated text untouched."""
         text = "Search or start a new chat chat-list-filters Archived Chat list"
         self.assertEqual(rule_engine._strip_calendar_metadata(text), text)
 
@@ -214,35 +239,55 @@ class CalendarMetadataStrippingTests(unittest.TestCase):
 # GetNextSiblingControl) for _find_larger_sibling_rect to walk, without
 # needing a real window or the uiautomation library's live tree.
 class _FakeRect:
+    """A minimal stand-in for uiautomation's real rect type — just left/top/
+    right/bottom plus width()/height(), enough for the code under test.
+    """
     def __init__(self, left, top, right, bottom):
+        """Stores the four raw edge coordinates."""
         self.left, self.top, self.right, self.bottom = left, top, right, bottom
 
     def width(self):
+        """Returns right - left."""
         return self.right - self.left
 
     def height(self):
+        """Returns bottom - top."""
         return self.bottom - self.top
 
 
 class _FakeControl:
+    """A minimal stand-in for a real uiautomation Control — just enough
+    surface area (BoundingRectangle, GetParentControl, GetFirstChildControl,
+    GetNextSiblingControl via _link_siblings) for the tree-walking functions
+    under test to operate on, without a real window or live UI tree.
+    """
     def __init__(self, rect, parent=None, name=""):
+        """Builds a fake control with the given rect/parent/name and no
+        children yet (append to self._children directly to add some).
+        """
         self.BoundingRectangle = rect
         self.Name = name
         self._parent = parent
         self._children = []
 
     def GetParentControl(self):
+        """Returns the parent passed at construction time, or None."""
         return self._parent
 
     def GetFirstChildControl(self):
+        """Returns the first child added to self._children, or None."""
         return self._children[0] if self._children else None
 
 
 def _link_siblings(children):
+    """Wires up GetNextSiblingControl on each fake control in children so a
+    caller can walk the list as a real sibling chain, ending in None.
+    """
     for i, child in enumerate(children):
         child._next_sibling = children[i + 1] if i + 1 < len(children) else None
 
         def _get_next_sibling(self=child):
+            """Returns this fake control's next sibling, or None if last."""
             return self._next_sibling
 
         child.GetNextSiblingControl = _get_next_sibling
@@ -258,6 +303,7 @@ class SiblingRedirectTests(unittest.TestCase):
     lock in that this fix correctly does nothing there instead of misfiring."""
 
     def test_redirects_from_header_to_large_sibling_body(self):
+        """Redirects from header to large sibling body."""
         # Positive, monitor-agnostic coordinates deliberately (not the real
         # negative multi-monitor ones captured live) — _is_onscreen() depends
         # on the ACTUAL current virtual screen bounds (win32api.GetSystemMetrics
@@ -274,6 +320,7 @@ class SiblingRedirectTests(unittest.TestCase):
         self.assertIs(result, body.BoundingRectangle)
 
     def test_no_redirect_when_only_small_siblings_exist(self):
+        """No redirect when only small siblings exist."""
         # The "Start my video" toolbar-button case: short control, but its
         # siblings are other short toolbar buttons, not a real content pane.
         # Positive coordinates deliberately — see the note in the test above.
@@ -290,6 +337,7 @@ class SiblingRedirectTests(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_does_not_redirect_to_a_sibling_above_it(self):
+        """Does not redirect to a sibling above it."""
         # A large sibling ABOVE the focused control is not "the body under the
         # header" — must not redirect to it.
         parent = _FakeControl(rect=_FakeRect(0, 0, 500, 1000))
@@ -317,12 +365,17 @@ class WholeWindowSearchTests(unittest.TestCase):
     own child elements), correctly excludes both."""
 
     def setUp(self):
+        """Remembers the real auto.ControlFromHandle so tests can patch it
+        with a fake tree and this can restore it afterward.
+        """
         self._orig_control_from_handle = rule_engine.auto.ControlFromHandle
 
     def tearDown(self):
+        """Restores the real auto.ControlFromHandle patched in setUp."""
         rule_engine.auto.ControlFromHandle = self._orig_control_from_handle
 
     def test_finds_the_leaf_pane_even_when_larger_non_leaf_panes_exist(self):
+        """Finds the leaf pane even when larger non leaf panes exist."""
         root = _FakeControl(rect=_FakeRect(0, 0, 2000, 1000))
 
         video_gallery = _FakeControl(rect=_FakeRect(0, 0, 200, 900), parent=root)
@@ -348,6 +401,7 @@ class WholeWindowSearchTests(unittest.TestCase):
         self.assertIs(result, chat_body_leaf.BoundingRectangle)
 
     def test_returns_none_when_nothing_qualifies(self):
+        """Returns none when nothing qualifies."""
         root = _FakeControl(rect=_FakeRect(0, 0, 500, 500))
         small = _FakeControl(rect=_FakeRect(0, 0, 100, 100), parent=root)
         root._children = [small]
@@ -359,6 +413,7 @@ class WholeWindowSearchTests(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_rejects_a_leaf_that_spans_the_entire_window(self):
+        """Rejects a leaf that spans the entire window."""
         # Real bug found live, 2026-09-17, confirmed with
         # diagnose_window_search.py against the actual live window: on a
         # Chrome/Claude.ai tab, this search picked a leaf spanning (0,0) to
@@ -391,6 +446,7 @@ class WholeWindowSearchTests(unittest.TestCase):
         self.assertIs(result, real_content_leaf.BoundingRectangle)
 
     def test_still_returns_none_when_only_the_whole_window_leaf_qualifies(self):
+        """Still returns none when only the whole window leaf qualifies."""
         root = _FakeControl(rect=_FakeRect(0, 0, 1920, 1079))
         whole_window_leaf = _FakeControl(rect=_FakeRect(0, 0, 1920, 1079), parent=root)
         root._children = [whole_window_leaf]
@@ -414,18 +470,28 @@ class GoogleDocsTitleOneTimeDefaultTests(unittest.TestCase):
     same spirit as the learned-defaults layers."""
 
     def setUp(self):
+        """Clears google_docs_title_already_applied so no state leaks in
+        from a previous test.
+        """
         rule_engine.google_docs_title_already_applied.clear()
 
     def tearDown(self):
+        """Clears google_docs_title_already_applied so no state leaks into
+        the next test.
+        """
         rule_engine.google_docs_title_already_applied.clear()
 
     @staticmethod
     def _fake_offscreen_doc_control():
+        """Builds a fake control with the real off-screen, document-scroll-
+        coordinate rect shape Google Docs is confirmed to report.
+        """
         # Real captured shape: Google Docs reports its focused control's rect
         # in document-scroll coordinates, often far outside any real monitor.
         return _FakeControl(rect=_FakeRect(1076, -13318, 1921, -13292), name="")
 
     def test_first_read_uses_the_title_and_marks_it_applied(self):
+        """First read uses the title and marks it applied."""
         hwnd = 12345
         title = "קורות חיים - לירן - Google Docs"
         with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=hwnd), \
@@ -437,6 +503,7 @@ class GoogleDocsTitleOneTimeDefaultTests(unittest.TestCase):
         self.assertIn(999, rule_engine.google_docs_title_already_applied)
 
     def test_second_read_same_visit_does_not_reassert(self):
+        """Second read same visit does not reassert."""
         # Reproduces the exact real scenario: the first read applies Hebrew
         # from the title, then the poll thread re-checks a few seconds later
         # while the user's own manual English override is the current
@@ -453,6 +520,7 @@ class GoogleDocsTitleOneTimeDefaultTests(unittest.TestCase):
         self.assertIsNone(reason)
 
     def test_new_visit_after_title_change_gets_a_fresh_read(self):
+        """New visit after title change gets a fresh read."""
         # Switching to a DIFFERENT Google Docs tab (same shared Chrome
         # thread_id, confirmed real quirk) must still get its own one-time
         # title-derived read — this fix must not disable the mechanism
@@ -481,26 +549,32 @@ class TrustHistoryTests(unittest.TestCase):
     itself withholds/grants trust — not a name check."""
 
     def test_below_minimum_samples_is_not_trusted(self):
+        """Below minimum samples is not trusted."""
         self.assertIsNone(rule_engine._trust(["hebrew", "hebrew"]))
 
     def test_consistent_history_is_trusted(self):
+        """Consistent history is trusted."""
         # 4/5 = 80% — exactly at TRUST_AGREEMENT_THRESHOLD.
         self.assertEqual(
             rule_engine._trust(["hebrew", "hebrew", "hebrew", "hebrew", "english"]), "hebrew")
 
     def test_inconsistent_history_is_not_trusted(self):
+        """Inconsistent history is not trusted."""
         self.assertIsNone(
             rule_engine._trust(["hebrew", "english", "hebrew", "english"]))
 
     def test_history_of_normalizes_legacy_bare_string(self):
+        """History of normalizes legacy bare string."""
         self.assertEqual(rule_engine._history_of("hebrew"), ["hebrew"])
 
     def test_history_of_normalizes_new_dict_shape(self):
+        """History of normalizes new dict shape."""
         self.assertEqual(
             rule_engine._history_of({"history": ["hebrew", "english"]}),
             ["hebrew", "english"])
 
     def test_history_of_handles_missing_key(self):
+        """History of handles missing key."""
         self.assertEqual(rule_engine._history_of(None), [])
 
 
@@ -515,6 +589,9 @@ class DecisionLoggerOverrideLinkTests(unittest.TestCase):
     real pattern that broke it (tab away, come back, then correct it)."""
 
     def setUp(self):
+        """Redirects decision_logger's log/screenshot paths to a fresh
+        temp directory, so this test never touches the real log file.
+        """
         self._tmp_dir = tempfile.mkdtemp()
         self._orig_logs_dir = decision_logger.LOGS_DIR
         self._orig_screenshots_dir = decision_logger.SCREENSHOTS_DIR
@@ -525,6 +602,9 @@ class DecisionLoggerOverrideLinkTests(unittest.TestCase):
         decision_logger._last_auto_decision.clear()
 
     def tearDown(self):
+        """Restores decision_logger's real paths and deletes the temp
+        directory created in setUp.
+        """
         decision_logger.LOGS_DIR = self._orig_logs_dir
         decision_logger.SCREENSHOTS_DIR = self._orig_screenshots_dir
         decision_logger.LOG_FILE = self._orig_log_file
@@ -532,6 +612,7 @@ class DecisionLoggerOverrideLinkTests(unittest.TestCase):
         shutil.rmtree(self._tmp_dir, ignore_errors=True)
 
     def test_override_links_to_preceding_auto_decision(self):
+        """Override links to preceding auto decision."""
         decision_logger.log_auto_change(
             "zoom.exe", "Zoom Meeting", 6384, "english", "hebrew",
             {"mechanism": "tier3_content", "source": "ocr", "text": "x",
@@ -560,14 +641,21 @@ class PollBackoffTests(unittest.TestCase):
     a threshold, makes that exact key ineligible for re-polling for a while."""
 
     def setUp(self):
+        """Clears the backoff state dicts so no state leaks in from a
+        previous test.
+        """
         rule_engine.poll_unchanged_streak.clear()
         rule_engine.poll_next_allowed.clear()
 
     def tearDown(self):
+        """Clears the backoff state dicts so no state leaks into the next
+        test.
+        """
         rule_engine.poll_unchanged_streak.clear()
         rule_engine.poll_next_allowed.clear()
 
     def test_repeated_unchanged_results_trigger_backoff(self):
+        """Repeated unchanged results trigger backoff."""
         check_key = (999, "Static Page - Google Chrome")
         with patch.object(rule_engine, "apply_content_correction", return_value=False):
             for _ in range(rule_engine.POLL_BACKOFF_STREAK_THRESHOLD):
@@ -582,6 +670,7 @@ class PollBackoffTests(unittest.TestCase):
         self.assertGreater(rule_engine.poll_next_allowed[check_key], time.time())
 
     def test_below_threshold_does_not_back_off_yet(self):
+        """Below threshold does not back off yet."""
         check_key = (999, "Static Page - Google Chrome")
         with patch.object(rule_engine, "apply_content_correction", return_value=False):
             for _ in range(rule_engine.POLL_BACKOFF_STREAK_THRESHOLD - 1):
@@ -592,6 +681,7 @@ class PollBackoffTests(unittest.TestCase):
         self.assertNotIn(check_key, rule_engine.poll_next_allowed)
 
     def test_a_real_change_resets_any_existing_backoff(self):
+        """A real change resets any existing backoff."""
         # Reproduces the WhatsApp-shape case this poll exists for: a window
         # backs off after settling, then its content genuinely changes with
         # no Windows event (the poll is the only thing that ever notices) —
@@ -622,23 +712,31 @@ class ManualOverrideDetectionTests(unittest.TestCase):
     path (on_focus_change) and the poll path (_poll_focused_window)."""
 
     def setUp(self):
+        """Clears the override-tracking state dicts so no state leaks in
+        from a previous test.
+        """
         rule_engine.last_set.clear()
         rule_engine.last_switch_time.clear()
         rule_engine.overridden.clear()
         rule_engine.pending_override.clear()
 
     def tearDown(self):
+        """Clears the override-tracking state dicts so no state leaks into
+        the next test.
+        """
         rule_engine.last_set.clear()
         rule_engine.last_switch_time.clear()
         rule_engine.overridden.clear()
         rule_engine.pending_override.clear()
 
     def test_nothing_to_compare_against_is_not_an_override(self):
+        """Nothing to compare against is not an override."""
         result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
         self.assertFalse(result)
         self.assertNotIn(999, rule_engine.overridden)
 
     def test_matching_actual_layout_is_not_an_override(self):
+        """Matching actual layout is not an override."""
         rule_engine.last_set[999] = rule_engine.English_HKL
         rule_engine.last_switch_time[999] = time.time() - 10
         result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.English_HKL)
@@ -646,6 +744,7 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         self.assertNotIn(999, rule_engine.overridden)
 
     def test_does_not_misfire_right_after_our_own_switch(self):
+        """Does not misfire right after our own switch."""
         # Within SWITCH_GRACE of CKILS's own last switch, a mismatch is just
         # the OS not having propagated it yet — not a real manual override.
         rule_engine.last_set[999] = rule_engine.English_HKL
@@ -655,6 +754,7 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         self.assertNotIn(999, rule_engine.overridden)
 
     def test_a_single_mismatch_is_not_yet_trusted(self):
+        """A single mismatch is not yet trusted."""
         # Real regression found live, 2026-09-17, right after shipping the
         # fix above: PostMessage(WM_INPUTLANGCHANGEREQUEST) is fire-and-
         # forget, so a single mismatched read shortly after a slow Tier 3
@@ -672,6 +772,7 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         self.assertIn(999, rule_engine.pending_override)  # noted, not yet trusted
 
     def test_a_mismatch_that_resolves_itself_is_never_trusted(self):
+        """A mismatch that resolves itself is never trusted."""
         # The propagation-lag case: the first read catches Windows mid-way
         # through applying CKILS's own correction; by the next check it's
         # caught up and matches again. Must never become a committed override.
@@ -686,6 +787,7 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         self.assertNotIn(999, rule_engine.pending_override)
 
     def test_the_same_mismatch_confirmed_twice_is_a_real_override(self):
+        """The same mismatch confirmed twice is a real override."""
         rule_engine.last_set[999] = rule_engine.English_HKL
         rule_engine.last_switch_time[999] = time.time() - 10
         rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
@@ -702,6 +804,7 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         self.assertNotIn(999, rule_engine.pending_override)
 
     def test_poll_loop_detects_a_silent_override_confirmed_over_two_ticks(self):
+        """Poll loop detects a silent override confirmed over two ticks."""
         # Reproduces the exact real scenario: the user manually switches with
         # no focus/title event at all, then the SAME reading confirmed on a
         # second poll tick must record it as an override — a single tick

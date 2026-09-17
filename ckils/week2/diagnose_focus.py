@@ -1,3 +1,14 @@
+"""
+Diagnostic tool: like debug_capture.py, but also walks UP from the focused
+control through its parent chain, printing each ancestor's name/type/rect.
+Built for the common failure mode where GetFocusedControl() lands on
+something tiny (a button, an icon) and the real content is actually one of
+its parents — walking up from the wrong branch can reveal that case, though
+some real bugs (Zoom's main window, browser tab content) instead need
+diagnose_zoom_tree.py / diagnose_window_search.py, which walk DOWN from the
+window root since the real content isn't an ancestor of the focused element
+at all in those cases.
+"""
 import time
 import uiautomation as auto
 from PIL import ImageGrab

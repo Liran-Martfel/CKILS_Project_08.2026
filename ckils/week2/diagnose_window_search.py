@@ -1,12 +1,21 @@
+"""
+Diagnostic tool built to root-cause the 2026-09-17 bug where a Chrome/
+Claude.ai tab flipped to Hebrew with no Hebrew content on screen. Calls the
+ACTUAL live rule_engine._find_largest_leaf_pane_in_window() and
+read_region() against the real foreground window 8 seconds after starting —
+not a reimplementation — so whatever it reports is exactly what the real
+app would have picked and read, for real diagnosis instead of guessing. Also
+lists every leaf candidate tall enough to have been considered, so a false
+positive can be compared against what else was in the running. Confirmed
+live that this fallback (built for Zoom) was picking the entire browser
+window itself, including its tab strip/bookmarks bar — see
+WHOLE_WINDOW_SEARCH_MAX_WINDOW_COVERAGE in rule_engine.py for the fix.
+"""
 import time
 import win32gui
 import uiautomation as auto
 
 import rule_engine
-
-# Reuses the ACTUAL function CKILS runs (_find_largest_leaf_pane_in_window),
-# not a reimplementation — so whatever it reports is exactly what the real
-# app would have picked, for real diagnosis instead of guessing.
 
 auto.InitializeUIAutomationInCurrentThread()
 print("You have 8 seconds - bring the Chrome/Claude.ai tab to the front "
@@ -44,6 +53,12 @@ visited = 0
 
 
 def walk(control, depth=0):
+    """Recursively visits every descendant of control and prints the ones
+    that are true leaves (no children) at least WHOLE_WINDOW_SEARCH_MIN_HEIGHT
+    tall — the same candidate pool rule_engine._find_largest_leaf_pane_in_window
+    picks from — so a misfire can be compared against every other candidate
+    that was in the running, not just the one that won.
+    """
     global visited
     if control is None or depth > rule_engine.WHOLE_WINDOW_SEARCH_MAX_DEPTH or visited >= rule_engine.WHOLE_WINDOW_SEARCH_NODE_CAP:
         return

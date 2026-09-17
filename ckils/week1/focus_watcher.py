@@ -1,3 +1,11 @@
+"""
+Week 1 scratch file — early experimentation with SetWinEventHook, the
+Windows API CKILS eventually uses to detect focus changes in real time
+(see rule_engine.py's on_focus_change). Sets up the ctypes function
+signature needed to register that hook, but doesn't register or run
+anything yet — a stepping stone toward focus_and_process.py, not a
+runnable tool on its own.
+"""
 import ctypes
 import ctypes.wintypes
 import win32api

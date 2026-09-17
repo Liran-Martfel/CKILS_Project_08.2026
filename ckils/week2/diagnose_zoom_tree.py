@@ -1,3 +1,13 @@
+"""
+Diagnostic tool: dumps the WHOLE descendant tree (not just ancestors) of
+whatever window is in the foreground 8 seconds after this starts, top-down.
+Built specifically for Zoom's main call window, where GetFocusedControl()
+lands on a branch with no useful relationship (not even a parent/sibling)
+to the real chat pane elsewhere in the tree — the case
+_find_larger_sibling_rect and _find_largest_leaf_pane_in_window in
+rule_engine.py exist to handle. Not Zoom-specific in what it does; works
+against any foreground window, including a rendered Chrome tab.
+"""
 import time
 import win32gui
 import uiautomation as auto
@@ -32,6 +42,11 @@ _node_count = 0
 
 
 def walk(control, depth=0, max_depth=10):
+    """Recursively prints this control and every descendant (depth-first),
+    skipping tiny unnamed decorative nodes and stopping once MAX_NODES have
+    been printed or max_depth is reached, so this stays readable and finite
+    even against a huge rendered web page.
+    """
     global _node_count
     if control is None or depth > max_depth or _node_count >= MAX_NODES:
         return

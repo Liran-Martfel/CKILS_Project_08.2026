@@ -1,3 +1,11 @@
+"""
+Early exploration script: lists every keyboard layout installed on this
+Windows machine (and the numeric language ID each one maps to), then
+demonstrates the exact mechanism CKILS uses everywhere to actually switch
+languages — PostMessage(WM_INPUTLANGCHANGEREQUEST) — by forcing the
+current foreground window to English. This is where the English_HKL/
+Hebrew_HKL constants used throughout rule_engine.py were first identified.
+"""
 import ctypes.wintypes
 import win32api
 import win32con, win32gui, win32process, psutil
