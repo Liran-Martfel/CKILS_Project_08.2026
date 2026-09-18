@@ -7,7 +7,10 @@ approximation of it. importing rule_engine is safe for testing because its
 hook-setup / message-loop code is guarded by `if __name__ == "__main__":` —
 see that guard's own comment for why.
 """
+import os
+import queue
 import shutil
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -15,6 +18,7 @@ from unittest.mock import patch
 
 import rule_engine
 import decision_logger
+import skip_logger
 
 
 class PlaceholderRejectionTests(unittest.TestCase):
@@ -831,6 +835,198 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         # First tick was a normal (unconfirmed) reading and still queued a Tier 3
         # check; only the second, confirming tick should have skipped one.
         self.assertEqual(mock_thread.call_count, 1)
+
+
+class SkipLoggerTests(unittest.TestCase):
+    """Guards skip_logger.py's design guarantees, each of which exists to
+    prevent a specific bug named in the plan: it must never raise, never
+    block, never flood, and stay inert until started. Nothing here touches
+    the real ckils_skips.db — the writer tests use a temp directory.
+    """
+
+    def setUp(self):
+        """Resets the module's in-memory state so tests can't affect each other."""
+        skip_logger._last_logged.clear()
+        skip_logger._recent_stamps.clear()
+        while not skip_logger._queue.empty():
+            skip_logger._queue.get_nowait()
+        skip_logger._disabled_reason = None
+        skip_logger._started = False
+
+    def tearDown(self):
+        """Leaves the module clean for whatever runs next."""
+        self.setUp()
+
+    def test_queues_a_row_with_the_reason(self):
+        """A skip becomes exactly one queued row carrying the reason code."""
+        skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_EMPTY_FIELD, "ocr")
+        self.assertEqual(skip_logger._queue.qsize(), 1)
+        row = skip_logger._queue.get_nowait()
+        self.assertEqual(row[1:], ("chrome.exe", "New chat", 7, "empty_field", "ocr"))
+
+    def test_same_window_and_reason_is_logged_once(self):
+        """Repeats of the same (window, title, reason) inside the dedupe window are dropped."""
+        for _ in range(10):
+            skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_EMPTY_FIELD)
+        self.assertEqual(skip_logger._queue.qsize(), 1)
+
+    def test_a_different_reason_is_still_logged(self):
+        """De-duplication is per reason, so a new kind of failure is never hidden."""
+        skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_EMPTY_FIELD)
+        skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_REJECTED_NOISE)
+        self.assertEqual(skip_logger._queue.qsize(), 2)
+
+    def test_hourly_cap_stops_a_flood_of_volatile_titles(self):
+        """Titles that change constantly (unread counters) can't produce unbounded rows."""
+        with patch.object(skip_logger, "MAX_ROWS_PER_HOUR", 5):
+            for i in range(50):
+                skip_logger.log_skip("whatsapp.exe", f"({i}) WhatsApp", 7, skip_logger.REASON_EMPTY_FIELD)
+        self.assertEqual(skip_logger._queue.qsize(), 5)
+
+    def test_detail_is_truncated_for_privacy(self):
+        """Only the first MAX_DETAIL_CHARS characters of rejected text are ever kept."""
+        skip_logger.log_skip("a.exe", "t", 1, skip_logger.REASON_REJECTED_NOISE, "x" * 500)
+        self.assertEqual(len(skip_logger._queue.get_nowait()[5]), skip_logger.MAX_DETAIL_CHARS)
+
+    def test_a_full_queue_drops_instead_of_blocking_or_raising(self):
+        """If the writer falls behind, the correction thread must never wait or fail."""
+        with patch.object(skip_logger, "_queue", queue.Queue(maxsize=1)):
+            skip_logger.log_skip("a.exe", "t1", 1, skip_logger.REASON_EMPTY_FIELD)
+            skip_logger.log_skip("a.exe", "t2", 1, skip_logger.REASON_EMPTY_FIELD)
+
+    def test_never_raises_on_hostile_input(self):
+        """Even a detail whose str() explodes must not escape log_skip."""
+        class Boom:
+            """An object whose string conversion always raises."""
+            def __str__(self):
+                raise RuntimeError("boom")
+        skip_logger.log_skip(None, None, None, skip_logger.REASON_READ_FAILED, Boom())
+
+    def test_disabled_logger_records_nothing(self):
+        """Once disabled (circuit breaker or kill switch) log_skip is a no-op."""
+        skip_logger._disabled_reason = "test"
+        skip_logger.log_skip("a.exe", "t", 1, skip_logger.REASON_EMPTY_FIELD)
+        self.assertEqual(skip_logger._queue.qsize(), 0)
+
+    def test_kill_switch_file_prevents_start(self):
+        """Creating skip_logging.off next to the exe keeps the writer from ever starting."""
+        tmp = tempfile.mkdtemp()
+        try:
+            switch = os.path.join(tmp, "skip_logging.off")
+            open(switch, "w").close()
+            with patch.object(skip_logger, "KILL_SWITCH_PATH", switch), \
+                 patch.object(skip_logger.threading, "Thread") as mock_thread:
+                skip_logger.start()
+            mock_thread.assert_not_called()
+            self.assertIsNotNone(skip_logger._disabled_reason)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_logging_alone_starts_no_writer(self):
+        """Without start(), log_skip only queues in memory: no thread, no file."""
+        skip_logger.log_skip("a.exe", "t", 1, skip_logger.REASON_EMPTY_FIELD)
+        self.assertFalse(skip_logger._started)
+
+    def test_writer_persists_rows_to_its_own_database(self):
+        """End to end: start() -> log_skip() -> a real row in the temp database."""
+        tmp = tempfile.mkdtemp()
+        db = os.path.join(tmp, "skips.db")
+        try:
+            with patch.object(skip_logger, "DB_FILE", db), \
+                 patch.object(skip_logger, "KILL_SWITCH_PATH", os.path.join(tmp, "absent.off")):
+                skip_logger.start()
+                skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_EMPTY_FIELD)
+                rows = []
+                for _ in range(50):
+                    time.sleep(0.1)
+                    if os.path.exists(db):
+                        conn = sqlite3.connect(db)
+                        rows = conn.execute("SELECT exe_name, reason FROM skipped_reads").fetchall()
+                        conn.close()
+                        if rows:
+                            break
+                skip_logger._queue.put(None)  # stop the writer before the temp dir vanishes
+                time.sleep(0.3)
+            self.assertEqual(rows, [("chrome.exe", "empty_field")])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_writer_disables_itself_after_repeated_failures(self):
+        """The circuit breaker: after WRITER_FAILURE_LIMIT consecutive failures it stops, quietly."""
+        tmp = tempfile.mkdtemp()
+        real_connect = sqlite3.connect
+        calls = {"n": 0}
+
+        def flaky_connect(*args, **kwargs):
+            """Succeeds once (for table creation), then always fails."""
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return real_connect(os.path.join(tmp, "skips.db"))
+            raise sqlite3.OperationalError("disk full")
+
+        try:
+            for i in range(skip_logger.WRITER_FAILURE_LIMIT):
+                skip_logger._queue.put(("t", "a.exe", "t", i, "empty_field", None))
+            with patch.object(skip_logger.sqlite3, "connect", flaky_connect):
+                skip_logger._writer_loop()
+            self.assertIn("consecutive write failures", skip_logger._disabled_reason)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class SkipWiringTests(unittest.TestCase):
+    """Proves the log_skip() calls added to decide_with_content report the
+    right reason WITHOUT changing what it returns — the property that keeps
+    this whole feature from altering any language decision.
+    """
+
+    def _run(self, control, read_text="", foreground_matches=True):
+        """Runs decide_with_content on fakes and returns (result, reasons logged)."""
+        hwnd = 12345
+        fg = hwnd if foreground_matches else 99999
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=fg), \
+             patch.object(rule_engine.auto, "GetFocusedControl", return_value=control), \
+             patch.object(rule_engine, "read_region", return_value=read_text), \
+             patch.object(rule_engine, "log_decision"), \
+             patch.object(rule_engine.skip_logger, "log_skip") as mock_log:
+            result = rule_engine.decide_with_content(
+                hwnd, rule_engine.English_HKL, "Some Page - Google Chrome", "chrome.exe", 7)
+        return result, [c.args[3] for c in mock_log.call_args_list]
+
+    def test_empty_read_logs_empty_field_and_changes_nothing(self):
+        """An empty compose box: reason empty_field, and the fallback is returned untouched."""
+        control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="")
+        result, reasons = self._run(control, read_text="")
+        self.assertEqual(result, (rule_engine.English_HKL, None))
+        self.assertEqual(reasons, ["empty_field"])
+
+    def test_placeholder_logs_rejected_noise_and_changes_nothing(self):
+        """A recognised placeholder: reason rejected_noise, fallback returned untouched."""
+        control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="")
+        result, reasons = self._run(control, read_text="Write a message...")
+        self.assertEqual(result, (rule_engine.English_HKL, None))
+        self.assertEqual(reasons, ["rejected_noise"])
+
+    def test_off_screen_control_logs_off_screen(self):
+        """A control rect outside every monitor: reason off_screen, fallback returned."""
+        control = _FakeControl(rect=_FakeRect(1076, -13318, 1921, -13292), name="")
+        result, reasons = self._run(control)
+        self.assertEqual(result, (rule_engine.English_HKL, None))
+        self.assertEqual(reasons, ["off_screen"])
+
+    def test_focus_moved_logs_focus_moved(self):
+        """Losing focus before the read: reason focus_moved, fallback returned."""
+        control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="")
+        result, reasons = self._run(control, foreground_matches=False)
+        self.assertEqual(result, (rule_engine.English_HKL, None))
+        self.assertEqual(reasons, ["focus_moved"])
+
+    def test_a_real_read_logs_no_skip(self):
+        """A normal confident read is a decision, not a skip: nothing is logged here."""
+        control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="")
+        result, reasons = self._run(control, read_text="This is a normal English sentence about the project")
+        self.assertEqual(result[0], rule_engine.English_HKL)
+        self.assertEqual(reasons, [])
 
 
 if __name__ == "__main__":

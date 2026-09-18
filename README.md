@@ -70,7 +70,7 @@ it's trusted. The whole-window search added for Zoom also turned out to occasion
 browser window itself (tab strip and bookmarks bar included) as "content" on other apps — confirmed
 live with a purpose-built diagnostic tool — fixed by rejecting any candidate that spans essentially
 the whole window, since real content is never that. Each fix is backed by a regression test built
-from the real failure it addresses — 52 tests currently, covering every bug found so far
+from the real failure it addresses — 69 tests currently, covering every bug found so far
 (`ckils/week2/test_regressions.py`).
 
 **Known open limitations:**
@@ -82,6 +82,10 @@ from the real failure it addresses — 52 tests currently, covering every bug fo
   toolbar button, ...) has been a targeted, hand-diagnosed structural fix, not something that
   generalizes on its own to an app not yet encountered. A second, separate learning system for
   "which control reliably has real content" is a real idea for later, not yet designed.
+
+CKILS also keeps a separate, local "why did it do nothing?" log (`ckils_skips.db`, summarised by
+`summarize_skips.py`) that records every check that ended without a decision and why — an empty chat, a
+rejected placeholder, a read that failed — so a failure to switch can be diagnosed from evidence.
 
 The full, honest development history — every real bug found, how it was diagnosed, what was tried
 and rejected, and why — lives in [`PROJECT_JOURNEY.md`](PROJECT_JOURNEY.md).

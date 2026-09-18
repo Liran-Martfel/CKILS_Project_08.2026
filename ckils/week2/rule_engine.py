@@ -42,6 +42,7 @@ import uiautomation as auto
 from ocr_reader import read_region
 from predict_language import predict_language
 import decision_logger
+import skip_logger
 
 # Set to False for a quiet, end-user-facing run — True prints a line for every
 # focus change and every content-layer check, useful while developing/debugging.
@@ -860,6 +861,7 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     if win32gui.GetForegroundWindow() != hwnd:
         if DEBUG:
             print("  [content] skipped, focus moved before content could be read")
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_FOCUS_MOVED)
         return fallback_hkl, None
 
     try:
@@ -868,6 +870,8 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     except Exception as e:
         if DEBUG:
             print(f"  [content] skipped ({e})")
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_READ_FAILED,
+                             f"focused_control:{type(e).__name__}")
         return fallback_hkl, None
 
     # Diagnostic, not behavior: the raw, UNCAPPED control rect of whatever was
@@ -891,6 +895,7 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
         if title_text is not None and thread_id in google_docs_title_already_applied:
             if DEBUG:
                 print("  [content] Google Docs title already used as this visit's one-time default — not re-asserting")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_DOCS_TITLE_USED)
             return fallback_hkl, None
         if title_text is not None:
             text = title_text
@@ -901,6 +906,7 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
         else:
             if DEBUG:
                 print(f"  [content] control rect is off-screen ({rect.left},{rect.top}) — skipping OCR")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_OFF_SCREEN)
             return fallback_hkl, None
     else:
         ocr_rect = rect
@@ -927,11 +933,14 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
         except Exception as e:
             if DEBUG:
                 print(f"  [content] skipped ({e})")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_READ_FAILED,
+                                 f"ocr:{type(e).__name__}")
             return fallback_hkl, None
 
     if not text.strip():
         if DEBUG:
             print("  [content] empty field, nothing to read")
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_EMPTY_FIELD, source)
         return fallback_hkl, None
 
     stripped_text = _strip_message_metadata(text)
@@ -942,6 +951,8 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     if not text:
         if DEBUG:
             print("  [content] nothing left after stripping known UI wrapper")
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_EMPTY_FIELD,
+                             f"{source}: only a UI wrapper")
         return fallback_hkl, None
 
     # Real finding: Zoom's own product-branding text ("zoom. Workplace ...")
@@ -958,6 +969,8 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     if rejection_reason is not None:
         if DEBUG:
             print(f"  [content] rejected as {rejection_reason}, not real content: {text[:60]!r}")
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_REJECTED_NOISE,
+                             f"{rejection_reason}: {text}")
         return fallback_hkl, None
 
     try:
@@ -967,6 +980,8 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
         # already found and fixed) falls back gracefully here now, same as OCR.
         if DEBUG:
             print(f"  [content] skipped ({e})")
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_READ_FAILED,
+                             f"classifier:{type(e).__name__}")
         return fallback_hkl, None
     confidence = proba[label]
     if DEBUG:
@@ -1248,6 +1263,7 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         if win32gui.GetForegroundWindow() != hwnd:
             if DEBUG:
                 print(f"  [content] {exe_name}: decision arrived too late, focus moved on ({elapsed_ms:.0f} ms)")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_FOCUS_MOVED, "result ready too late")
             return False
         # Real bug found live: Chrome's hwnd doesn't change between tabs, so the
         # check above alone can't tell "still the same window" apart from "same
@@ -1257,10 +1273,12 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         if win32gui.GetWindowText(hwnd) != title:
             if DEBUG:
                 print(f"  [content] {exe_name}: decision is for a different tab now, discarding ({elapsed_ms:.0f} ms)")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_STALE_DISCARDED)
             return False
         if thread_id in overridden:
             if DEBUG:
                 print(f"  [content] {exe_name}: user has manually overridden this window, leaving it alone ({elapsed_ms:.0f} ms)")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_OVERRIDE_RESPECTED)
             return False
 
         win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, corrected_hkl)
@@ -1398,6 +1416,7 @@ def _poll_apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, titl
 if __name__ == "__main__":
     threading.Thread(target=_poll_focused_window, daemon=True).start()
     decision_logger.start_background_pruning()
+    skip_logger.start()
 
     callback = WinEventProcType(on_focus_change)
     hook = user32.SetWinEventHook(

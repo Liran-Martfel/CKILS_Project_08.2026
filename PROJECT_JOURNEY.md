@@ -2133,6 +2133,44 @@ back to the whole-window pane when it's the only candidate available.
 
 ---
 
+## 2026-09-18 — Confirmed why CKILS did nothing on a fresh Claude chat, and built the "why did it do nothing?" log
+
+**The confirmed finding.** User report: on claude.ai, the keyboard stayed Hebrew when landing on a
+new chat. Confirmed live with `diagnose_arrival.py` (new; it prints what CKILS would decide the moment
+a window is focused), not inferred: the page key "New chat - Claude - Google Chrome" has a mixed
+history (`E,H,E,H,H,E,E,H` — every new chat shares one title, and some end up Hebrew, some English) so
+`_trust()` correctly trusts nothing, and the fast path applies no language; the focused control is the
+empty compose box ("Write your prompt to Claude", 924x66), so the Tier 3 read returns
+`empty field, nothing to read`. There is nothing on a brand-new empty chat to decide from — the known
+"brand-new page" gap, not a regression. It was invisible in the database because checks that end
+without a decision were never recorded.
+
+**What was built (observation only — no decision or return value changes).** `skip_logger.py` records
+one row per check that ends without a decision, with a reason code (`empty_field`, `rejected_noise`,
+`off_screen`, `read_failed`, `focus_moved`, `stale_discarded`, `override_respected`, `docs_title_used`),
+in its own database `ckils_skips.db`. `summarize_skips.py` reports the top reasons. Built to avoid the
+bugs a logger could cause: it never raises; it does no disk I/O on the switching thread (a bounded
+in-memory queue feeds one separate writer thread); it shares no lock, table or file with the decision
+log and is never read by the retrain workflow; de-duplication (10 min per window+title+reason), a
+120-rows/hour cap, a bounded queue and 60-day retention keep it from flooding; only 60 characters of
+rejected text are stored; it is inert until `start()`. 69 tests pass (was 52), including tests that
+`decide_with_content` returns exactly the same value on every logged path.
+
+**If it ever misbehaves (also written at the top of `skip_logger.py`):** (a) create an empty file
+`skip_logging.off` next to CKILS.exe and restart — no rebuild, the logger never starts; (b) it disables
+itself after 5 consecutive write failures; (c) delete `ckils_skips.db` if it grows; (d) if corrections
+feel slower, do (a) first — if that doesn't fix it, it was never the logger, so roll nothing else back;
+(e) full rollback is one `git revert` of the single commit that added it. Never fix a logger problem by
+editing decision logic.
+
+**How success is judged — a 72-hour window, not 24** (every past regression surfaced ~36-40 hours after
+a change): deployed 2026-09-18 ~19:10; the check is on 2026-09-21 ~19:10. Pass = all tests green; a fresh
+empty Claude chat produces exactly one `empty_field` row; no repeated rows for one window+reason inside
+10 minutes and under ~2,000 rows/day; average CPU still under 1%; no new console errors; override rate
+still at or under 0.3%; and `summarize_skips.py` names the top 3 causes of "no decision".
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
