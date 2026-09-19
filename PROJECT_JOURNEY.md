@@ -2205,6 +2205,35 @@ user had to correct CKILS". (2) The learned-defaults files already contain false
 
 ---
 
+## 2026-09-19 (later) — Correcting the published numbers, and cleaning the learned defaults
+
+**The "22.5x fewer corrections" claim is withdrawn.** Audit of `dist/ckils_decisions.db`, two independent flaws:
+1. *The numerator counted false detections.* On the days a comparison log exists (Sep 15-19), 57 of 79 recorded
+   overrides (72%) equalled the language CKILS itself had last set in another window (carry-over — see the entry
+   above). Sep 3-14 predates `decisions.jsonl`, so those days cannot be tested at all — how many of the 137 "before"
+   overrides were real is unknown.
+2. *The denominator grew ~15x.* Applied decisions per active day: ~403 (Sep 3-8) → ~5,915 (Sep 9-16) → ~903 (Sep 17-19).
+   The jump is the background poll (added Sep 9, commit 44d88d8) logging a decision on every tick, not more usage.
+   A rate whose denominator is inflated by polling frequency cannot show reliability.
+What the data does support: recorded overrides per active day 22.8 (Sep 3-8) → 14.0 (Sep 9-16) → 17.0 (Sep 17-19) —
+roughly 1.6x fewer in the middle period, then up again during the regressions (and mostly false). The disclosure
+page's investor table, this README, and the numbers given in chat are corrected accordingly; a clean baseline is
+measured from the Sep 19 fix onward (the user never switches by hand, so genuine overrides should be ~0).
+Other published figures re-verified: background CPU ~9% → ~0.25% (161 CPU-seconds over 17.8 h, measured); code/test
+counts refreshed (100 commits / 20 fixes / ~2,900 + ~1,180 lines / 78 tests).
+
+**Learned defaults cleaned (user-approved).** Every recorded override had been written into the trust history as if
+chosen by the user. Keys never touched by any recorded override were left exactly as they were; the 98 page keys and 13
+app keys that were touched were rebuilt by replaying, in time order, the reliable events available (confident Tier 3
+corrections from `decisions.jsonl` + the overrides NOT classified as carry-over). Result: 74 page histories changed, 43
+emptied (mostly single-entry, untrusted anyway), trusted keys among the touched ones 19 → 14 — a small, temporary loss of
+instant defaults that CKILS re-learns in normal use; e.g. VS Code's page went from a mixed history (untrusted) to
+all-English (trusted). Originals are kept as `*.bak-before-carryover-cleanup` next to the files in `dist/`. Method and
+limits: rebuilt histories only see events since 2026-09-15 (the log's coverage), which is why some older-but-fine
+histories were lost rather than kept.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
