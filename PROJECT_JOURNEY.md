@@ -2171,6 +2171,40 @@ still at or under 0.3%; and `summarize_skips.py` names the top 3 causes of "no d
 
 ---
 
+## 2026-09-19 — The real cause of the "false override": Windows shares the layout across windows
+
+**The finding.** User report: moved to claude.ai (language went Hebrew), moved to VS Code — stayed Hebrew;
+it only changed after pressing the Claude tab and returning. The new skip log showed the exact moment:
+12:52:34 CKILS recorded an "override to Hebrew" in VS Code, and at 12:52:36 an `override_respected` row
+showed the correct English correction being thrown away because of it. The user said they never switch by
+hand — and the data agreed: the "override" is not a manual switch, it fires on ANY mismatch between the
+real layout and what CKILS remembers for the window. Windows' "different input method for each app window"
+setting is off here (`DefaultInputMethodOverride` empty), so the language is shared across windows: arriving
+in B keeps whatever CKILS just set in A. Measured over the real log: **38 of 51 recorded "overrides" (29/37 on
+Sep 17, 4/5 Sep 18, 5/9 today) equalled the language CKILS itself had last set in a DIFFERENT window.** The
+other 13 are not explained by this data and are not guessed at. This means the Sep 17 "confirm twice" fix
+(which blamed propagation lag) was incomplete: carry-over is a real, persistent mismatch, so two checks
+agree. It also means every false override was fed into the learned defaults as if the user had chosen it.
+
+**Fix (`matched_this_visit`, `_handle_carry_over`, `_reset_visit_state`).** A real manual switch is a change
+that appears in a window whose layout CKILS has already SEEN match on this visit. A mismatch present since
+arrival is carry-over: no override is recorded and nothing is learned. If CKILS decided something this visit
+it re-posts that decision (up to `MAX_REASSERT_ATTEMPTS` = 2, since Windows may re-sync right after a post);
+otherwise, or after the attempts, it adopts the layout Windows shows as the new baseline, so any later change
+is judged as real. Leaving a window (or a shared thread's title changing) ends the visit. Outcomes are
+visible in the skip log as `carryover_reasserted` / `carryover_accepted`. 78 tests pass (was 69), including
+a replay of the 12:52 sequence. The failure plan (dial `MAX_REASSERT_ATTEMPTS` to 0 first; one `git revert`
+as the last step) is in the docstring of `_handle_carry_over`.
+
+**Consequences still open.** (1) The override-rate metric — including the 22.5x figure on the disclosure page's
+investor section — counts these false detections, so it needs an audit before it can be quoted as "how often the
+user had to correct CKILS". (2) The learned-defaults files already contain false "overrides" (e.g. stray
+"hebrew" in VS Code's history); cleaning them is user data and needs the user's OK. (3) The empty-new-chat gap
+(nothing to read) is a separate, known limitation. Verification: normal use for 72 hours; expected result is no
+`Code.exe -> hebrew` overrides on entry and a much lower override count.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

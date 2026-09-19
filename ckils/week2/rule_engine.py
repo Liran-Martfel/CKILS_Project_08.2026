@@ -1022,7 +1022,81 @@ WinEventProcType = ctypes.WINFUNCTYPE(
 
 pending_override = {}  # thread_id -> (hkl_seen, first_seen_time) — an unconfirmed mismatch, not yet trusted
 
-def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl):
+# Real bug found live, 2026-09-19 (root cause of the Sep 17 "false override" too): Windows shares the
+# input language across windows (the "different input method for each app window" setting is off), so
+# arriving in window B keeps whatever language window A had — including one CKILS itself just set in A.
+# CKILS compares that with what it remembers for B, sees a mismatch, and used to call it a manual
+# override. Measured on the real log: 38 of 51 recorded "overrides" over three days equalled the
+# language CKILS had last set in ANOTHER window. The user never switched by hand. A false override
+# froze correction AND taught the wrong language into the learned defaults.
+# A real manual switch is a change that appears while a window already holds a layout CKILS has SEEN
+# match on this visit. A mismatch that has been there since arrival, never matching, is carry-over.
+matched_this_visit = set()   # thread_ids whose real layout has matched last_set at least once this visit
+reassert_attempts = {}       # thread_id -> times CKILS re-posted its own decision against a carry-over mismatch
+MAX_REASSERT_ATTEMPTS = 2    # after this many tries CKILS accepts the layout Windows insists on (never fights forever)
+
+
+def _reset_visit_state(thread_id):
+    """Forgets everything that only made sense within one visit to a window:
+    whether its layout has matched this visit, re-assert attempts, any
+    unconfirmed mismatch, and CKILS's own last-post time (so "did CKILS
+    decide anything since arriving?" starts false). Called when focus leaves
+    a thread and when a shared thread's title changes (a new tab = a new visit).
+    """
+    matched_this_visit.discard(thread_id)
+    reassert_attempts.pop(thread_id, None)
+    pending_override.pop(thread_id, None)
+    last_switch_time.pop(thread_id, None)
+
+
+def _handle_carry_over(thread_id, hwnd, exe_name, title, actual_hkl):
+    """A mismatch that has existed since arrival (never matched this visit) is
+    carry-over from another window, NOT a manual switch: records no override
+    and teaches the learned defaults nothing. If CKILS itself decided
+    something this visit (it has posted a switch since arriving) it re-posts
+    that decision up to MAX_REASSERT_ATTEMPTS times, since Windows may have
+    re-synced the layout right after the first post. Otherwise, or once the
+    attempts are used up, it accepts the layout Windows insists on as the new
+    baseline, so any LATER change is correctly seen as a real one. With
+    hwnd=None (the focus-event path, where the fast path is about to post the
+    right target anyway) it only declines to call it an override.
+
+    IF THIS MISBEHAVES — failure plan, cheapest first (so a bug here never
+    becomes a reason to undo other work):
+      a) Language keeps flipping back / feels like CKILS fights you: set
+         MAX_REASSERT_ATTEMPTS = 0 and rebuild. CKILS then never re-posts; it
+         only adopts the layout Windows shows. It still never records a false
+         override, so the original bug stays fixed either way.
+      b) Real manual switches are not being respected: check the skip log
+         (summarize_skips.py) for carryover_accepted rows on that window; a
+         genuine switch made BEFORE the layout ever matched this visit is
+         indistinguishable from carry-over by design and is simply adopted.
+      c) Anything else, or if unsure: `git revert` the single commit that added
+         matched_this_visit / _handle_carry_over. That restores the previous
+         behaviour exactly (including its false overrides).
+      Never fix a problem here by touching the fast path or Tier 3 logic.
+    """
+    if hwnd is None:
+        return
+    attempts = reassert_attempts.get(thread_id, 0)
+    decided_this_visit = thread_id in last_switch_time
+    if decided_this_visit and attempts < MAX_REASSERT_ATTEMPTS:
+        reassert_attempts[thread_id] = attempts + 1
+        try:
+            win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, last_set[thread_id])
+        except Exception:
+            pass
+        last_switch_time[thread_id] = time.time()  # give Windows the usual grace before judging again
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_CARRYOVER_REASSERTED,
+                             f"attempt {attempts + 1}")
+        return
+    last_set[thread_id] = actual_hkl
+    matched_this_visit.add(thread_id)
+    reassert_attempts.pop(thread_id, None)
+    skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_CARRYOVER_ACCEPTED)
+
+
+def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, hwnd=None):
     """Real bug found live, 2026-09-17 ("ping-pong" complaint): manual-override
     detection used to live ONLY inside on_focus_change, which only runs on a
     genuine Windows focus/title event. Switching the language yourself with
@@ -1057,9 +1131,18 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl):
     """
     if thread_id not in last_set:
         return False
+    if actual_hkl == last_set[thread_id]:
+        matched_this_visit.add(thread_id)  # from now on, a change in THIS window is a real change
+        reassert_attempts.pop(thread_id, None)
+        pending_override.pop(thread_id, None)
+        return False
     just_switched = time.time() - last_switch_time.get(thread_id, 0) < SWITCH_GRACE
-    if actual_hkl == last_set[thread_id] or just_switched:
-        pending_override.pop(thread_id, None)  # matches again on its own — was propagation lag, not a real override
+    if just_switched:
+        pending_override.pop(thread_id, None)  # Windows hasn't caught up to our own post yet — not an override
+        return False
+    if thread_id not in matched_this_visit:
+        # Never matched since arrival: carry-over from another window, not a manual switch.
+        _handle_carry_over(thread_id, hwnd, exe_name, title, actual_hkl)
         return False
 
     pending_hkl, _ = pending_override.get(thread_id, (None, None))
@@ -1116,7 +1199,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             last_set.pop(previous_thread, None)
         content_decision.pop(previous_thread, None)  # fresh window = learned default first, again
         google_docs_title_already_applied.discard(previous_thread)
-        pending_override.pop(previous_thread, None)  # an unconfirmed mismatch from THIS visit shouldn't leak into the next
+        _reset_visit_state(previous_thread)  # matched-state, re-asserts, unconfirmed mismatches: all end with the visit
         # Real bug found live: unlike content_decision (a per-visit "sticky"
         # value that SHOULD reset the moment you leave), decision_logger's
         # last-auto-decision record is meant to answer "what did CKILS decide
@@ -1149,6 +1232,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     if last_title_by_thread.get(thread_id) != title:
         content_decision.pop(thread_id, None)
         google_docs_title_already_applied.discard(thread_id)
+        _reset_visit_state(thread_id)
         old_key = (thread_id, last_title_by_thread.get(thread_id))
         poll_unchanged_streak.pop(old_key, None)
         poll_next_allowed.pop(old_key, None)
@@ -1361,7 +1445,7 @@ def _poll_focused_window():
                 actual_hkl = win32api.GetKeyboardLayout(thread_id)
             except Exception:
                 actual_hkl = None
-            if actual_hkl is not None and _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl):
+            if actual_hkl is not None and _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, hwnd):
                 continue  # just recorded a fresh override — don't immediately fight it with a Tier 3 read
 
         check_key = (thread_id, title)

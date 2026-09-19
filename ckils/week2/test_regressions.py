@@ -723,6 +723,8 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         rule_engine.last_switch_time.clear()
         rule_engine.overridden.clear()
         rule_engine.pending_override.clear()
+        rule_engine.matched_this_visit.clear()
+        rule_engine.reassert_attempts.clear()
 
     def tearDown(self):
         """Clears the override-tracking state dicts so no state leaks into
@@ -732,6 +734,8 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         rule_engine.last_switch_time.clear()
         rule_engine.overridden.clear()
         rule_engine.pending_override.clear()
+        rule_engine.matched_this_visit.clear()
+        rule_engine.reassert_attempts.clear()
 
     def test_nothing_to_compare_against_is_not_an_override(self):
         """Nothing to compare against is not an override."""
@@ -769,6 +773,7 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         # commit to an override.
         rule_engine.last_set[999] = rule_engine.English_HKL
         rule_engine.last_switch_time[999] = time.time() - 10  # well past the switch grace
+        rule_engine.matched_this_visit.add(999)  # a real change is only judged once the layout has matched this visit
         result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
 
         self.assertFalse(result)
@@ -782,6 +787,7 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         # caught up and matches again. Must never become a committed override.
         rule_engine.last_set[999] = rule_engine.English_HKL
         rule_engine.last_switch_time[999] = time.time() - 10
+        rule_engine.matched_this_visit.add(999)
         rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
 
         result = rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.English_HKL)
@@ -794,6 +800,7 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         """The same mismatch confirmed twice is a real override."""
         rule_engine.last_set[999] = rule_engine.English_HKL
         rule_engine.last_switch_time[999] = time.time() - 10
+        rule_engine.matched_this_visit.add(999)
         rule_engine._detect_and_record_manual_override(999, "chrome.exe", "t", rule_engine.Hebrew_HKL)
 
         with patch.object(rule_engine, "log_override"), \
@@ -820,13 +827,14 @@ class ManualOverrideDetectionTests(unittest.TestCase):
              patch.object(rule_engine.win32gui, "GetWindowText", return_value="Some Title"), \
              patch.object(rule_engine.win32process, "GetWindowThreadProcessId", return_value=(999, 4321)), \
              patch.object(rule_engine.psutil, "Process") as mock_process, \
-             patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=rule_engine.Hebrew_HKL), \
+             patch.object(rule_engine.win32api, "GetKeyboardLayout",
+                          side_effect=[rule_engine.English_HKL, rule_engine.Hebrew_HKL, rule_engine.Hebrew_HKL]), \
              patch.object(rule_engine, "log_override"), \
              patch.object(rule_engine, "save_learned_default"), \
              patch.object(rule_engine, "save_page_learned_default"), \
              patch.object(rule_engine.decision_logger, "log_manual_override"), \
              patch.object(rule_engine.threading, "Thread") as mock_thread, \
-             patch.object(rule_engine.time, "sleep", side_effect=[None, None, StopIteration]):
+             patch.object(rule_engine.time, "sleep", side_effect=[None, None, None, StopIteration]):
             mock_process.return_value.name.return_value = "chrome.exe"
             with self.assertRaises(StopIteration):
                 rule_engine._poll_focused_window()
@@ -835,6 +843,145 @@ class ManualOverrideDetectionTests(unittest.TestCase):
         # First tick was a normal (unconfirmed) reading and still queued a Tier 3
         # check; only the second, confirming tick should have skipped one.
         self.assertEqual(mock_thread.call_count, 1)
+
+
+class CarryOverTests(unittest.TestCase):
+    """Real bug found live, 2026-09-19 (and the true cause of the Sep 17 "false
+    override"): Windows shares the input language across windows, so arriving
+    in window B keeps the language CKILS just set in window A. CKILS compared
+    that with its stale memory of B, called the mismatch a manual override,
+    stopped correcting, and taught the wrong language into the learned
+    defaults - while the user never switched anything by hand. Measured on the
+    real log: 38 of 51 recorded "overrides" over three days equalled the
+    language CKILS had last set in ANOTHER window. A real manual switch is a
+    change that appears in a window whose layout CKILS has already SEEN match
+    this visit; a mismatch present since arrival is carry-over.
+    """
+
+    def setUp(self):
+        """Clears every piece of per-visit state and starts with no recorded posts."""
+        for d in (rule_engine.last_set, rule_engine.last_switch_time, rule_engine.pending_override,
+                  rule_engine.reassert_attempts):
+            d.clear()
+        rule_engine.overridden.clear()
+        rule_engine.matched_this_visit.clear()
+        self.posts = []
+        self.learned = 0
+        self.override_rows = 0
+
+    tearDown = setUp
+
+    def _seen(self, hkl, hwnd=12345):
+        """Runs one detection with every side effect mocked, tallying posts/learning/override rows."""
+        with patch.object(rule_engine.win32api, "PostMessage") as post, \
+             patch.object(rule_engine, "log_override") as log_row, \
+             patch.object(rule_engine, "save_learned_default") as learn_app, \
+             patch.object(rule_engine, "save_page_learned_default") as learn_page, \
+             patch.object(rule_engine.decision_logger, "log_manual_override"):
+            result = rule_engine._detect_and_record_manual_override(999, "Code.exe", "t", hkl, hwnd)
+        self.posts += post.call_args_list
+        self.learned += learn_app.call_count + learn_page.call_count
+        self.override_rows += log_row.call_count
+        return result
+
+    def _aged(self):
+        """Marks CKILS's last post as long ago, so the switch-grace window doesn't hide the mismatch."""
+        rule_engine.last_switch_time[999] = time.time() - 10
+
+    def test_a_mismatch_present_since_arrival_is_not_an_override(self):
+        """Never having matched this visit, a mismatch is carry-over: no override, no learning."""
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        self._aged()
+        result = self._seen(rule_engine.Hebrew_HKL, hwnd=None)
+        self.assertFalse(result)
+        self.assertNotIn(999, rule_engine.overridden)
+        self.assertEqual((self.learned, self.override_rows), (0, 0))
+
+    def test_repeating_the_same_carry_over_never_becomes_an_override(self):
+        """The old two-checks rule was fooled by this; carry-over must stay carry-over however often seen."""
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        for _ in range(6):
+            self._aged()
+            self._seen(rule_engine.Hebrew_HKL, hwnd=None)
+        self.assertNotIn(999, rule_engine.overridden)
+        self.assertEqual((self.learned, self.override_rows), (0, 0))
+
+    def test_reasserts_its_own_decision_when_it_decided_this_visit(self):
+        """If CKILS posted a switch this visit, it re-posts that decision instead of backing off."""
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        self._aged()
+        self._seen(rule_engine.Hebrew_HKL)
+        self.assertEqual(len(self.posts), 1)
+        self.assertEqual(self.posts[0].args[1:],
+                         (rule_engine.win32con.WM_INPUTLANGCHANGEREQUEST, 0, rule_engine.English_HKL))
+        self.assertEqual(rule_engine.reassert_attempts[999], 1)
+        self.assertNotIn(999, rule_engine.overridden)
+
+    def test_gives_up_after_the_limit_and_accepts_the_layout(self):
+        """It never fights forever: after MAX_REASSERT_ATTEMPTS it adopts the layout Windows insists on, recording no override."""
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        for _ in range(rule_engine.MAX_REASSERT_ATTEMPTS + 1):
+            self._aged()
+            self._seen(rule_engine.Hebrew_HKL)
+        self.assertEqual(len(self.posts), rule_engine.MAX_REASSERT_ATTEMPTS)
+        self.assertEqual(rule_engine.last_set[999], rule_engine.Hebrew_HKL)
+        self.assertIn(999, rule_engine.matched_this_visit)
+        self.assertNotIn(999, rule_engine.overridden)
+        self.assertEqual((self.learned, self.override_rows), (0, 0))
+
+    def test_a_window_where_ckils_decided_nothing_is_never_pushed_to_a_stale_language(self):
+        """With no decision this visit, last_set is stale memory: adopt the real layout, post nothing."""
+        rule_engine.last_set[999] = rule_engine.English_HKL  # stale; no last_switch_time this visit
+        self._seen(rule_engine.Hebrew_HKL)
+        self.assertEqual(self.posts, [])
+        self.assertEqual(rule_engine.last_set[999], rule_engine.Hebrew_HKL)
+        self.assertNotIn(999, rule_engine.overridden)
+
+    def test_a_change_after_a_match_is_still_a_real_override_and_teaches(self):
+        """The genuine case still works: layout seen matching, then changed and confirmed twice."""
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        self._aged()
+        self._seen(rule_engine.English_HKL)   # matches -> this visit is now settled
+        self._seen(rule_engine.Hebrew_HKL)    # first sighting of the change
+        result = self._seen(rule_engine.Hebrew_HKL)  # confirmed
+        self.assertTrue(result)
+        self.assertIn(999, rule_engine.overridden)
+        self.assertEqual(self.override_rows, 1)
+        self.assertGreaterEqual(self.learned, 1)
+
+    def test_after_accepting_the_layout_a_later_change_is_treated_as_real(self):
+        """Once the baseline is adopted, a subsequent change (the user's) is judged normally."""
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        self._seen(rule_engine.Hebrew_HKL)             # undecided window: accepted silently
+        self._seen(rule_engine.English_HKL)            # first sighting of a change
+        result = self._seen(rule_engine.English_HKL)   # confirmed
+        self.assertTrue(result)
+
+    def test_the_real_incident_sequence_produces_no_override(self):
+        """Replays 12:52 exactly: VS Code entered with Hebrew carried over; CKILS re-asserts, then Windows follows."""
+        rule_engine.last_set[999] = rule_engine.English_HKL
+        self._aged()
+        self._seen(rule_engine.Hebrew_HKL)  # tick 1: carry-over, re-assert #1
+        self._aged()
+        self._seen(rule_engine.Hebrew_HKL)  # tick 2: still carried over, re-assert #2
+        self._aged()
+        result = self._seen(rule_engine.English_HKL)  # tick 3: Windows finally follows
+        self.assertFalse(result)
+        self.assertNotIn(999, rule_engine.overridden)
+        self.assertIn(999, rule_engine.matched_this_visit)
+        self.assertEqual((self.learned, self.override_rows), (0, 0))
+
+    def test_leaving_a_window_ends_the_visit(self):
+        """_reset_visit_state clears the matched flag, re-assert count, pending mismatch and last post time."""
+        rule_engine.matched_this_visit.add(999)
+        rule_engine.reassert_attempts[999] = 2
+        rule_engine.pending_override[999] = (rule_engine.Hebrew_HKL, time.time())
+        rule_engine.last_switch_time[999] = time.time()
+        rule_engine._reset_visit_state(999)
+        self.assertNotIn(999, rule_engine.matched_this_visit)
+        self.assertNotIn(999, rule_engine.reassert_attempts)
+        self.assertNotIn(999, rule_engine.pending_override)
+        self.assertNotIn(999, rule_engine.last_switch_time)
 
 
 class SkipLoggerTests(unittest.TestCase):

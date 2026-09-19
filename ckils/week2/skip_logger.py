@@ -30,6 +30,11 @@ REASON CODES (what each one means, and what it usually tells you)
                       window, so CKILS correctly left it alone.
     docs_title_used   Google Docs' one-time title default was already spent for
                       this visit, so nothing new was applied.
+    carryover_reasserted  The layout differed from CKILS's decision since arriving (Windows
+                      shares the language across windows), so CKILS re-posted its own
+                      decision instead of calling it a manual override; `detail` = attempt no.
+    carryover_accepted  CKILS gave up re-asserting (or had decided nothing this visit) and
+                      accepted the layout Windows insists on, still without recording an override.
   Not logged, by design: routine "no change" results, the poll's backoff skips
   and its in-flight de-duplication — they are normal operation, not failures,
   and logging them would flood the file.
@@ -89,6 +94,8 @@ REASON_FOCUS_MOVED = "focus_moved"
 REASON_STALE_DISCARDED = "stale_discarded"
 REASON_OVERRIDE_RESPECTED = "override_respected"
 REASON_DOCS_TITLE_USED = "docs_title_used"
+REASON_CARRYOVER_REASSERTED = "carryover_reasserted"
+REASON_CARRYOVER_ACCEPTED = "carryover_accepted"
 
 ENABLED = True
 KILL_SWITCH_FILENAME = "skip_logging.off"
