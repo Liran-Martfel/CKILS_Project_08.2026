@@ -106,6 +106,12 @@ local-only (real captured text from real usage isn't something that belongs in a
 the trained model file (`ckils/week2/language_model.joblib`) is what ships and is what CKILS
 actually runs on.
 
+## Before you try it
+
+A short, plain-language note (English and Hebrew) on what CKILS reads from your screen, what it saves and
+where, what's still not perfect, and how to stop it or clear its data:
+**[What CKILS Sees](https://claude.ai/artifact/KMiiK4EUXr74emHT2PtYEe)**. Please read it before turning it on.
+
 ## Repo layout
 
 - `ckils/week1/`, `ckils/week2/` — the working code, one file per lesson; `rule_engine.py` is the
