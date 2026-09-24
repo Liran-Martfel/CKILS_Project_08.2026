@@ -2314,6 +2314,41 @@ on the wording, given what this feature touches.
 
 ---
 
+## 2026-09-24 (later still) — A real, serious bug: Tier 4's hook froze the keyboard system-wide
+
+User report: enabled Phase 1 to test it (per the plan), tried to type, and the keyboard stopped
+responding entirely — in every app, not just CKILS. Closing CKILS immediately fixed it. Opt-in file
+removed at once and confirmed absent before any further work.
+
+**Root cause, found from real code inspection, not a guess:** neither `CallNextHookEx` nor the hook
+callback itself (`_hook_proc`) had its real Windows return type declared anywhere. The true type is
+`LRESULT` — pointer-sized, 64-bit on a 64-bit machine — but with nothing declared, ctypes silently
+assumed a plain 32-bit `int` for both. `WH_KEYBOARD_LL`'s contract is that returning ANY nonzero value
+blocks that keystroke, system-wide, for every app, until the hook is removed. With the upper 32 bits
+of the real 64-bit return register left as whatever garbage happened to be there — instead of
+correctly zero-extended — the value Windows actually read back was often nonzero even when the real,
+intended answer was always "0, let it through." That's the exact mechanism behind "every keystroke,
+everywhere, stopped working" and why killing the process (tearing down the malformed hook) fixed it
+instantly — Windows never got a chance to read the broken value again.
+
+**Fixed** by explicitly declaring `restype`/`argtypes` for `CallNextHookEx` and `SetWindowsHookExW`
+(pointer-sized types — `c_ssize_t` for the LRESULT-returning one, `c_void_p` for the handle-returning
+one) and building the hook callback itself with a `c_ssize_t` return type instead of `c_long` (`c_long`
+is always 32 bits on Windows, even in a 64-bit build — the LLP64 data model, not the mistake it looks
+like at a glance). Also hardened: the ctypes callback object is now kept as a module-level reference
+rather than only a local variable, removing any doubt about premature garbage collection during the
+hook's lifetime. 5 new tests exist specifically to make this exact class of mistake — an undeclared
+Windows return type on a hook/callback — impossible to reintroduce silently, not just to check today's
+specific fix. 119 tests pass (was 114).
+
+**What this means for the rollout:** Tier 4 remains off (opt-in file not recreated) until the user
+explicitly chooses to re-test, this time fixed and with the recovery method (killing the process,
+already confirmed to work, mouse-only) understood in advance. The 1-week observation window has not
+started yet — it starts from whenever the user re-enables it after this fix, not from the original
+ship date.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

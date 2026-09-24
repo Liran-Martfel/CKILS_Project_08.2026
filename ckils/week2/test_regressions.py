@@ -7,6 +7,7 @@ approximation of it. importing rule_engine is safe for testing because its
 hook-setup / message-loop code is guarded by `if __name__ == "__main__":` —
 see that guard's own comment for why.
 """
+import ctypes
 import os
 import queue
 import shutil
@@ -1381,6 +1382,54 @@ class LayoutRemapTests(unittest.TestCase):
         self.assertEqual(plain[layout_remap.VK_SHIFT], 0)
         self.assertEqual(shifted[layout_remap.VK_SHIFT], 0x80)
         self.assertEqual(capped[layout_remap.VK_CAPITAL], 0x01)
+
+
+class KeyboardHookAbiTests(unittest.TestCase):
+    """Real bug found live, 2026-09-24: neither CallNextHookEx nor the hook
+    callback itself had its real Windows return type (LRESULT — pointer-
+    sized, 64-bit on a 64-bit machine) declared, so ctypes defaulted to a
+    plain 32-bit int for both. WH_KEYBOARD_LL's contract is that ANY nonzero
+    return value blocks that keystroke, everywhere, for every app — with
+    the upper 32 bits of the real return register left as uninitialized
+    garbage instead of correctly zero-extended, the value Windows actually
+    read was often nonzero even when the intended answer was always "let it
+    through", freezing the keyboard system-wide until CKILS was killed.
+    These tests exist to make that exact class of mistake impossible to
+    reintroduce silently — not just today's specific fix."""
+
+    def test_call_next_hook_ex_return_type_is_pointer_sized(self):
+        """c_long is always 32 bits, even on 64-bit Windows (LLP64) — the
+        real LRESULT is pointer-sized. c_ssize_t is correct on every build;
+        c_long is exactly the mistake that froze the keyboard."""
+        self.assertEqual(keyboard_hook.user32.CallNextHookEx.restype, ctypes.c_ssize_t)
+        self.assertNotEqual(keyboard_hook.user32.CallNextHookEx.restype, ctypes.c_long)
+
+    def test_call_next_hook_ex_has_declared_argtypes(self):
+        """Undeclared argtypes is the same class of silent-truncation risk
+        on the way IN as an undeclared restype is on the way out."""
+        self.assertIsNotNone(keyboard_hook.user32.CallNextHookEx.argtypes)
+
+    def test_hook_callback_return_type_is_pointer_sized(self):
+        """The actual HOOKPROC callback ctypes builds must declare the same
+        pointer-sized return type — this is the type Windows reads back
+        directly as the block/pass-through decision for every keystroke."""
+        self.assertEqual(keyboard_hook._HOOK_CALLBACK_TYPE._restype_, ctypes.c_ssize_t)
+        self.assertNotEqual(keyboard_hook._HOOK_CALLBACK_TYPE._restype_, ctypes.c_long)
+
+    def test_set_windows_hook_ex_return_type_is_pointer_sized(self):
+        """HHOOK is a handle — pointer-sized like every other Windows handle
+        in this codebase, not a plain 32-bit int."""
+        self.assertEqual(keyboard_hook.user32.SetWindowsHookExW.restype, ctypes.c_void_p)
+
+    def test_hook_proc_always_returns_call_next_hook_ex_value_even_on_error(self):
+        """Whatever branch _hook_proc takes, it must always return
+        CallNextHookEx's own value — never a bare 0/None from a different
+        code path, which would itself reintroduce the "wrong value returned
+        to Windows" risk this whole class of bug belongs to."""
+        with patch.object(keyboard_hook.user32, "CallNextHookEx", return_value=12345) as mock_call:
+            result = keyboard_hook._hook_proc(-1, 0, 0)  # n_code < 0: must pass through untouched, per the real API contract
+        mock_call.assert_called_once()
+        self.assertEqual(result, 12345)
 
 
 class KeyboardHookDecisionTests(unittest.TestCase):

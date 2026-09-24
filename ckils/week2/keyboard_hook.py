@@ -47,6 +47,28 @@ import skip_logger
 
 user32 = ctypes.windll.user32
 
+# Real bug found live, caused a total keyboard freeze until CKILS was killed:
+# neither of these two calls had its real return type declared, so ctypes
+# defaulted to a plain 32-bit `int` for both. The real Windows type is
+# LRESULT — pointer-sized, 64-bit on a 64-bit machine. WH_KEYBOARD_LL's
+# contract is that returning ANY NONZERO value from the hook tells Windows
+# to swallow that keystroke everywhere, for every app, permanently until the
+# hook is removed. With the upper 32 bits of a 64-bit return register left
+# as garbage instead of correctly zero-extended, the value Windows actually
+# read back could easily be nonzero even when CallNextHookEx's real,
+# intended answer was 0 (pass the key through) — silently blocking every
+# keystroke system-wide. This is exactly why the keyboard came back the
+# instant the process (and its malformed hook) was torn down. Declaring the
+# real return types below is the fix — c_ssize_t is pointer-sized on every
+# Windows build, unlike c_long, which is always 32-bit even on 64-bit
+# Windows (the LLP64 model).
+user32.CallNextHookEx.restype = ctypes.c_ssize_t
+user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM]
+user32.SetWindowsHookExW.restype = ctypes.c_void_p
+user32.SetWindowsHookExW.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.wintypes.DWORD]
+user32.UnhookWindowsHookEx.restype = ctypes.c_int
+user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+
 WH_KEYBOARD_LL = 13
 WM_KEYDOWN = 0x0100
 WM_SYSKEYDOWN = 0x0104
@@ -62,6 +84,7 @@ VK_A, VK_Z = 0x41, 0x5A
 
 _event_queue = queue.Queue(maxsize=200)  # bounded — a burst of keys never blocks the hook callback
 _started = False
+_hook_callback_ref = None  # keeps the ctypes callback alive for the hook's lifetime — see _run_hook
 
 
 class LowLevelKeyboardInputEvent(ctypes.Structure):
@@ -91,6 +114,13 @@ def _hook_proc(n_code, w_param, l_param):
     except Exception:
         pass
     return user32.CallNextHookEx(None, n_code, w_param, l_param)
+
+
+# The real HOOKPROC return type is LRESULT — pointer-sized (c_ssize_t), not
+# c_long (always 32-bit). See the module-level comment above CallNextHookEx's
+# restype declaration for why getting this wrong froze the keyboard.
+_HOOK_CALLBACK_TYPE = ctypes.WINFUNCTYPE(
+    ctypes.c_ssize_t, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)
 
 
 class _PerThreadState:
@@ -267,10 +297,15 @@ def start(english_hkl, hebrew_hkl):
             thread that installed it, so this runs on its own dedicated
             thread rather than sharing rule_engine.py's own PumpMessages().
             """
-            callback_type = ctypes.WINFUNCTYPE(
-                ctypes.c_long, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)
-            callback = callback_type(_hook_proc)
-            hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, callback, None, 0)
+            global _hook_callback_ref
+            # Kept as a module-level global, not a local — a ctypes callback
+            # object must stay alive for as long as Windows might call it;
+            # storing it only as a local here would be relying on this one
+            # stack frame never unwinding, which PumpMessages() blocking
+            # forever happens to guarantee, but a module-level reference
+            # removes any doubt rather than depending on that.
+            _hook_callback_ref = _HOOK_CALLBACK_TYPE(_hook_proc)
+            hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, _hook_callback_ref, None, 0)
             if not hook:
                 print("  [keyboard_hook] failed to install the low-level keyboard hook")
                 return
