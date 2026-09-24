@@ -101,10 +101,14 @@ class _PerThreadState:
     decoded characters alone can't answer. Reset together, always.
     """
     def __init__(self):
+        """Starts with no word in progress and no raw keys recorded."""
         self.chars = gibberish_detector.IncrementalWordBuffer()
         self.raw_keys = []
 
     def reset(self):
+        """Clears both the decoded-character buffer and the raw (vk, scan)
+        pairs together, so they can never drift out of sync with each other.
+        """
         self.chars.reset()
         self.raw_keys = []
 
@@ -258,6 +262,11 @@ def start(english_hkl, hebrew_hkl):
         threading.Thread(target=_consumer_loop, daemon=True).start()
 
         def _run_hook():
+            """Registers the real WH_KEYBOARD_LL hook and pumps messages
+            forever — WH_KEYBOARD_LL requires a live message loop on the
+            thread that installed it, so this runs on its own dedicated
+            thread rather than sharing rule_engine.py's own PumpMessages().
+            """
             callback_type = ctypes.WINFUNCTYPE(
                 ctypes.c_long, ctypes.c_int, ctypes.wintypes.WPARAM, ctypes.wintypes.LPARAM)
             callback = callback_type(_hook_proc)

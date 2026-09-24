@@ -141,6 +141,7 @@ class IncrementalWordBuffer:
     MAX_LENGTH = 12
 
     def __init__(self):
+        """Starts empty — no word in progress, nothing capped yet."""
         self._chars = []
         self.capped = False
 
