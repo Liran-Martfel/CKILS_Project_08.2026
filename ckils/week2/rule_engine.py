@@ -43,6 +43,7 @@ from ocr_reader import read_region
 from predict_language import predict_language
 import decision_logger
 import skip_logger
+import keyboard_hook
 
 # Set to False for a quiet, end-user-facing run — True prints a line for every
 # focus change and every content-layer check, useful while developing/debugging.
@@ -1527,6 +1528,11 @@ def _poll_apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, titl
 if __name__ == "__main__":
     threading.Thread(target=_poll_focused_window, daemon=True).start()
     decision_logger.start_background_pruning()
+    # Tier 4, Phase 1 (log-only, corrects nothing): off unless the user has
+    # explicitly created enable_gibberish_detection.on next to CKILS — see
+    # keyboard_hook.py's own module docstring for why this one, alone among
+    # everything else here, defaults to off rather than on.
+    keyboard_hook.start(English_HKL, Hebrew_HKL)
     skip_logger.start()
 
     callback = WinEventProcType(on_focus_change)

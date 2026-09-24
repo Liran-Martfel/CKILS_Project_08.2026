@@ -35,6 +35,13 @@ REASON CODES (what each one means, and what it usually tells you)
                       decision instead of calling it a manual override; `detail` = attempt no.
     carryover_accepted  CKILS gave up re-asserting (or had decided nothing this visit) and
                       accepted the layout Windows insists on, still without recording an override.
+    gibberish_suspected  Tier 4 Phase 1 (keyboard_hook.py): the current word looked
+                      structurally impossible in the active layout's language, AND the
+                      same physical keys looked plausible under the other layout —
+                      exactly what a wrong-layout typo looks like. Phase 1 never
+                      corrects anything; `detail` is language names and a key COUNT
+                      only, never the characters actually typed (see keyboard_hook.py's
+                      own privacy guarantees).
   Not logged, by design: routine "no change" results, the poll's backoff skips
   and its in-flight de-duplication — they are normal operation, not failures,
   and logging them would flood the file.
@@ -96,6 +103,7 @@ REASON_OVERRIDE_RESPECTED = "override_respected"
 REASON_DOCS_TITLE_USED = "docs_title_used"
 REASON_CARRYOVER_REASSERTED = "carryover_reasserted"
 REASON_CARRYOVER_ACCEPTED = "carryover_accepted"
+REASON_GIBBERISH_SUSPECTED = "gibberish_suspected"  # Tier 4 Phase 1 (keyboard_hook.py) — log-only, never corrects
 
 ENABLED = True
 KILL_SWITCH_FILENAME = "skip_logging.off"

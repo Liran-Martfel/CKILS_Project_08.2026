@@ -19,6 +19,9 @@ from unittest.mock import patch
 import rule_engine
 import decision_logger
 import skip_logger
+import gibberish_detector
+import layout_remap
+import keyboard_hook
 
 
 class PlaceholderRejectionTests(unittest.TestCase):
@@ -1196,6 +1199,313 @@ class SkipWiringTests(unittest.TestCase):
         result, reasons = self._run(control, read_text="This is a normal English sentence about the project")
         self.assertEqual(result[0], rule_engine.English_HKL)
         self.assertEqual(reasons, [])
+
+
+class GibberishCbawRuleTests(unittest.TestCase):
+    """Tier 4 (Phase 1, log-only) piece 1: the CBAW ("can't become a word")
+    rule checker. Real rules, not guesses — see gibberish_detector.py's own
+    docstring for why this is rule-based rather than a dictionary or a
+    trained model. Confirms the user's own two Hebrew examples are caught,
+    that real short words/usernames/abbreviations are NOT flagged (the
+    exact false-positive risk raised while designing this), and the
+    Hebrew final-form rule (the deterministic one) works on more than just
+    the one example it was named after.
+    """
+
+    def test_final_form_letter_not_at_end_is_impossible(self):
+        """The user's own example: final-nun (ן) followed by another letter."""
+        self.assertIsNotNone(gibberish_detector.looks_impossible("ןמ", "hebrew"))
+
+    def test_seed_bigram_is_impossible(self):
+        """The user's own second example."""
+        self.assertIsNotNone(gibberish_detector.looks_impossible("זש", "hebrew"))
+
+    def test_final_form_rule_generalizes_beyond_the_one_example(self):
+        """The final-form rule is a real alphabet fact, not curated per-letter —
+        confirm it catches a different final form (ך) the same way."""
+        self.assertIsNotNone(gibberish_detector.looks_impossible("ךל", "hebrew"))
+
+    def test_final_form_at_the_actual_end_is_fine(self):
+        """A final form IS legal — at the end of a word, which is its whole purpose."""
+        self.assertIsNone(gibberish_detector.looks_impossible("של", "hebrew"))  # ends in ל, not a final form
+        self.assertIsNone(gibberish_detector.looks_impossible("שלום"[-2:], "hebrew"))
+
+    def test_a_real_hebrew_word_is_not_flagged(self):
+        """A real, ordinary Hebrew word must never be flagged."""
+        self.assertIsNone(gibberish_detector.looks_impossible("שלום", "hebrew"))
+
+    def test_doubled_letter_that_never_doubles_is_impossible_in_english(self):
+        """J, Q, V never double in real English words."""
+        self.assertIsNotNone(gibberish_detector.looks_impossible("vv", "english"))
+
+    def test_q_not_followed_by_u_is_impossible_in_english(self):
+        """Q is followed by U in essentially every common English word."""
+        self.assertIsNotNone(gibberish_detector.looks_impossible("qk", "english"))
+
+    def test_known_q_exceptions_are_not_flagged(self):
+        """Real loanwords/proper nouns are explicitly allowed, not guessed at."""
+        self.assertIsNone(gibberish_detector.looks_impossible("Qatar", "english"))
+        self.assertIsNone(gibberish_detector.looks_impossible("Iraq", "english"))
+
+    def test_code_identifiers_are_not_flagged(self):
+        """Real risk raised while designing this: code tokens are not real
+        words, but they're not IMPOSSIBLE letter combinations either."""
+        for token in ("hkl", "tid", "hwnd", "argc", "df_train"):
+            self.assertIsNone(gibberish_detector.looks_impossible(token, "english"), token)
+
+    def test_chat_shorthand_is_not_flagged(self):
+        """Real risk raised while designing this: common shorthand must not
+        be mistaken for gibberish just because it isn't in a dictionary."""
+        for token in ("tbh", "idk", "lol", "brb", "np"):
+            self.assertIsNone(gibberish_detector.looks_impossible(token, "english"), token)
+
+    def test_a_username_is_not_flagged(self):
+        """Usernames are built from ordinary letters, just not real words."""
+        self.assertIsNone(gibberish_detector.looks_impossible("shadow99", "english"))
+
+    def test_too_short_to_judge_is_not_flagged_either_way(self):
+        """A single letter isn't enough evidence of anything."""
+        self.assertIsNone(gibberish_detector.looks_impossible("a", "english"))
+        self.assertIsNone(gibberish_detector.looks_impossible("א", "hebrew"))
+
+    def test_direction_marks_and_digits_are_ignored_not_judged(self):
+        """Non-letter characters mixed in (RTL marks, digits) must not
+        themselves be treated as evidence of anything — only letters count."""
+        self.assertIsNone(gibberish_detector.looks_impossible("‏shalom123‎", "english"))
+
+
+class IncrementalWordBufferTests(unittest.TestCase):
+    """Tier 4 (Phase 1) piece 1b: the per-keystroke buffer that holds only
+    the CURRENT in-progress word, capped at 12 characters (the user's own
+    design — checking incrementally rather than only at a full word
+    boundary, and never evaluating anything longer than that at all, which
+    is also what protects long passwords/paths/identifiers structurally,
+    without ever needing to recognize them as such).
+    """
+
+    def test_accumulates_characters_in_order(self):
+        """Pushed characters build up the current word, in order."""
+        buf = gibberish_detector.IncrementalWordBuffer()
+        for ch in "shalom":
+            buf.push(ch)
+        self.assertEqual(buf.text(), "shalom")
+
+    def test_a_boundary_character_resets_the_buffer(self):
+        """A space (or other boundary char) clears the buffer — a new word starts fresh."""
+        buf = gibberish_detector.IncrementalWordBuffer()
+        for ch in "hello world":
+            buf.push(ch)
+        self.assertEqual(buf.text(), "world")
+
+    def test_caps_at_twelve_characters_and_stops_accumulating(self):
+        """Real design requirement: nothing past 12 characters is ever
+        evaluated as a whole — the buffer simply stops growing."""
+        buf = gibberish_detector.IncrementalWordBuffer()
+        long_token = "abcdefghijklmnopqrstuvwxyz"
+        for ch in long_token:
+            buf.push(ch)
+        self.assertEqual(len(buf.text()), gibberish_detector.IncrementalWordBuffer.MAX_LENGTH)
+        self.assertTrue(buf.capped)
+
+    def test_push_returns_false_once_capped_or_on_boundary(self):
+        """The caller uses this return value to know when to stop checking this word."""
+        buf = gibberish_detector.IncrementalWordBuffer()
+        self.assertTrue(buf.push("a"))
+        self.assertFalse(buf.push(" "))  # boundary
+        buf2 = gibberish_detector.IncrementalWordBuffer()
+        for _ in range(gibberish_detector.IncrementalWordBuffer.MAX_LENGTH):
+            buf2.push("a")
+        self.assertFalse(buf2.push("a"))  # already capped
+
+    def test_reset_clears_manually(self):
+        """A caller (e.g. focus moving to a different control) can reset explicitly."""
+        buf = gibberish_detector.IncrementalWordBuffer()
+        buf.push("a")
+        buf.push("b")
+        buf.reset()
+        self.assertEqual(buf.text(), "")
+        self.assertFalse(buf.capped)
+
+
+class LayoutRemapTests(unittest.TestCase):
+    """Tier 4 (Phase 1) piece 2: the physical-key-to-other-layout remap.
+    _to_unicode_ex is the one function that touches the real Windows API
+    (ToUnicodeEx) and is mocked here, same reason ocr_reader.py's real
+    Tesseract call isn't unit-tested either — real OS/driver behavior isn't
+    something a test can meaningfully fake beyond "was it called correctly".
+    """
+
+    def test_masks_a_negative_hkl_before_passing_to_ctypes(self):
+        """Real bug caught before shipping: ctypes.wintypes.HANDLE sign-
+        extends a negative Python int to a 64-bit value instead of the real
+        32-bit HKL bit pattern. Confirms the mask is applied."""
+        captured = {}
+
+        def fake_to_unicode_ex(vk, scan, key_state, buf, size, flags, hkl):
+            captured["hkl"] = hkl.value
+            return 0
+        with patch.object(layout_remap.user32, "ToUnicodeEx", side_effect=fake_to_unicode_ex):
+            layout_remap.remap_key_to_other_layout(0x41, 30, rule_engine.Hebrew_HKL)
+        self.assertGreaterEqual(captured["hkl"], 0)
+        self.assertEqual(captured["hkl"], rule_engine.Hebrew_HKL & 0xFFFFFFFF)
+
+    def test_returns_the_produced_character(self):
+        """A successful remap returns the single character produced."""
+        with patch.object(layout_remap, "_to_unicode_ex", return_value="a"):
+            self.assertEqual(
+                layout_remap.remap_key_to_other_layout(0x41, 30, rule_engine.English_HKL), "a")
+
+    def test_returns_none_for_a_dead_key_or_no_character(self):
+        """A dead key or a key with no plain-character mapping (empty result) yields None."""
+        with patch.object(layout_remap, "_to_unicode_ex", return_value=""):
+            self.assertIsNone(layout_remap.remap_key_to_other_layout(0x41, 30, rule_engine.English_HKL))
+
+    def test_returns_none_when_the_api_call_fails(self):
+        """A failed/exception-raising API call must not propagate — this
+        runs inside a real-time keyboard hook, where a raised exception
+        could break the hook chain."""
+        with patch.object(layout_remap, "_to_unicode_ex", return_value=None):
+            self.assertIsNone(layout_remap.remap_key_to_other_layout(0x41, 30, rule_engine.English_HKL))
+
+    def test_returns_none_for_multi_character_results(self):
+        """A dead-key composition producing more than one character isn't a
+        plain letter remap — treated as "no usable answer", not guessed at."""
+        with patch.object(layout_remap, "_to_unicode_ex", return_value="ab"):
+            self.assertIsNone(layout_remap.remap_key_to_other_layout(0x41, 30, rule_engine.English_HKL))
+
+    def test_build_key_state_reflects_shift_and_caps_lock(self):
+        """The key-state array's shift/caps-lock bits are set exactly when requested."""
+        plain = layout_remap.build_key_state()
+        shifted = layout_remap.build_key_state(shift_pressed=True)
+        capped = layout_remap.build_key_state(caps_lock_on=True)
+        self.assertEqual(plain[layout_remap.VK_SHIFT], 0)
+        self.assertEqual(shifted[layout_remap.VK_SHIFT], 0x80)
+        self.assertEqual(capped[layout_remap.VK_CAPITAL], 0x01)
+
+
+class KeyboardHookDecisionTests(unittest.TestCase):
+    """Tier 4 (Phase 1) piece 3: process_key_event, the pure decision
+    function behind the keyboard hook. Uses a fake remap table instead of
+    the real Windows API, so this tests only the LOGIC: does it correctly
+    identify a wrong-layout word, and does it correctly leave real text,
+    shortcuts, and password fields alone.
+    """
+
+    def setUp(self):
+        """Points the module's HKL constants at the real values so
+        current/other-language comparisons in process_key_event work."""
+        self._orig_en = keyboard_hook.ENGLISH_HKL_VALUE
+        self._orig_he = keyboard_hook.HEBREW_HKL_VALUE
+        keyboard_hook.ENGLISH_HKL_VALUE = rule_engine.English_HKL
+        keyboard_hook.HEBREW_HKL_VALUE = rule_engine.Hebrew_HKL
+
+    def tearDown(self):
+        """Restores the module's HKL constants."""
+        keyboard_hook.ENGLISH_HKL_VALUE = self._orig_en
+        keyboard_hook.HEBREW_HKL_VALUE = self._orig_he
+
+    @staticmethod
+    def _fake_remap(table):
+        """Builds a fake remap_key_to_other_layout: table maps (vk, hkl) ->
+        the character that layout produces for that key, ignoring scan/
+        shift/caps — real per-key mapping is layout_remap.py's own concern,
+        already tested separately.
+        """
+        def remap(vk, scan, hkl, shift_pressed=False, caps_lock_on=False):
+            return table.get((vk, hkl))
+        return remap
+
+    def test_ctrl_held_resets_the_buffer_and_flags_nothing(self):
+        """A Ctrl-held keystroke is a shortcut, not text — whatever word
+        was in progress is abandoned, not judged."""
+        state = keyboard_hook._PerThreadState()
+        state.chars.push("a")
+        result = keyboard_hook.process_key_event(
+            0x41, 30, state, rule_engine.English_HKL, ctrl_held=True, alt_held=False)
+        self.assertIsNone(result)
+        self.assertEqual(state.chars.text(), "")
+
+    def test_alt_held_resets_the_buffer_and_flags_nothing(self):
+        """Same as Ctrl — an Alt combination is a shortcut, not typed text."""
+        state = keyboard_hook._PerThreadState()
+        state.chars.push("a")
+        result = keyboard_hook.process_key_event(
+            0x41, 30, state, rule_engine.English_HKL, ctrl_held=False, alt_held=True)
+        self.assertIsNone(result)
+        self.assertEqual(state.chars.text(), "")
+
+    def test_a_normal_english_word_is_never_flagged(self):
+        """A real word must never be flagged, at any point while it's being typed."""
+        state = keyboard_hook._PerThreadState()
+        table = {(0x48, rule_engine.English_HKL): "h", (0x49, rule_engine.English_HKL): "i"}
+        with patch.object(keyboard_hook.layout_remap, "remap_key_to_other_layout", self._fake_remap(table)):
+            r1 = keyboard_hook.process_key_event(0x48, 30, state, rule_engine.English_HKL, False, False)
+            r2 = keyboard_hook.process_key_event(0x49, 31, state, rule_engine.English_HKL, False, False)
+        self.assertIsNone(r1)
+        self.assertIsNone(r2)
+
+    def test_a_wrong_layout_word_is_flagged_with_language_names_and_a_count_only(self):
+        """The core mechanism: physical keys that read as impossible under
+        the current layout, but plausible under the other one — exactly
+        what a wrong-layout typo looks like. The result must carry ONLY
+        language names and a key count, never the characters themselves
+        (the privacy guarantee — see test_result_never_carries_raw_text)."""
+        state = keyboard_hook._PerThreadState()
+        # Physical keys Q then K: "qk" is impossible in English (q not
+        # followed by u); the same two keys read as a real-shaped Hebrew
+        # pair (ש then ל — neither a final form, not a seed-impossible pair).
+        table = {
+            (0x51, rule_engine.English_HKL): "q", (0x51, rule_engine.Hebrew_HKL): "ש",
+            (0x4B, rule_engine.English_HKL): "k", (0x4B, rule_engine.Hebrew_HKL): "ל",
+        }
+        with patch.object(keyboard_hook.layout_remap, "remap_key_to_other_layout", self._fake_remap(table)):
+            r1 = keyboard_hook.process_key_event(0x51, 16, state, rule_engine.English_HKL, False, False)
+            r2 = keyboard_hook.process_key_event(0x4B, 37, state, rule_engine.English_HKL, False, False)
+        self.assertIsNone(r1)  # a single letter is never enough evidence
+        self.assertIsNotNone(r2)
+        self.assertEqual(r2, {"current_language": "english", "other_language": "hebrew", "length": 2})
+
+    def test_result_never_carries_raw_text(self):
+        """Privacy guarantee, checked structurally: whatever fields a
+        result dict has, none of them may be the actual typed characters."""
+        state = keyboard_hook._PerThreadState()
+        table = {
+            (0x51, rule_engine.English_HKL): "q", (0x51, rule_engine.Hebrew_HKL): "ש",
+            (0x4B, rule_engine.English_HKL): "k", (0x4B, rule_engine.Hebrew_HKL): "ל",
+        }
+        with patch.object(keyboard_hook.layout_remap, "remap_key_to_other_layout", self._fake_remap(table)):
+            keyboard_hook.process_key_event(0x51, 16, state, rule_engine.English_HKL, False, False)
+            result = keyboard_hook.process_key_event(0x4B, 37, state, rule_engine.English_HKL, False, False)
+        self.assertEqual(set(result.keys()), {"current_language", "other_language", "length"})
+        for value in result.values():
+            self.assertNotIn(value, ("qk", "של", "q", "k", "ש", "ל"))
+
+    def test_an_implausible_reading_in_both_languages_is_not_flagged(self):
+        """If the OTHER layout's reading is ALSO implausible, this isn't
+        real evidence of a wrong-layout typo — just noise either way."""
+        state = keyboard_hook._PerThreadState()
+        table = {
+            (0x51, rule_engine.English_HKL): "q", (0x51, rule_engine.Hebrew_HKL): "ז",
+            (0x4B, rule_engine.English_HKL): "k", (0x4B, rule_engine.Hebrew_HKL): "ש",
+        }
+        with patch.object(keyboard_hook.layout_remap, "remap_key_to_other_layout", self._fake_remap(table)):
+            keyboard_hook.process_key_event(0x51, 16, state, rule_engine.English_HKL, False, False)
+            result = keyboard_hook.process_key_event(0x4B, 37, state, rule_engine.English_HKL, False, False)
+        self.assertIsNone(result)  # 'זש' is itself a seed-impossible Hebrew pair
+
+    def test_password_field_is_never_buffered(self):
+        """_is_password_field_focused reports True for a password control —
+        the consumer loop resets and skips entirely on this, before any
+        analysis ever runs (see _consumer_loop)."""
+        fake_control = type("F", (), {"IsPassword": True})()
+        with patch.object(keyboard_hook.auto, "GetFocusedControl", return_value=fake_control):
+            self.assertTrue(keyboard_hook._is_password_field_focused())
+
+    def test_password_check_failure_defaults_to_not_a_password_field(self):
+        """If UI Automation itself fails, this must not crash the consumer
+        loop — defaulting to False just means normal analysis proceeds."""
+        with patch.object(keyboard_hook.auto, "GetFocusedControl", side_effect=Exception("boom")):
+            self.assertFalse(keyboard_hook._is_password_field_focused())
 
 
 if __name__ == "__main__":

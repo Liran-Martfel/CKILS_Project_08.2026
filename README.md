@@ -72,7 +72,7 @@ it's trusted. The whole-window search added for Zoom also turned out to occasion
 browser window itself (tab strip and bookmarks bar included) as "content" on other apps — confirmed
 live with a purpose-built diagnostic tool — fixed by rejecting any candidate that spans essentially
 the whole window, since real content is never that. Each fix is backed by a regression test built
-from the real failure it addresses — 82 tests currently, covering every bug found so far
+from the real failure it addresses — 114 tests currently, covering every bug found so far
 (`ckils/week2/test_regressions.py`).
 
 **Known open limitations:**
@@ -111,6 +111,16 @@ actually runs on.
 A short, plain-language note (English and Hebrew) on what CKILS reads from your screen, what it saves and
 where, what's still not perfect, and how to stop it or clear its data:
 **[What CKILS Sees](https://claude.ai/artifact/KMiiK4EUXr74emHT2PtYEe)**. Please read it before turning it on.
+
+## Tier 4 (experimental, off by default)
+
+A first phase of a fourth safety-net tier now exists in the code: it watches your typing (never a
+password field, never a Ctrl/Alt shortcut, never more than the current in-progress word, capped at 12
+characters) to catch a real word coming out garbled because the keyboard is in the wrong layout — the
+one case the other three tiers can't catch until after the fact. This phase only LOGS what it would
+have flagged; it never changes your keyboard. It's disabled by default and requires deliberately
+creating `enable_gibberish_detection.on` next to CKILS.exe to turn on — see PROJECT_JOURNEY.md for the
+full design and privacy guarantees.
 
 ## Repo layout
 

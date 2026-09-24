@@ -2257,6 +2257,63 @@ pass (was 78).
 
 ---
 
+## 2026-09-24 (later) — Tier 4, Phase 1: a gibberish-typing safety net (log-only, off by default)
+
+The user's own long-standing idea (written down 2026-09-03) built for real, in its first phase. Every
+other tier decides the language from something AROUND the user — the app, the page, the screen. This
+is the first mechanism that watches what the user is actually TYPING, to catch the one case nothing
+else can: a real word coming out garbled because the keyboard is in the wrong layout, mid-sentence.
+
+**Design, shaped directly by the user's own feedback during planning, not just my own proposal:**
+- **Detection is rule-based ("CBAW" — the user's term, "can't become a word"), not a trained model.**
+  `gibberish_detector.py`'s one deterministic rule: Hebrew's five final-form letters (ך ם ן ף ץ) can
+  never appear except as the LAST letter of a word — a real, absolute fact of the alphabet, not a
+  guess (matches the user's own "ןמ" example exactly). A small, explicitly-labeled seed list of
+  impossible bigrams handles a few more (the user's "זש" example) for Hebrew and English. Deliberately
+  NOT a real-word dictionary: usernames, code identifiers, chat shorthand ("tbh", "idk"), and invented
+  names are all real, ordinary typing that no dictionary would recognize — none of them are actually
+  IMPOSSIBLE combinations, which is the narrower, safer claim this only ever makes.
+- **Checked incrementally, capped at 12 characters — the user's own design, adopted over my original
+  "check only at a word boundary" plan.** `IncrementalWordBuffer` judges the word as it's being typed,
+  so a real correction could land after 4-6 characters instead of waiting for the whole word — and,
+  as the user pointed out, capping at 12 also means long passwords/paths/identifiers are never
+  evaluated as a whole at all, without ever needing to recognize them as such.
+- **The actual mechanism:** `layout_remap.py` asks Windows (`ToUnicodeEx`) what character the SAME
+  physical key would have produced under a DIFFERENT layout than the one active — the real technique
+  behind "wrong layout" correction, not a guess. A word is only ever flagged if it's impossible under
+  the current layout AND the same keys read as plausible under the other one — both conditions,
+  never one alone.
+- **A real bug caught before it ever ran live:** `ctypes.wintypes.HANDLE` sign-extends this codebase's
+  negative HKL representation (`Hebrew_HKL = -0xfc2fbf3`) to a 64-bit value instead of the real 32-bit
+  bit pattern Windows expects — confirmed directly by constructing one and inspecting it. Fixed by
+  masking to 32 bits first, with a regression test.
+- **Built ON TOP of the existing pipeline, not a parallel system** — the user's explicit requirement.
+  A Phase 2 correction (not built yet) would use the exact same `PostMessage`/`decision_logger` call
+  Tier 3 already uses, just tagged as Tier 4 — meaning the EXISTING override-detection code would
+  already handle a reverted Tier 4 correction with zero new code, matching the user's "an override is
+  an override" instruction.
+- **Privacy, enforced structurally, not just promised:** the keyboard hook (`keyboard_hook.py`) never
+  buffers a keystroke typed with Ctrl/Alt held (a shortcut), never buffers one while the focused
+  control's `IsPassword` is true, and never buffers an injected (synthetic) keystroke. Only the
+  CURRENT in-progress word is ever held, capped at 12 characters, cleared on every word boundary —
+  never a history of anything typed before it. What reaches the log is language names and a key COUNT
+  only, NEVER the characters typed — checked by a dedicated test asserting a flagged result's fields
+  can only ever be `{current_language, other_language, length}`.
+- **Off by default, opt-in required** — the inverse of `skip_logger`'s kill-switch: this watches
+  keystrokes, so it must be deliberately turned on (`enable_gibberish_detection.on` next to CKILS.exe),
+  never silently active, for anyone including the user himself.
+- **Phase 1 is log-only.** Nothing about this ever changes the keyboard. It only records, via
+  `skip_logger`'s new `gibberish_suspected` reason code, "this would have been flagged" — the entire
+  purpose being to measure real false-positive/miss rates from real typing before Phase 2 (actual
+  correction) is even considered, a separate future decision gated on this week's real data.
+
+114 tests pass (was 82). **Verification: 1 week of real use with Phase 1 enabled**, before any Phase 2
+work starts. Not yet done: updating the consent/disclosure page to describe this capability (it exists
+in the code now, disabled, but the page doesn't mention it yet) — flagged for the user's own sign-off
+on the wording, given what this feature touches.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
