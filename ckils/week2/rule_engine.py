@@ -533,6 +533,30 @@ UI_CHROME_MARKERS = ["Workplace", "וביטקוין בזמן-אמת ב-TradingVi
 # isn't wrongly rejected too — only the logo-only read is.
 YOUTUBE_LOGO_ONLY_PATTERN = re.compile(r"^[>\s]*YouTube[\"“”']*$")
 
+# Real finding, 2026-09-24: a 2-3 character OCR read (a misread icon, a
+# scrollbar arrow) can score confidence just over
+# CONTENT_CONFIDENCE_THRESHOLD purely by chance — a short string gives the
+# classifier almost nothing to actually be confident ABOUT. Confirmed live:
+# 'הם' (2 real Hebrew letters, confidence 0.665) flipped an English exam
+# page ("Exam B - Machine Learning (Calculations)") mid-sentence. The
+# confidence threshold alone doesn't protect against this — length is a
+# separate, independent signal that a read is real evidence rather than
+# noise. Direction marks (LRM/RLM/LRE/RLE/PDF, U+200E/U+200F/U+202A-U+202C)
+# are stripped before counting, since Windows adds these around a lot of
+# on-screen text and they carry no linguistic content of their own.
+#
+# Honest limit, found while writing the regression test: a SECOND real
+# capture that day ("TEST -ML - Liran_Martfel_part_2", confidence 0.70,
+# text 'ר וא ה-- ‏ ‎ll‏') is NOT caught by this — once
+# direction marks are stripped it's still 12 characters (spaces and dashes
+# included), well past this threshold, even though only a few of those are
+# meaningful letters. This fix is deliberately scoped to what was approved:
+# a plain length floor. It does not detect "mostly punctuation/whitespace
+# padding a few real letters" — that would need counting letters specifically
+# rather than raw length, a separate decision not made here.
+MIN_CLASSIFIED_TEXT_LENGTH = 5
+DIRECTION_MARKS_PATTERN = re.compile(r"[‎‏‪-‬]")
+
 
 def _rejected_as_ui_noise(text):
     """Applied to whatever text was FINALLY selected, regardless of source
@@ -545,6 +569,9 @@ def _rejected_as_ui_noise(text):
         return "an empty-field placeholder"
     if YOUTUBE_LOGO_ONLY_PATTERN.match(text.strip()):
         return "YouTube's own logo/wordmark, not real content"
+    real_chars = DIRECTION_MARKS_PATTERN.sub("", text).strip()
+    if len(real_chars) < MIN_CLASSIFIED_TEXT_LENGTH:
+        return "too short to be real evidence, not just noise"
     return None
 
 # Real finding: clicking Gemini's "New chat" button (שיחה חדשה) briefly put

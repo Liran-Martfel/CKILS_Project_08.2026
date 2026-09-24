@@ -115,6 +115,28 @@ class UiNoiseRejectionTests(unittest.TestCase):
         """Real content not rejected."""
         self.assertIsNone(rule_engine._rejected_as_ui_noise("היי, מה קורה מחר?"))
 
+    def test_a_two_character_ocr_read_is_rejected_as_too_short(self):
+        """Real bug (2026-09-24): a 2-character OCR read (a misread icon,
+        confidence 0.665 — just over threshold) flipped an English exam page,
+        "Exam B - Machine Learning (Calculations)", to Hebrew mid-sentence.
+        A read this short is noise regardless of how confident the model is."""
+        self.assertIsNotNone(rule_engine._rejected_as_ui_noise("הם"))
+
+    def test_direction_marks_alone_do_not_count_toward_length(self):
+        """Direction marks contribute no linguistic content, so a string that
+        is otherwise too short doesn't get padded past the threshold by them
+        (a 4-letter word wrapped in marks is still 4 real characters)."""
+        self.assertIsNotNone(rule_engine._rejected_as_ui_noise("‏שלום‎"))
+
+    def test_a_short_real_word_is_still_rejected(self):
+        """Length is judged independently of confidence or plausibility —
+        even a genuine short word isn't enough evidence on its own."""
+        self.assertIsNotNone(rule_engine._rejected_as_ui_noise("Hi"))
+
+    def test_a_five_character_read_is_not_rejected_for_length(self):
+        """The boundary: exactly MIN_CLASSIFIED_TEXT_LENGTH real characters passes."""
+        self.assertIsNone(rule_engine._rejected_as_ui_noise("Hello"))
+
 
 class MessageMetadataStrippingTests(unittest.TestCase):
     """Real bug (2026-09-11): a real, unambiguously Hebrew WhatsApp message

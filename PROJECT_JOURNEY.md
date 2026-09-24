@@ -2234,6 +2234,29 @@ histories were lost rather than kept.
 
 ---
 
+## 2026-09-24 — A minimum length before a Tier 3 read is trusted at all
+
+User report: writing in English, the language flipped to Hebrew mid-sentence. Found from the real log,
+not guessed: `'הם'` — a 2-character OCR read, likely a misread icon or scrollbar arrow — scored 0.665
+confidence, just over `CONTENT_CONFIDENCE_THRESHOLD` (0.65), and flipped "Exam B - Machine Learning
+(Calculations)" (a genuinely English page) to Hebrew. A short string gives the classifier almost
+nothing to actually be confident about; the confidence threshold alone doesn't guard against that.
+
+**Fix:** `_rejected_as_ui_noise()` now also rejects any read under `MIN_CLASSIFIED_TEXT_LENGTH` (5)
+real characters, after stripping direction marks (LRM/RLM/LRE/RLE/PDF) which carry no linguistic
+content of their own. This is the same rejection path already used for placeholders and UI chrome, so
+it's logged the same way (`skip_logger`'s `rejected_noise`).
+
+**Honest limit, found while writing the test:** a second real capture the same day ("TEST -ML -
+Liran_Martfel_part_2", confidence 0.70, text `'ר וא ה-- ‏ ‎ll‏'`) is NOT caught by
+this — after stripping direction marks it's still 12 characters once spaces and dashes are counted,
+even though only a few are meaningful letters. This fix is deliberately scoped to what was approved: a
+plain length floor, not a "mostly punctuation padding a few real letters" detector. That would need
+counting letters specifically rather than raw length — a separate decision, not made here. 82 tests
+pass (was 78).
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

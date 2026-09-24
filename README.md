@@ -72,7 +72,7 @@ it's trusted. The whole-window search added for Zoom also turned out to occasion
 browser window itself (tab strip and bookmarks bar included) as "content" on other apps — confirmed
 live with a purpose-built diagnostic tool — fixed by rejecting any candidate that spans essentially
 the whole window, since real content is never that. Each fix is backed by a regression test built
-from the real failure it addresses — 78 tests currently, covering every bug found so far
+from the real failure it addresses — 82 tests currently, covering every bug found so far
 (`ckils/week2/test_regressions.py`).
 
 **Known open limitations:**
