@@ -1330,58 +1330,66 @@ class IncrementalWordBufferTests(unittest.TestCase):
 
 class LayoutRemapTests(unittest.TestCase):
     """Tier 4 (Phase 1) piece 2: the physical-key-to-other-layout remap.
-    _to_unicode_ex is the one function that touches the real Windows API
-    (ToUnicodeEx) and is mocked here, same reason ocr_reader.py's real
-    Tesseract call isn't unit-tested either — real OS/driver behavior isn't
-    something a test can meaningfully fake beyond "was it called correctly".
+
+    Real bug found live, 2026-09-25, and why this is a static table now, not
+    a live Windows API call: ToUnicodeEx (the original design) doesn't
+    reliably answer questions about a layout other than the CALLING
+    THREAD's own currently active one — confirmed directly, live, that it
+    fails even when given the exact, correct, installed Hebrew layout ID,
+    because a background thread has no real focused input queue for Windows
+    to honor that parameter against. Since CKILS only ever needs to tell
+    English and Hebrew apart, a fixed lookup table sidesteps that limitation
+    entirely, with no OS dependency at all — see layout_remap.py's own
+    module docstring for which entries were independently confirmed against
+    real typed evidence the same day, versus taken from the published
+    SI-1452 standard.
     """
 
-    def test_masks_a_negative_hkl_before_passing_to_ctypes(self):
-        """Real bug caught before shipping: ctypes.wintypes.HANDLE sign-
-        extends a negative Python int to a 64-bit value instead of the real
-        32-bit HKL bit pattern. Confirms the mask is applied."""
-        captured = {}
+    def test_english_layout_returns_the_plain_letter(self):
+        """Under English, every letter key produces itself."""
+        self.assertEqual(layout_remap.remap_key_to_other_layout(0x48, 35, rule_engine.English_HKL), "h")
 
-        def fake_to_unicode_ex(vk, scan, key_state, buf, size, flags, hkl):
-            captured["hkl"] = hkl.value
-            return 0
-        with patch.object(layout_remap.user32, "ToUnicodeEx", side_effect=fake_to_unicode_ex):
-            layout_remap.remap_key_to_other_layout(0x41, 30, rule_engine.Hebrew_HKL)
-        self.assertGreaterEqual(captured["hkl"], 0)
-        self.assertEqual(captured["hkl"], rule_engine.Hebrew_HKL & 0xFFFFFFFF)
+    def test_hebrew_layout_returns_the_mapped_letter(self):
+        """Under Hebrew, a letter key produces its mapped Hebrew letter —
+        using the four pairs directly confirmed by real typed evidence the
+        same day (h->י, e->ק, l->ך, o->ם, from "hello"->"יקךךם")."""
+        pairs = {0x48: "י", 0x45: "ק", 0x4C: "ך", 0x4F: "ם"}
+        for vk, expected in pairs.items():
+            self.assertEqual(layout_remap.remap_key_to_other_layout(vk, 0, rule_engine.Hebrew_HKL), expected)
 
-    def test_returns_the_produced_character(self):
-        """A successful remap returns the single character produced."""
-        with patch.object(layout_remap, "_to_unicode_ex", return_value="a"):
-            self.assertEqual(
-                layout_remap.remap_key_to_other_layout(0x41, 30, rule_engine.English_HKL), "a")
+    def test_the_akuo_and_hkl_capture_letters_match_real_evidence(self):
+        """Cross-checks the remaining letters confirmed live the same day:
+        k->ל and a->ש, u->ו (from "hkl"->"ילך" and שלום's physical
+        keys producing "akuo" on the wrong layout)."""
+        self.assertEqual(layout_remap.remap_key_to_other_layout(0x4B, 0, rule_engine.Hebrew_HKL), "ל")
+        self.assertEqual(layout_remap.remap_key_to_other_layout(0x41, 0, rule_engine.Hebrew_HKL), "ש")
+        self.assertEqual(layout_remap.remap_key_to_other_layout(0x55, 0, rule_engine.Hebrew_HKL), "ו")
 
-    def test_returns_none_for_a_dead_key_or_no_character(self):
-        """A dead key or a key with no plain-character mapping (empty result) yields None."""
-        with patch.object(layout_remap, "_to_unicode_ex", return_value=""):
-            self.assertIsNone(layout_remap.remap_key_to_other_layout(0x41, 30, rule_engine.English_HKL))
+    def test_returns_none_for_a_non_letter_key(self):
+        """A key outside VK_A..VK_Z (digits, function keys, ...) isn't a
+        letter to remap — this module never judges anything but letters."""
+        self.assertIsNone(layout_remap.remap_key_to_other_layout(0x31, 0, rule_engine.English_HKL))  # '1' key
 
-    def test_returns_none_when_the_api_call_fails(self):
-        """A failed/exception-raising API call must not propagate — this
-        runs inside a real-time keyboard hook, where a raised exception
-        could break the hook chain."""
-        with patch.object(layout_remap, "_to_unicode_ex", return_value=None):
-            self.assertIsNone(layout_remap.remap_key_to_other_layout(0x41, 30, rule_engine.English_HKL))
+    def test_returns_none_for_an_unknown_target_layout(self):
+        """A layout that's neither English nor Hebrew is never guessed at."""
+        self.assertIsNone(layout_remap.remap_key_to_other_layout(0x48, 0, 0x0C0C0C0C))
 
-    def test_returns_none_for_multi_character_results(self):
-        """A dead-key composition producing more than one character isn't a
-        plain letter remap — treated as "no usable answer", not guessed at."""
-        with patch.object(layout_remap, "_to_unicode_ex", return_value="ab"):
-            self.assertIsNone(layout_remap.remap_key_to_other_layout(0x41, 30, rule_engine.English_HKL))
+    def test_case_and_scan_code_do_not_affect_the_result(self):
+        """Case never changes which letter it is, and Hebrew has no case at
+        all — shift/caps-lock/scan_code are accepted for interface
+        compatibility but don't change the answer."""
+        plain = layout_remap.remap_key_to_other_layout(0x48, 35, rule_engine.English_HKL)
+        shifted = layout_remap.remap_key_to_other_layout(0x48, 999, rule_engine.English_HKL, shift_pressed=True, caps_lock_on=True)
+        self.assertEqual(plain, shifted)
 
-    def test_build_key_state_reflects_shift_and_caps_lock(self):
-        """The key-state array's shift/caps-lock bits are set exactly when requested."""
-        plain = layout_remap.build_key_state()
-        shifted = layout_remap.build_key_state(shift_pressed=True)
-        capped = layout_remap.build_key_state(caps_lock_on=True)
-        self.assertEqual(plain[layout_remap.VK_SHIFT], 0)
-        self.assertEqual(shifted[layout_remap.VK_SHIFT], 0x80)
-        self.assertEqual(capped[layout_remap.VK_CAPITAL], 0x01)
+    def test_every_letter_key_has_some_mapping_for_both_layouts(self):
+        """No VK_A..VK_Z key silently falls through to None for either
+        layout — a real gap here would silently break Tier 4 for whatever
+        word happens to contain that letter, the same shape of bug as the
+        wrong-thread layout lookup."""
+        for vk in range(layout_remap.VK_A, layout_remap.VK_A + 26):
+            self.assertIsNotNone(layout_remap.remap_key_to_other_layout(vk, 0, rule_engine.English_HKL))
+            self.assertIsNotNone(layout_remap.remap_key_to_other_layout(vk, 0, rule_engine.Hebrew_HKL))
 
 
 class KeyboardHookAbiTests(unittest.TestCase):

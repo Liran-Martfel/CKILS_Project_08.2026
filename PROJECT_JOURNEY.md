@@ -2424,6 +2424,41 @@ stay rule-based and fully offline, expanding CBAW rules from real Phase 1 misses
 
 ---
 
+## 2026-09-25 (later still) — The real, final bug: ToUnicodeEx doesn't work for a non-active layout
+
+**Diagnosed live, not guessed, using a new tool built for exactly this** (`diagnose_keyboard_hook_live.py`,
+reusing the real `process_key_event`/`remap_key_to_other_layout` functions directly, printing every
+step). With the wrong-thread fix already in place, the user typed the physical keys for "hello" while
+on Hebrew — and `decoded_char=None` printed for every single key, even though the layout was correctly
+detected as Hebrew. That ruled out the thread-lookup bug and pointed at the remap itself.
+
+**Root cause, confirmed by calling the raw Windows API directly, isolating exactly where it breaks:**
+`ToUnicodeEx`'s `dwhkl` parameter — the whole mechanism this design depended on for "what would the
+OTHER layout have produced" — only reliably works when the target layout is the CALLING THREAD's own
+currently active one. Confirmed directly: feeding it the exact, correct, installed Hebrew layout ID
+(cross-checked against the real system's own `GetKeyboardLayoutList()` — it matched exactly) still
+returned failure (0) from a thread whose own active layout was English. Also confirmed `LoadKeyboardLayout`
+and `ActivateKeyboardLayout` don't fix this from an unfocused background thread — this isn't a missing
+step, it's a hard limitation of asking a background thread (which owns no real input queue) about a
+layout other than its own.
+
+**Fixed by replacing the live API call with a static lookup table.** Since CKILS only ever needs to
+tell English and Hebrew apart (by design — see README), `layout_remap.py` now hardcodes the standard
+SI-1452 Hebrew keyboard mapping instead of asking Windows dynamically. Seven of the 26 letter mappings
+(h, e, l, o, k, a, u) were independently cross-verified against real typed evidence from the same day's
+tests — "hello" → `יקךךם`, "hkl" → `ילך`, and שלום's physical keys → `akuo` on the English layout all
+agree with each other on the shared letters — before the table was written, not guessed after. The
+remainder are the same published, decades-unchanged standard. This is a strictly SMALLER, simpler
+design than what it replaced: no ctypes calls, no thread-association requirements, fully offline,
+fully deterministic, and every caller (`keyboard_hook.py`, both diagnose tools) needed zero changes,
+since only `layout_remap.py`'s internals changed — confirmed by grepping every caller first.
+
+**Verified directly against the real captured evidence**, not just unit tests: re-running the exact
+"hello"/"hkl" sequences through the new table reproduces `יקךךם`/`ילך` character-for-character.
+126 tests pass (was 125). Tier 4 is being relaunched now for a real end-to-end retest.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
