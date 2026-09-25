@@ -2480,6 +2480,22 @@ not from any of today's earlier, broken attempts. Check-in: **2026-10-02 ~11:41.
 
 ---
 
+## 2026-09-25 (later still) — Removed three genuinely redundant early scripts
+
+User asked whether the project has files nothing actually uses. Checked properly — grepped every
+`.py` file in the repo, `test_regressions.py`, and `CKILS.spec` for any import of each candidate,
+rather than guessing — and confirmed nothing anywhere imports `debug_capture.py`, `find_focus.py`, or
+`list_layouts.py`; none were ever part of the built exe either (PyInstaller only follows
+`rule_engine.py`'s own import chain). `debug_capture.py` did strictly less than the newer
+`diagnose_focus.py`; `find_focus.py` and `list_layouts.py` were the very first Week 2 exploration
+scripts, whose findings (the `English_HKL`/`Hebrew_HKL` constants, the Windows-OCR-has-no-Hebrew
+finding) are already fully captured in `rule_engine.py` and the journal itself. Deleted after
+confirming the full test suite (126 tests) still passes unchanged. Every other diagnose_*.py tool and
+both Week 1 files were kept deliberately — each is the real record of how a specific past bug was
+found, or the project's own stated learning history, not accidental clutter.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
