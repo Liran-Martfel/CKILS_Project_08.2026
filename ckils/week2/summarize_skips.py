@@ -49,6 +49,22 @@ def summarize(db_path, hours):
             "WHERE timestamp >= ? GROUP BY exe_name, title, reason ORDER BY c DESC LIMIT 15", (since,)):
         shown = (title or "").encode("ascii", "replace").decode()
         print(f"  {n:5d}  {exe}  {shown!r}  {reason}")
+
+    # Tier 4's own reason listed individually, not just as a count — this is
+    # the one the Phase 1 week-long review actually needs to look at row by
+    # row (was this a real wrong-layout moment, or a false positive?), and
+    # it's rare enough that a full list stays readable, unlike empty_field.
+    gibberish_rows = conn.execute(
+        "SELECT timestamp, exe_name, substr(title, 1, 40), detail FROM skipped_reads "
+        "WHERE timestamp >= ? AND reason = 'gibberish_suspected' ORDER BY timestamp DESC", (since,)).fetchall()
+    print(f"\nTier 4 (gibberish_suspected) — {len(gibberish_rows)} in this window:")
+    for ts, exe, title, detail in gibberish_rows:
+        shown = (title or "").encode("ascii", "replace").decode()
+        print(f"  {ts}  {exe}  {shown!r}  {detail}")
+    if gibberish_rows:
+        print("  For each: was this really a wrong-layout moment, or a false positive "
+              "(code/username/abbreviation)? That judgment call needs you — the log only "
+              "has the language direction and a key count, never the actual characters typed.")
     conn.close()
 
 
