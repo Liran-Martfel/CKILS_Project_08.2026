@@ -36,6 +36,7 @@ import ctypes
 import ctypes.wintypes
 import queue
 import threading
+import time
 
 import win32api
 import win32con
@@ -85,6 +86,23 @@ VK_A, VK_Z = 0x41, 0x5A
 _event_queue = queue.Queue(maxsize=200)  # bounded — a burst of keys never blocks the hook callback
 _started = False
 _hook_callback_ref = None  # keeps the ctypes callback alive for the hook's lifetime — see _run_hook
+_hook_handle = None  # the real HHOOK, once installed — needed by the panic watcher to remove it live
+
+# Real request from the user, after the keyboard-freeze incident: a way to
+# recover WITHOUT closing CKILS, since only the process dying (or the
+# process unhooking itself) can remove a live low-level keyboard hook, and a
+# frozen keyboard can't type anything to trigger the second option. This
+# watcher runs on its own thread, checking for one file's existence every
+# PANIC_CHECK_INTERVAL_SECONDS — nothing about window focus, nothing about
+# what app is active, just that one file. It has NOTHING to do with focus
+# changes; it runs continuously regardless of what you're doing. The moment
+# the file appears, it removes Tier 4's hook (not the rest of CKILS — Tiers
+# 1-3 are untouched and keep running) and deletes the trigger file so it
+# doesn't fire again. One-shot per run: once triggered, Tier 4 stays off for
+# the rest of this CKILS session (restart to re-arm it), the same lifetime a
+# real process-kill would have given it, just without losing the other tiers.
+PANIC_TRIGGER_FILENAME = "disable_tier4_now.trigger"
+PANIC_CHECK_INTERVAL_SECONDS = 1.5
 
 
 class LowLevelKeyboardInputEvent(ctypes.Structure):
@@ -255,6 +273,44 @@ def _consumer_loop():
             continue  # one bad event must never take down the whole consumer thread
 
 
+def check_panic_trigger_once():
+    """Checks, once, whether PANIC_TRIGGER_FILENAME exists next to CKILS. If
+    it does: removes the live keyboard hook (Tiers 1-3 are untouched — this
+    only ever affects Tier 4), deletes the trigger file, and returns True.
+    Returns False if the file wasn't there, or if there's no hook to remove
+    yet (checked separately from _started so this is safe to call at any
+    point). Never raises — a failure here must not be able to crash the
+    watcher thread that calls this in a loop.
+    """
+    global _hook_handle
+    try:
+        trigger_path = skip_logger.os.path.join(skip_logger._persistent_dir(), PANIC_TRIGGER_FILENAME)
+        if not skip_logger.os.path.exists(trigger_path):
+            return False
+        if _hook_handle is not None:
+            user32.UnhookWindowsHookEx(_hook_handle)
+            _hook_handle = None
+        try:
+            skip_logger.os.remove(trigger_path)
+        except Exception:
+            pass
+        print("  [keyboard_hook] Tier 4 disabled live via panic trigger — CKILS itself keeps running")
+        return True
+    except Exception:
+        return False
+
+
+def _panic_watcher_loop():
+    """Calls check_panic_trigger_once() every PANIC_CHECK_INTERVAL_SECONDS,
+    forever — one-shot in effect, since once the hook is removed there's
+    nothing left to disable, but this keeps running harmlessly for the rest
+    of the session rather than needing its own shutdown signal.
+    """
+    while True:
+        time.sleep(PANIC_CHECK_INTERVAL_SECONDS)
+        check_panic_trigger_once()
+
+
 def _current_window_identity():
     """Returns (exe_name, title, thread_id) for the currently focused
     window — same shape as rule_engine.py's own lookups, kept separate here
@@ -297,7 +353,7 @@ def start(english_hkl, hebrew_hkl):
             thread that installed it, so this runs on its own dedicated
             thread rather than sharing rule_engine.py's own PumpMessages().
             """
-            global _hook_callback_ref
+            global _hook_callback_ref, _hook_handle
             # Kept as a module-level global, not a local — a ctypes callback
             # object must stay alive for as long as Windows might call it;
             # storing it only as a local here would be relying on this one
@@ -309,9 +365,12 @@ def start(english_hkl, hebrew_hkl):
             if not hook:
                 print("  [keyboard_hook] failed to install the low-level keyboard hook")
                 return
+            _hook_handle = hook  # exposed module-level so check_panic_trigger_once() can remove it live
             import win32gui
             win32gui.PumpMessages()
         threading.Thread(target=_run_hook, daemon=True).start()
-        print("  [keyboard_hook] Tier 4 Phase 1 active (log-only, corrects nothing)")
+        threading.Thread(target=_panic_watcher_loop, daemon=True).start()
+        print("  [keyboard_hook] Tier 4 Phase 1 active (log-only, corrects nothing) — "
+              f"create {PANIC_TRIGGER_FILENAME} next to CKILS.exe to disable it live, no restart needed")
     except Exception as e:
         print(f"  [keyboard_hook] failed to start: {e}")

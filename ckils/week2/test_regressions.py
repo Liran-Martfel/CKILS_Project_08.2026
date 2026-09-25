@@ -1432,6 +1432,83 @@ class KeyboardHookAbiTests(unittest.TestCase):
         self.assertEqual(result, 12345)
 
 
+class PanicWatcherTests(unittest.TestCase):
+    """The user's own request, after the keyboard-freeze incident: a way to
+    recover WITHOUT closing CKILS, since only the process dying (or the
+    process unhooking itself) can remove a live low-level keyboard hook, and
+    a frozen keyboard can't type anything to trigger the second option. This
+    watcher checks for one file's existence, on its own thread, independent
+    of window focus or anything else CKILS is doing — it does NOT release
+    the hook on a focus change, a real misunderstanding raised while
+    designing this and worth locking in as a test, not just a clarification.
+    """
+
+    def setUp(self):
+        """Starts each test with no hook installed, matching a fresh run."""
+        self._orig_hook_handle = keyboard_hook._hook_handle
+        keyboard_hook._hook_handle = None
+
+    def tearDown(self):
+        """Restores whatever hook handle existed before this test."""
+        keyboard_hook._hook_handle = self._orig_hook_handle
+
+    def test_no_trigger_file_does_nothing(self):
+        """Absent the trigger file, nothing is unhooked and nothing fires —
+        confirms this isn't tied to focus changes or any other event, only
+        the file's existence."""
+        keyboard_hook._hook_handle = 12345
+        with patch.object(keyboard_hook.skip_logger.os.path, "exists", return_value=False), \
+             patch.object(keyboard_hook.user32, "UnhookWindowsHookEx") as mock_unhook:
+            result = keyboard_hook.check_panic_trigger_once()
+        self.assertFalse(result)
+        mock_unhook.assert_not_called()
+        self.assertEqual(keyboard_hook._hook_handle, 12345)  # untouched
+
+    def test_trigger_file_removes_the_hook_and_itself(self):
+        """The real mechanism: file appears -> hook removed, handle cleared,
+        trigger file deleted so it can't re-fire on the next check."""
+        keyboard_hook._hook_handle = 12345
+        with patch.object(keyboard_hook.skip_logger.os.path, "exists", return_value=True), \
+             patch.object(keyboard_hook.user32, "UnhookWindowsHookEx") as mock_unhook, \
+             patch.object(keyboard_hook.skip_logger.os, "remove") as mock_remove:
+            result = keyboard_hook.check_panic_trigger_once()
+        self.assertTrue(result)
+        mock_unhook.assert_called_once_with(12345)
+        mock_remove.assert_called_once()
+        self.assertIsNone(keyboard_hook._hook_handle)
+
+    def test_trigger_file_with_no_hook_installed_still_cleans_up(self):
+        """If Tier 4 never actually got a hook installed (e.g. it failed to
+        start), the trigger file is still consumed rather than left behind
+        or repeatedly re-checked forever."""
+        keyboard_hook._hook_handle = None
+        with patch.object(keyboard_hook.skip_logger.os.path, "exists", return_value=True), \
+             patch.object(keyboard_hook.user32, "UnhookWindowsHookEx") as mock_unhook, \
+             patch.object(keyboard_hook.skip_logger.os, "remove") as mock_remove:
+            result = keyboard_hook.check_panic_trigger_once()
+        self.assertTrue(result)
+        mock_unhook.assert_not_called()  # nothing to unhook
+        mock_remove.assert_called_once()
+
+    def test_never_raises_even_if_removal_fails(self):
+        """A failure here must not be able to crash the watcher thread that
+        calls this in a loop, or the panic switch itself becomes unreliable."""
+        keyboard_hook._hook_handle = 12345
+        with patch.object(keyboard_hook.skip_logger.os.path, "exists", side_effect=Exception("boom")):
+            result = keyboard_hook.check_panic_trigger_once()
+        self.assertFalse(result)
+
+    def test_is_unrelated_to_window_focus(self):
+        """Real misunderstanding raised and corrected while designing this:
+        the check never looks at the foreground window, focus, or any
+        per-window state — only the trigger file. Confirmed structurally by
+        inspecting the function's own source for any focus-related call."""
+        import inspect
+        source = inspect.getsource(keyboard_hook.check_panic_trigger_once)
+        for forbidden in ("GetForegroundWindow", "GetFocusedControl", "win32gui", "thread_id"):
+            self.assertNotIn(forbidden, source)
+
+
 class KeyboardHookDecisionTests(unittest.TestCase):
     """Tier 4 (Phase 1) piece 3: process_key_event, the pure decision
     function behind the keyboard hook. Uses a fake remap table instead of

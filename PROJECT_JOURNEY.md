@@ -2349,6 +2349,39 @@ ship date.
 
 ---
 
+## 2026-09-25 — A panic switch for Tier 4: disable it live, no restart needed
+
+The user's own request, directly after the keyboard-freeze incident: "I don't want to close and open
+the program every time." Only two things can remove a live `WH_KEYBOARD_LL` hook — the process dying,
+or the process unhooking itself — and a frozen keyboard can't type anything to trigger the second
+option, which is exactly the trap the freeze bug created.
+
+**Fixed with a background watcher, unrelated to anything else CKILS is doing.** A dedicated thread
+(`_panic_watcher_loop`) checks, every 1.5 seconds, whether `disable_tier4_now.trigger` exists next to
+`CKILS.exe` — nothing about window focus, the active app, or any per-window state; only that one
+file's existence (a real misunderstanding raised and corrected while designing this — it does NOT
+"release on a focus change"). The moment it exists, `check_panic_trigger_once()` removes Tier 4's hook
+via `UnhookWindowsHookEx` and deletes the trigger file — **Tiers 1-3 are completely untouched and keep
+running the whole time.** Since only the keyboard was ever affected by the freeze bug (the mouse is a
+separate input path `WH_KEYBOARD_LL` never touches), the user can always create this file with the
+mouse alone (right-click → New → Text Document, named correctly) even with the keyboard fully frozen.
+
+**Honest limit, stated directly:** this only helps because the freeze was a *return-value* problem,
+not a hung process — the watcher thread itself only keeps working because the rest of CKILS was never
+actually stuck. If some future bug froze the whole process instead, this wouldn't help, and closing
+CKILS would still be the only recovery. One-shot per run: once triggered, Tier 4 stays off for the
+rest of that session; a restart re-arms it.
+
+124 tests pass (was 119), including one confirming the check's own source never references focus/
+window lookups at all — not just a comment saying so.
+
+**Then, with this safety net in place, Tier 4 was re-enabled for the user's own live test** (5 examples:
+a real Hebrew word typed on English, a real English word typed on Hebrew, and three negative controls
+— a real word typed correctly, a real Hebrew word typed correctly, and a short code-like token, to
+confirm the false-positive guards hold). Results of that test are the next entry once run.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
