@@ -2382,6 +2382,48 @@ confirm the false-positive guards hold). Results of that test are the next entry
 
 ---
 
+## 2026-09-25 (later) — Tier 4's live test results: a real bug (wrong-thread layout) and a real rule gap
+
+**The user's own live test, 6 words** (5 planned + one extra): a Hebrew word typed on English (screen
+result `akuo`), an English word typed on Hebrew (screen result `יקךךם`), the same two words typed
+correctly, `hkl` typed correctly, and `hkl`'s physical keys typed on Hebrew (screen result `ילך` — which,
+by coincidence, is itself a real Hebrew word, "he will go"). **Result: zero `gibberish_suspected` rows
+for any of them** — including `יקךךם`, which contains `ך` (a final-form letter) not at the end of the
+word, followed by more letters — the single most deterministic rule in `gibberish_detector.py`, with
+its own dedicated test. That case should have fired with certainty. It didn't, which was the signal
+this was a real bug, not just a rule-coverage gap.
+
+**Root cause, found from re-reading the code, not guessed:** `_consumer_loop` called
+`win32api.GetKeyboardLayout(0)` — and per the Windows API, thread ID `0` means "the calling thread",
+i.e. the consumer thread itself, which no user ever types into. Keyboard layout is tracked PER THREAD
+in Windows (the exact fact `rule_engine.py` is built around everywhere else), so this was silently
+judging every keystroke against an unrelated background thread's layout instead of the real focused
+window's — regardless of what the user actually had active. That's precisely why even the guaranteed
+final-form-letter catch never fired: with the wrong layout assumed, the code read `יקךךם`'s underlying
+physical keys back out as plain English "hello" (a real word — nothing to flag) instead of testing the
+actual Hebrew text for impossibility.
+
+**Fixed** by looking up the real foreground window's thread first (`_current_window_identity()`,
+already used elsewhere in this file) and calling `GetKeyboardLayout(thread_id)` with THAT thread,
+never `0`. A new test confirms the real thread ID is used and the literal `0` never is. 125 tests pass
+(was 124).
+
+**The separate, honest finding, not a bug:** `akuo` (the garbled English-layout result of typing
+שלום) was not flagged even in principle, because it violates none of `gibberish_detector.py`'s current
+seed rules — a real, expected gap in a seed rule list, exactly the kind of miss Phase 1 exists to
+surface. Left as-is for now rather than patched under pressure; a candidate for a future rule addition
+once more real misses like it accumulate.
+
+**A related idea raised and declined:** connecting to an English/Hebrew dictionary (via a free MCP) to
+compare typed words directly, instead of the CBAW rules. Discussed and declined for two reasons: (1) it
+would reintroduce the exact false-positive risk this design was built to avoid — usernames, code
+identifiers, and chat shorthand are real, ordinary typing that no dictionary recognizes, and would
+constantly misfire; (2) sending typed fragments to any external service, even a free/local one, breaks
+the "nothing typed ever leaves this machine" privacy guarantee this whole feature is built on. Decision:
+stay rule-based and fully offline, expanding CBAW rules from real Phase 1 misses as they're found.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

@@ -239,11 +239,28 @@ def _consumer_loop():
     while True:
         vk_code, scan_code = _event_queue.get()
         try:
+            # Real bug found live, 2026-09-25: keyboard layout is tracked PER
+            # THREAD in Windows (the same fact rule_engine.py is built around
+            # throughout) — GetKeyboardLayout(0) asks for THIS thread's own
+            # layout (the consumer thread itself, which never has a real user
+            # typing into it), not the layout of whatever window the user is
+            # actually focused on. That silently judged every keystroke
+            # against the wrong layout regardless of what was really active,
+            # which is why even a guaranteed catch (a Hebrew final-form
+            # letter not at the end of a word) never fired. Fixed by looking
+            # up the REAL foreground window's thread first, same as
+            # rule_engine.py already does everywhere else, and using THAT
+            # thread's layout instead of this thread's own.
+            try:
+                exe_name, title, thread_id = _current_window_identity()
+                current_hkl = win32api.GetKeyboardLayout(thread_id) & 0xFFFFFFFF
+            except Exception:
+                continue  # the focused window vanished mid-keystroke — skip this one event
+
             ctrl_held = bool(win32api.GetAsyncKeyState(VK_CONTROL) & 0x8000)
             alt_held = bool(win32api.GetAsyncKeyState(VK_MENU) & 0x8000)
             shift_pressed = bool(win32api.GetAsyncKeyState(win32con.VK_SHIFT) & 0x8000)
             caps_lock_on = bool(win32api.GetKeyState(win32con.VK_CAPITAL) & 0x0001)
-            current_hkl = win32api.GetKeyboardLayout(0) & 0xFFFFFFFF
             # Normalize to this module's signed HKL constants for comparison —
             # see layout_remap.py's own note on the same sign-representation gap.
             if current_hkl == (ENGLISH_HKL_VALUE & 0xFFFFFFFF):
@@ -260,10 +277,6 @@ def _consumer_loop():
             result = process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_held,
                                        shift_pressed, caps_lock_on)
             if result is not None:
-                try:
-                    exe_name, title, thread_id = _current_window_identity()
-                except Exception:
-                    exe_name, title, thread_id = "unknown", "", 0
                 # PRIVACY: only counts and language names ever reach the log —
                 # never the characters that were actually typed.
                 skip_logger.log_skip(

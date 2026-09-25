@@ -1432,6 +1432,35 @@ class KeyboardHookAbiTests(unittest.TestCase):
         self.assertEqual(result, 12345)
 
 
+class ConsumerLoopUsesTheFocusedWindowsLayoutTests(unittest.TestCase):
+    """Real bug found live, 2026-09-25: _consumer_loop called
+    GetKeyboardLayout(0), which asks for THIS THREAD's own layout (the
+    background consumer thread itself, which no user ever types into), not
+    the layout of whatever window the user is actually focused on — the
+    same per-thread fact rule_engine.py is built around everywhere else.
+    Confirmed live: even a guaranteed catch (a Hebrew final-form letter not
+    at the end of a word) never fired, because every keystroke was silently
+    judged against the wrong thread's layout. Fixed by looking up the real
+    foreground window's thread first and using THAT thread's layout."""
+
+    def test_queries_the_focused_windows_thread_not_thread_zero(self):
+        """The core fix: GetKeyboardLayout must be called with the real
+        window's thread_id, never the literal 0 that broke this."""
+        keyboard_hook.ENGLISH_HKL_VALUE = rule_engine.English_HKL
+        keyboard_hook.HEBREW_HKL_VALUE = rule_engine.Hebrew_HKL
+        with patch.object(keyboard_hook, "_current_window_identity",
+                          return_value=("chrome.exe", "Some Page", 4242)), \
+             patch.object(keyboard_hook.win32api, "GetKeyboardLayout",
+                          return_value=rule_engine.Hebrew_HKL & 0xFFFFFFFF) as mock_get_layout, \
+             patch.object(keyboard_hook.win32api, "GetAsyncKeyState", return_value=0), \
+             patch.object(keyboard_hook.win32api, "GetKeyState", return_value=0), \
+             patch.object(keyboard_hook, "_is_password_field_focused", return_value=True), \
+             patch.object(keyboard_hook._event_queue, "get", side_effect=[(0x41, 30), StopIteration]):
+            with self.assertRaises(StopIteration):
+                keyboard_hook._consumer_loop()
+        mock_get_layout.assert_called_once_with(4242)  # the real window's thread — never the literal 0 that broke this
+
+
 class PanicWatcherTests(unittest.TestCase):
     """The user's own request, after the keyboard-freeze incident: a way to
     recover WITHOUT closing CKILS, since only the process dying (or the
