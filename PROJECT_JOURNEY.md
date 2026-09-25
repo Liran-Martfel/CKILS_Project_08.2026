@@ -2459,6 +2459,27 @@ since only `layout_remap.py`'s internals changed — confirmed by grepping every
 
 ---
 
+## 2026-09-25 (later still) — Tier 4 confirmed working end-to-end; the 1-week clock starts now
+
+First real `gibberish_suspected` row ever recorded: `ONENOTE.EXE 'Sticky Notes (new)' hebrew->english
+len=4`, from physically typing "hello" on the Hebrew layout in a fresh window with no learned history
+to interfere. Confirms the whole chain works together for real: detected correctly (`hebrew->english`,
+matching what was actually typed), detected fast (after 4 keystrokes, not the full 5 — `יקךך` already
+breaks the Hebrew final-form rule before "o" is needed, the incremental design catching it mid-word as
+intended), and privacy held exactly as designed (`detail` is language names and a count only — never
+`יקךך`, never `hell`, nothing actually typed). Typing "hello" correctly afterward correctly produced no
+second entry.
+
+Three real bugs were found and fixed today before reaching this point — the ctypes ABI mismatch
+(froze the keyboard), the wrong-thread `GetKeyboardLayout(0)` lookup, and `ToUnicodeEx`'s cross-thread
+limitation — plus the panic switch, all now confirmed against real physical typing, not only unit
+tests with fakes.
+
+**The 1-week Phase 1 observation window starts from this confirmed-working moment, 2026-09-25 ~11:41**,
+not from any of today's earlier, broken attempts. Check-in: **2026-10-02 ~11:41.**
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
