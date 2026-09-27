@@ -146,7 +146,13 @@ class _PerThreadState:
     (gibberish_detector.IncrementalWordBuffer) alongside the SAME word's raw
     (vk, scan) pairs, kept in lockstep — the raw pairs are what let this
     re-derive "what would the OTHER layout have produced", something the
-    decoded characters alone can't answer. Reset together, always.
+    decoded characters alone can't answer. Reset together, always — this
+    was violated for a while (see the real bug noted in process_key_event's
+    boundary-handling branch, 2026-09-27): a word-boundary reset triggered
+    from INSIDE IncrementalWordBuffer.push() only cleared .chars, not the
+    sibling .raw_keys here, letting raw_keys silently accumulate across many
+    words. Fixed there; kept in lockstep everywhere else already (see
+    reset() below, and every _reset_visit_state-style call site).
     """
     def __init__(self):
         """Starts with no word in progress and no raw keys recorded."""
@@ -201,7 +207,29 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
 
     still_going = state.chars.push(char)
     if not still_going:
-        return None  # boundary just reset it, or it just hit the cap — nothing new to judge yet
+        # Real bug found live, 2026-09-27: IncrementalWordBuffer.push() resets
+        # ITSELF on a word boundary (see gibberish_detector.py) — but that only
+        # clears state.chars, a sibling of state.raw_keys, not state itself.
+        # Confirmed from real production data: some gibberish_suspected rows
+        # showed length up to 36, impossible under the documented 12-character
+        # cap. Root cause: on Hebrew, the physical Q and W keys produce '/' and
+        # "'" — both real, common Hebrew punctuation (the apostrophe especially,
+        # used for real abbreviations) — which this module's own boundary check
+        # correctly treats as ending a word, silently triggering the INTERNAL
+        # reset above without ever reaching _PerThreadState.reset(). raw_keys
+        # then kept accumulating across every subsequent word typed in that
+        # window, for as long as no Ctrl/Alt, password field or window change
+        # happened — directly contradicting the "only ever holds the current
+        # word" design promise (an in-memory guarantee; nothing typed ever
+        # reached the disk either way — log_skip only ever received a language
+        # direction and a count, confirmed unaffected). An empty chars buffer
+        # right after a failed push is the reliable signal this was a boundary
+        # reset (a cap-triggered failure leaves 12 real characters in place),
+        # so that's used here to keep raw_keys in lockstep without needing to
+        # change IncrementalWordBuffer's own interface.
+        if not state.chars.text():
+            state.raw_keys = []
+        return None
     state.raw_keys.append((vk_code, scan_code))
 
     current_language = "hebrew" if current_hkl == HEBREW_HKL_VALUE else "english"

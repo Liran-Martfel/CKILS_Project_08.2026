@@ -1578,6 +1578,41 @@ class KeyboardHookDecisionTests(unittest.TestCase):
             return table.get((vk, hkl))
         return remap
 
+    def test_a_boundary_produced_by_a_letter_key_also_clears_raw_keys(self):
+        """Real bug found live, 2026-09-27, from real production data: some
+        gibberish_suspected rows showed length up to 36, impossible under the
+        documented 12-character cap. Root cause: on Hebrew, the physical Q and
+        W keys produce '/' and "'" - real, common Hebrew punctuation (the
+        apostrophe especially) that IncrementalWordBuffer correctly treats as
+        a word boundary, resetting ITSELF - but that only cleared state.chars,
+        not the sibling state.raw_keys, letting raw_keys silently accumulate
+        across every word typed since. Reproduces the exact real shape: a
+        short word, then a letter key that maps to boundary punctuation (not a
+        real letter), then a second word - raw_keys must reflect ONLY the
+        second word afterward, not both."""
+        state = keyboard_hook._PerThreadState()
+        # First word: three ordinary letters.
+        table = {
+            (0x51, rule_engine.Hebrew_HKL): "ק", (0x51, rule_engine.English_HKL): "q",
+            (0x57, rule_engine.Hebrew_HKL): "'",  # the real, common case: W produces an apostrophe on Hebrew
+            (0x41, rule_engine.Hebrew_HKL): "ש", (0x41, rule_engine.English_HKL): "a",
+        }
+        with patch.object(keyboard_hook.layout_remap, "remap_key_to_other_layout", self._fake_remap(table)):
+            keyboard_hook.process_key_event(0x51, 0, state, rule_engine.Hebrew_HKL, False, False)
+            keyboard_hook.process_key_event(0x51, 0, state, rule_engine.Hebrew_HKL, False, False)
+            keyboard_hook.process_key_event(0x51, 0, state, rule_engine.Hebrew_HKL, False, False)
+            self.assertEqual(len(state.raw_keys), 3)  # first word accumulated normally
+
+            # The boundary: a letter key (W) whose Hebrew output is punctuation.
+            result = keyboard_hook.process_key_event(0x57, 0, state, rule_engine.Hebrew_HKL, False, False)
+            self.assertIsNone(result)
+            self.assertEqual(state.chars.text(), "")  # chars correctly reset...
+            self.assertEqual(state.raw_keys, [])       # ...and raw_keys must now ALSO be empty
+
+            # Second word: must reflect only ITS OWN keys, not the first word's too.
+            keyboard_hook.process_key_event(0x41, 0, state, rule_engine.Hebrew_HKL, False, False)
+            self.assertEqual(len(state.raw_keys), 1)
+
     def test_ctrl_held_resets_the_buffer_and_flags_nothing(self):
         """A Ctrl-held keystroke is a shortcut, not text — whatever word
         was in progress is abandoned, not judged."""

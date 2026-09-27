@@ -2496,6 +2496,45 @@ found, or the project's own stated learning history, not accidental clutter.
 
 ---
 
+## 2026-09-27 — A real bug found in Tier 4's first 2 days of real data: raw_keys never reset on a boundary
+
+User asked to review the first real data, two days into Phase 1's observation week. 36
+`gibberish_suspected` rows, ALL `hebrew->english`, several with `len` values up to 36 — impossible
+under the documented 12-character cap, and itself the tell that something was wrong, not just noisy.
+
+**Root cause, confirmed by reading the actual code, not guessed:** `IncrementalWordBuffer.push()`
+(`gibberish_detector.py`) resets ITSELF the moment a word-boundary character arrives — but that only
+clears `state.chars`, a sibling of `state.raw_keys` inside `_PerThreadState`, never touched by that
+internal reset. On the Hebrew layout, the physical **Q** and **W** keys produce `/` and `'` —
+real, ordinary Hebrew punctuation (the apostrophe especially, used for genuine abbreviations), which
+this module's own boundary check correctly treats as ending a word. Every time that happened,
+`raw_keys` silently kept accumulating across every subsequent word typed in that same window, until an
+unrelated Ctrl/Alt, password field, or window change finally cleared it via the proper full
+`_PerThreadState.reset()`. That also explains the `hebrew->english`-only pattern: once `raw_keys` grew
+long enough, it became close to random text, which easily slips past the narrower English seed rules —
+so even a real, correct Hebrew final-form violation elsewhere could look like a "confirmed" wrong-layout
+typo purely because the corrupted "other reading" comparison text was too long and generic to ever
+look impossible.
+
+**What this was, and wasn't:** nothing typed ever reached disk either way — `skip_logger` only ever
+received a language direction and a count, confirmed unaffected by this bug. What broke was the
+in-memory promise that Tier 4 only ever holds the CURRENT word — it was silently holding many words'
+worth of keys for as long as a window stayed focused.
+
+**Fixed** by treating an empty `state.chars.text()` right after a failed `push()` as the reliable
+signal that this specific failure was a boundary reset (a cap-triggered failure leaves the full 12
+characters in place, never empty), and clearing `raw_keys` in that case — keeping the two back in
+lockstep without changing `IncrementalWordBuffer`'s own interface. New test reproduces the exact real
+shape: a short word, a letter key whose Hebrew output is punctuation, then a second word — confirms
+`raw_keys` reflects only the second word afterward. 127 tests pass (was 126).
+
+**Honest process note, not just a code note:** this ran live for 2 full days before anyone looked at
+the data — including me. The 1-week observation plan had one distant check-in date, not ongoing
+monitoring, and nothing prompts a check between now and then except someone actually asking. Going
+forward this gets checked more often, not just at the one date originally picked.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
