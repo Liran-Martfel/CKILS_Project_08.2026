@@ -8,7 +8,8 @@ how CKILS actually switches languages is touched by this file.
 
 PRIVACY, stated as a hard rule, not a hope: the only things this module ever
 keeps are (a) the CURRENT in-progress word's characters, in memory only,
-cleared on every word boundary and capped at 12 characters, and (b) counts
+cleared on every word boundary and capped at gibberish_detector.IncrementalWordBuffer.MAX_LENGTH
+characters (4, as of 2026-10-08), and (b) counts
 and reason codes it hands to skip_logger — never the characters themselves.
 Nothing here writes a raw keystroke to disk, ever. REPLACE_TIER4_PRIVACY_TEST
 in test_regressions.py exists specifically to keep that true — it fails

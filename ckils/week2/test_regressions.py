@@ -1277,30 +1277,32 @@ class GibberishCbawRuleTests(unittest.TestCase):
 
 class IncrementalWordBufferTests(unittest.TestCase):
     """Tier 4 (Phase 1) piece 1b: the per-keystroke buffer that holds only
-    the CURRENT in-progress word, capped at 12 characters (the user's own
-    design — checking incrementally rather than only at a full word
-    boundary, and never evaluating anything longer than that at all, which
-    is also what protects long passwords/paths/identifiers structurally,
-    without ever needing to recognize them as such).
+    the CURRENT in-progress word, capped at MAX_LENGTH characters (the
+    user's own design — checking incrementally rather than only at a full
+    word boundary, and never evaluating anything longer than that at all,
+    which is also what protects long passwords/paths/identifiers
+    structurally, without ever needing to recognize them as such). Lowered
+    from 12 to 4 on 2026-10-08, at the user's request, to narrow the window
+    further.
     """
 
     def test_accumulates_characters_in_order(self):
         """Pushed characters build up the current word, in order."""
         buf = gibberish_detector.IncrementalWordBuffer()
-        for ch in "shalom":
+        for ch in "aku":
             buf.push(ch)
-        self.assertEqual(buf.text(), "shalom")
+        self.assertEqual(buf.text(), "aku")
 
     def test_a_boundary_character_resets_the_buffer(self):
         """A space (or other boundary char) clears the buffer — a new word starts fresh."""
         buf = gibberish_detector.IncrementalWordBuffer()
-        for ch in "hello world":
+        for ch in "hi you":
             buf.push(ch)
-        self.assertEqual(buf.text(), "world")
+        self.assertEqual(buf.text(), "you")
 
-    def test_caps_at_twelve_characters_and_stops_accumulating(self):
-        """Real design requirement: nothing past 12 characters is ever
-        evaluated as a whole — the buffer simply stops growing."""
+    def test_caps_at_max_length_and_stops_accumulating(self):
+        """Real design requirement: nothing past MAX_LENGTH characters is
+        ever evaluated as a whole — the buffer simply stops growing."""
         buf = gibberish_detector.IncrementalWordBuffer()
         long_token = "abcdefghijklmnopqrstuvwxyz"
         for ch in long_token:

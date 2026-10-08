@@ -131,14 +131,15 @@ def looks_impossible(text, language):
 class IncrementalWordBuffer:
     """Accumulates the current in-progress word's characters, one at a time,
     exactly as they're typed — capped at MAX_LENGTH (the user's own "check
-    the first 12 characters" design: past this length, a word is left alone
+    the first N characters" design, lowered from 12 to 4 on 2026-10-08 to
+    narrow the window further: past this length, a word is left alone
     entirely for the rest of its length, which is also what naturally keeps
     long passwords/paths/identifiers out of consideration, without ever
     needing to recognize them as such). Resets itself the moment a
     word-boundary character arrives. Holds only the current word — never a
     history of anything typed before it.
     """
-    MAX_LENGTH = 12
+    MAX_LENGTH = 4
 
     def __init__(self):
         """Starts empty — no word in progress, nothing capped yet."""

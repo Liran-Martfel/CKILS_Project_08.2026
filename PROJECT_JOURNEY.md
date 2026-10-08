@@ -2535,6 +2535,27 @@ forward this gets checked more often, not just at the one date originally picked
 
 ---
 
+## 2026-10-08 — Phase 1 check-in: the `raw_keys` fix holds; a one-directional pattern is real usage, not a bug
+
+Reviewed the full history of `gibberish_suspected` rows (62 total, spanning both before and after the
+2026-09-27 `raw_keys` fix). Confirmed from real data, not assumption: every one of the 21 post-fix
+rows has `len` between 2 and 12 — none exceed the documented cap, so the fix genuinely holds under
+real continued typing, not just the one regression test. Separately, all 62 rows (both pre- and
+post-fix) are `hebrew->english`; zero are `english->hebrew`. Asked the user directly whether this
+reflects real usage or a detection gap — their answer: it mostly happens hebrew-to-english for them
+in practice, consistent with the already-documented rule asymmetry (Hebrew's final-form rule is a
+hard, deterministic fact that fires readily; the English seed rules are narrower and rarer to trigger)
+rather than a sign Tier 4 is structurally blind to the other direction.
+
+**Follow-up request the same day:** lower `IncrementalWordBuffer.MAX_LENGTH` from 12 to 4 — the
+user's own call, to narrow the window Tier 4 ever looks at even further. Changed in
+`gibberish_detector.py`; updated the two hardcoded-word unit tests that happened to exceed 4
+characters (`IncrementalWordBufferTests`) to use shorter words instead, since they'd otherwise have
+silently started asserting against truncated text. 127 tests still pass. Rebuilt, relaunched, confirmed
+running (PID checked, exe timestamp newer than source).
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
