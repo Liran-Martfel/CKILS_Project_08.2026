@@ -1471,6 +1471,43 @@ class ConsumerLoopUsesTheFocusedWindowsLayoutTests(unittest.TestCase):
         mock_get_layout.assert_called_once_with(4242)  # the real window's thread — never the literal 0 that broke this
 
 
+class ResetOnFocusChangeTests(unittest.TestCase):
+    """Real bug found live, 2026-10-08, from a live diagnostic run: typing a
+    4+ letter word capped the buffer in one window, then switching entirely
+    to another app by mouse (no keystroke in between) left it capped —
+    every real wrong-layout word typed afterward, in any window, returned
+    None forever, since nothing compared "is this still the same window as
+    last keystroke". _reset_on_focus_change is the fix, factored out of
+    _consumer_loop so the comparison itself is directly testable."""
+
+    def test_same_thread_id_does_not_reset(self):
+        """No real focus change — whatever word was in progress survives."""
+        state = keyboard_hook._PerThreadState()
+        state.chars.push("a")
+        result = keyboard_hook._reset_on_focus_change(state, 111, 111)
+        self.assertEqual(result, 111)
+        self.assertEqual(state.chars.text(), "a")
+
+    def test_different_thread_id_resets(self):
+        """A real focus change — the previous window's in-progress word
+        must not bleed into the new one."""
+        state = keyboard_hook._PerThreadState()
+        state.chars.push("a")
+        state.raw_keys.append((0x41, 30))
+        result = keyboard_hook._reset_on_focus_change(state, 222, 111)
+        self.assertEqual(result, 222)
+        self.assertEqual(state.chars.text(), "")
+        self.assertEqual(state.raw_keys, [])
+
+    def test_first_event_ever_resets_against_the_none_sentinel(self):
+        """_consumer_loop starts last_thread_id at None — an already-empty
+        state must tolerate being reset against that sentinel without error."""
+        state = keyboard_hook._PerThreadState()
+        result = keyboard_hook._reset_on_focus_change(state, 111, None)
+        self.assertEqual(result, 111)
+        self.assertEqual(state.chars.text(), "")
+
+
 class PanicWatcherTests(unittest.TestCase):
     """The user's own request, after the keyboard-freeze incident: a way to
     recover WITHOUT closing CKILS, since only the process dying (or the
@@ -1633,6 +1670,28 @@ class KeyboardHookDecisionTests(unittest.TestCase):
             0x41, 30, state, rule_engine.English_HKL, ctrl_held=False, alt_held=True)
         self.assertIsNone(result)
         self.assertEqual(state.chars.text(), "")
+
+    def test_a_non_letter_key_always_resets_even_when_remap_produces_nothing(self):
+        """Real bug found live, 2026-10-08: the non-letter branch used to
+        only reset on a boundary if layout_remap's own lookup (which ONLY
+        ever maps VK_A..VK_Z) happened to return a character — which Space,
+        Enter, Tab and ordinary punctuation/digit keys never do, since
+        they're outside that range. A word that reached the cap without
+        lucking into a letter-key-produces-punctuation case (Hebrew's Q/W)
+        stayed capped forever, across every later window, blind for the
+        rest of the session. Fixed: ANY non-letter key resets unconditionally,
+        with no remap lookup involved at all."""
+        state = keyboard_hook._PerThreadState()
+        for _ in range(gibberish_detector.IncrementalWordBuffer.MAX_LENGTH):
+            state.chars.push("a")
+            state.raw_keys.append((0x41, 30))
+        self.assertTrue(state.chars.capped)
+        with patch.object(keyboard_hook.layout_remap, "remap_key_to_other_layout", return_value=None):
+            result = keyboard_hook.process_key_event(0x20, 57, state, rule_engine.English_HKL, False, False)  # Space
+        self.assertIsNone(result)
+        self.assertEqual(state.chars.text(), "")
+        self.assertEqual(state.raw_keys, [])
+        self.assertFalse(state.chars.capped)
 
     def test_a_normal_english_word_is_never_flagged(self):
         """A real word must never be flagged, at any point while it's being typed."""

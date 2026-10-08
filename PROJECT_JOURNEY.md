@@ -2556,6 +2556,46 @@ running (PID checked, exe timestamp newer than source).
 
 ---
 
+## 2026-10-08 (later) — Two real bugs found live: a capped word could get permanently stuck
+
+User ran a manual two-direction gibberish test in Chrome's address bar right after the len=4 change and
+got nothing — no detection in either direction, where the earlier len=12 build had at least logged
+something. Rather than guess, ran `diagnose_keyboard_hook_live.py` while the user retyped the exact
+same test, watching every keystroke's buffer state in real time.
+
+**Root cause #1, confirmed directly from the live trace:** the buffer got capped at 4 characters from
+unrelated typing in VS Code (this very chat), then **never reset** — not when that message was sent,
+not when focus moved to Chrome, not for the rest of the test. `process_key_event`'s non-letter branch
+asked `layout_remap.remap_key_to_other_layout` what character a key like Space, Enter or Tab would
+produce before deciding whether it was a boundary — but that function only ever maps `VK_A..VK_Z` (see
+its own docstring), so it always returned `None` for exactly these keys, and the boundary check
+(`if char and is_word_boundary_char(char)`) silently never fired for any of them. The ONE path that
+ever did reset a word was the 2026-09-27 fix's own case — a letter key that happens to remap to
+punctuation under the active layout (Hebrew's Q/W). With a 12-character cap this was rare enough to go
+unnoticed for weeks; lowering it to 4 earlier today made it fire on almost any real word, since most
+English and Hebrew words are at least 4 letters.
+
+**Root cause #2, found while fixing #1:** even with real boundary characters working, nothing compared
+"is this still the same window as the last keystroke" — switching apps by mouse alone, mid-word, with
+no keystroke in between, let a capped or in-progress word from the OLD window silently continue into
+the NEW one.
+
+**Fixed both.** `process_key_event`'s non-letter branch now resets unconditionally — no remap lookup
+needed, since a non-letter key can never be part of a word either way. A new `_reset_on_focus_change`
+helper, called from `_consumer_loop` every event, resets the buffer whenever the focused window's
+**thread ID** changes since the last keystroke — thread ID, not title, specifically because
+WhatsApp/Zoom's own already-known-unstable titles (`UNSTABLE_TITLE_MARKERS`) must never cause a
+spurious mid-word reset just because an unread-count badge ticked over; Chrome gives each tab its own
+thread, so a real tab switch is still caught. Four new regression tests reproduce both shapes directly
+(capped-but-no-boundary-ever-seen; a thread-id change resetting an in-progress word; the `None`
+sentinel on the very first event). 131 tests pass (was 127).
+
+**Verified live, immediately after rebuilding:** the user reran the same two-direction test. Both
+directions now log a `gibberish_suspected` row — `hebrew->english len=4` twice, a few minutes apart,
+matching a real back-and-forth retest rather than one lucky case.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

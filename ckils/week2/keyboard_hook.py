@@ -194,12 +194,25 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         return None
 
     if not (VK_A <= vk_code <= VK_Z):
-        # A digit, punctuation, or other non-letter key: if it's a real word
-        # boundary character it ends the current word (see below); either
-        # way it's never itself judged as a letter.
-        char = layout_remap.remap_key_to_other_layout(vk_code, scan_code, current_hkl, shift_pressed, caps_lock_on)
-        if char and gibberish_detector.is_word_boundary_char(char):
-            state.reset()
+        # Real bug found live, 2026-10-08: this used to ask layout_remap what
+        # character this key would produce, and only reset on a boundary if
+        # THAT lookup returned one. But layout_remap only ever maps VK_A..VK_Z
+        # (see its own module docstring) — Space, Enter, Tab and every real
+        # punctuation/digit key always returned None here, so NONE of them
+        # ever ended a word. A word that reached MAX_LENGTH without lucking
+        # into a letter-key-produces-punctuation case (the one real path that
+        # DID work — Hebrew's physical Q/W keys, see the raw_keys fix above)
+        # stayed capped forever: silently blind for the rest of the session,
+        # across every later window, until Ctrl/Alt or a password field reset
+        # it. Confirmed live: typing a 4+ letter word in one window, then
+        # switching entirely to another app and typing real wrong-layout
+        # gibberish there, produced nothing — the buffer was still capped
+        # from the first window. Lowering MAX_LENGTH from 12 to 4 earlier the
+        # same day made this fire on almost any real word, not just long ones.
+        # Fixed by treating ANY non-letter key as an unconditional boundary —
+        # it can never be part of a word either way, so there's no reason to
+        # ask what character it would decode to first.
+        state.reset()
         return None
 
     char = layout_remap.remap_key_to_other_layout(vk_code, scan_code, current_hkl, shift_pressed, caps_lock_on)
@@ -259,12 +272,32 @@ ENGLISH_HKL_VALUE = None
 HEBREW_HKL_VALUE = None
 
 
+def _reset_on_focus_change(state, thread_id, last_thread_id):
+    """Returns thread_id, for the caller to carry into the next event as
+    its own last_thread_id. Resets state (the word in progress) first if
+    thread_id differs from last_thread_id — a genuine window/tab switch.
+
+    Defense in depth alongside the 2026-10-08 non-letter-key fix in
+    process_key_event: a word in progress in one window/tab must never
+    bleed into a different one reached by a mouse-only switch (no
+    keystroke at all in between to trigger that other fix). thread_id, not
+    title, is what's compared — Chrome gives each tab its own thread, and
+    WhatsApp/Zoom's own known-unstable title (an unread-count badge, see
+    UNSTABLE_TITLE_MARKERS in rule_engine.py) never changes it, so this
+    can't spuriously reset mid-word just because a badge ticked over.
+    """
+    if thread_id != last_thread_id:
+        state.reset()
+    return thread_id
+
+
 def _consumer_loop():
     """Pulls queued key events and runs the real analysis — everything the
     hook callback itself deliberately avoids doing. One _PerThreadState per
     call, since this runs in its own dedicated thread.
     """
     state = _PerThreadState()
+    last_thread_id = None
     while True:
         vk_code, scan_code = _event_queue.get()
         try:
@@ -285,6 +318,8 @@ def _consumer_loop():
                 current_hkl = win32api.GetKeyboardLayout(thread_id) & 0xFFFFFFFF
             except Exception:
                 continue  # the focused window vanished mid-keystroke — skip this one event
+
+            last_thread_id = _reset_on_focus_change(state, thread_id, last_thread_id)
 
             ctrl_held = bool(win32api.GetAsyncKeyState(VK_CONTROL) & 0x8000)
             alt_held = bool(win32api.GetAsyncKeyState(VK_MENU) & 0x8000)
