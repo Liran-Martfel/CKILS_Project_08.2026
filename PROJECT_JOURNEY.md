@@ -2594,6 +2594,11 @@ sentinel on the very first event). 131 tests pass (was 127).
 directions now log a `gibberish_suspected` row — `hebrew->english len=4` twice, a few minutes apart,
 matching a real back-and-forth retest rather than one lucky case.
 
+**The Phase 1 observation clock restarts from here, 2026-10-08 ~19:46**, not continued from
+2026-09-25 — today changed too much about how Tier 4 actually behaves (the cap dropped from 12 to 4,
+plus both bugs above) for the rest of the original week to still mean anything. Same length as before,
+the user's own call: **1 week. Check-in: 2026-10-15 ~19:46.**
+
 ---
 
 ## Future ideas (not yet implemented)
