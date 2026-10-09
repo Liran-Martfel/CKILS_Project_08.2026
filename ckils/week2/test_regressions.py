@@ -50,6 +50,19 @@ class PlaceholderRejectionTests(unittest.TestCase):
         self.assertIsNotNone(
             rule_engine._rejected_as_ui_noise("Search name, number or @username"))
 
+    def test_vscode_claude_code_placeholder_rejected(self):
+        """VS Code Claude Code extension's own empty-input placeholder
+        rejected."""
+        # Real bug (2026-10-09), reported directly by the user ("every time
+        # i come to the app, it changes to english") and confirmed live with
+        # diagnose_focus.py: clicking anywhere in the chat panel refocuses
+        # this same idle input box, so this placeholder was read as real
+        # content almost every time the user returned to a genuinely Hebrew
+        # conversation.
+        self.assertFalse(
+            rule_engine._looks_like_real_content(
+                "Queue another message...", title="Claude Code"))
+
     def test_claude_placeholder_rejected(self):
         """Claude placeholder rejected."""
         self.assertFalse(
@@ -99,6 +112,36 @@ class UiNoiseRejectionTests(unittest.TestCase):
         self.assertIsNotNone(
             rule_engine._rejected_as_ui_noise(
                 "גרפי מניות, מדדים, חוזים עתידיים, מט\"ח וביטקוין בזמן-אמת ב-TradingView"))
+
+    def test_vscode_keybinding_hint_rejected(self):
+        """VS Code Claude Code extension's keybinding hint rejected, even
+        with OCR noise clipping its leading letters."""
+        # Real bug (2026-10-09), same investigation as the placeholder test
+        # above: this hint sits right next to the input box and was read as
+        # real content via OCR and accessible text alike. Matched on both the
+        # clean read and the real OCR misread confirmed live ("[irl" instead
+        # of "ctrl" — the leading letters clipped, the rest intact).
+        self.assertIsNotNone(
+            rule_engine._rejected_as_ui_noise("ctrl esc to focus or unfocus Claude"))
+        self.assertIsNotNone(
+            rule_engine._rejected_as_ui_noise("[irl esc to focus or unfocus Claude"))
+
+    def test_vscode_menu_bar_rejected(self):
+        """VS Code's own menu bar rejected — never something a person typed,
+        in any VS Code window, in either language."""
+        # Real bug (2026-10-09): CKILS's window-search fallback repeatedly
+        # landed on the menu bar instead of the real chat content, confirmed
+        # from the decisions log (confidence up to 0.89, applied every time).
+        self.assertIsNotNone(
+            rule_engine._rejected_as_ui_noise("File Edit Selection View Go Run Terminal Help"))
+
+    def test_vscode_claude_code_region_label_rejected(self):
+        """The Claude Code extension's own accessible-text region label
+        rejected — not something a person typed either."""
+        # Real bug (2026-10-09): reached the classifier via the
+        # accessible-text path, confirmed from the decisions log.
+        self.assertIsNotNone(
+            rule_engine._rejected_as_ui_noise("Claude Code conversation"))
 
     def test_youtube_logo_only_rejected(self):
         """Youtube logo only rejected."""

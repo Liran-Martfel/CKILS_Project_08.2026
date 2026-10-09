@@ -513,8 +513,18 @@ GENERIC_ACCESSIBLE_TEXT_MARKERS = ["מכיל", "דפים"]
 # switched to Hebrew correctly from a real message, then a poll cycle 20
 # seconds later happened to read this placeholder instead and forced English
 # right back, before a later real message corrected it again.
+# Real finding, 2026-10-09: the Claude Code extension in VS Code has its OWN
+# empty-compose-box placeholder — "Queue another message..." — same category,
+# same effect: a genuinely Hebrew conversation got forced to English every
+# single time focus returned to an idle input box. Confirmed live with
+# diagnose_focus.py: clicking anywhere in the chat panel (not just the input
+# box itself) refocuses this same box, so GetFocusedControl() lands here
+# almost every time the user "comes back to the app" — reported directly by
+# the user ("every time i come to the app, it changes to english") and
+# confirmed from the decisions log, dozens of reads of this exact text,
+# always English, always applied.
 PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude", "Write a message",
-                              "Search name, number or @username"]
+                              "Search name, number or @username", "Queue another message"]
 # Real finding, from auditing every manual override on record: TradingView's
 # own site tagline ("גרפי מניות, מדדים, חוזים עתידיים, מט"ח וביטקוין בזמן-אמת
 # ב-TradingView" — "Real-time stock charts, indices, futures, forex, and
@@ -523,7 +533,20 @@ PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude", "W
 # real English ticker symbols (NVDA, QQQ, XAUUSD, ...) 10 times in the log.
 # Same category as Zoom's "Workplace" branding text above — fixed marketing
 # copy, not something a person is reading or typing.
-UI_CHROME_MARKERS = ["Workplace", "וביטקוין בזמן-אמת ב-TradingView"]
+# Real finding, 2026-10-09, same VS Code / Claude Code investigation as the
+# "Queue another message" placeholder above: the SAME idle input box also
+# always shows its keybinding hint — "ctrl esc to focus or unfocus Claude" —
+# right next to the placeholder, read via OCR often enough to sometimes
+# clip the leading letters ("[irl esc to focus or unfocus Claude" was one
+# real OCR misread, confirmed live). Matched on the stable middle portion
+# so OCR noise at the very start doesn't defeat it. Separately, VS Code's
+# own menu bar ("File Edit Selection View Go Run Terminal Help") and the
+# extension's own accessible-text region label ("Claude Code conversation")
+# were ALSO read as if they were the conversation itself — neither is
+# something a person ever typed, in either language, in any VS Code window.
+UI_CHROME_MARKERS = ["Workplace", "וביטקוין בזמן-אמת ב-TradingView",
+                      "esc to focus or unfocus Claude", "File Edit Selection View Go",
+                      "Claude Code conversation"]
 
 # Real finding: on a Hebrew-titled YouTube video, OCR repeatedly read nothing
 # but YouTube's own logo/wordmark — always English, regardless of the video's

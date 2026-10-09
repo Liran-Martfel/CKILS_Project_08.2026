@@ -2601,6 +2601,37 @@ the user's own call: **1 week. Check-in: 2026-10-15 ~19:46.**
 
 ---
 
+## 2026-10-09 — The VS Code / Claude Code extension's own UI read as real content
+
+User reported it directly: a separate VS Code window, an entirely Hebrew Claude Code conversation, and
+"every time i come to the app, it changes to english" — with their own diagnosis already correct:
+"it sees the text bar, and because the VS program is in english, it would be automatic in english".
+
+**Confirmed from the decisions log first:** dozens of reads over roughly 20 minutes, all in `Code.exe`,
+all classified `english` at real confidence (0.76-0.89) and applied, with `text` holding VS Code's own
+UI — never the conversation itself: the menu bar (`File Edit Selection View Go Run Terminal Help`), an
+accessible-text region label (`Claude Code conversation`), and a keybinding hint next to the input box
+(`ctrl esc to focus or unfocus Claude`, OCR'd once with its leading letters clipped as `[irl esc to...`).
+
+**Then confirmed live with `diagnose_focus.py`**, the same tool built for Zoom's wrong-focused-element
+bug: asked the user to click into the actual Hebrew chat text in that separate window, waited 5 seconds,
+then checked what `GetFocusedControl()` actually landed on. Twice — once on the wrong (this) window by
+accident, once correctly on the real Hebrew one — it was the SAME idle input box both times, showing
+its placeholder (`Queue another message...`) or its keybinding hint depending on exactly where OCR's
+window-search landed. Root cause, now directly observed rather than inferred: clicking anywhere in this
+extension's chat panel refocuses the compose box, not the message text under the cursor — so
+`GetFocusedControl()` lands here almost every single time the user "comes back to the app", regardless
+of where in the panel they actually clicked.
+
+**Fixed exactly like every prior app-specific UI-chrome finding** (Zoom's "Workplace" branding,
+TradingView's tagline, WhatsApp's placeholders) — no new mechanism needed, just new entries in the
+existing lists: `"Queue another message"` added to `PLACEHOLDER_TEXT_PREFIXES`; `"esc to focus or
+unfocus Claude"` (matched on the stable middle portion, so the OCR-clipped variant still catches),
+`"File Edit Selection View Go"`, and `"Claude Code conversation"` added to `UI_CHROME_MARKERS`. 4 new
+tests, one per string. 135 tests pass (was 131).
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
