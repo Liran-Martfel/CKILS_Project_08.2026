@@ -144,6 +144,15 @@ def log_skip(exe_name, title, thread_id, reason, detail=None):
     reason) within DEDUPE_WINDOW_SECONDS, or anything beyond
     MAX_ROWS_PER_HOUR, or anything while the queue is full, is silently
     dropped. `detail` (optional short text) is truncated to MAX_DETAIL_CHARS.
+
+    REASON_GIBBERISH_SUSPECTED is exempt from the dedupe window (the
+    MAX_ROWS_PER_HOUR cap still applies as a safety net): unlike a noisy,
+    repeat-every-poll reason like empty_field, a real Tier 4 detection is
+    rare by construction and the user explicitly asked, 2026-10-11, that
+    every one be logged — Phase 1's whole purpose is counting real
+    detections accurately, and the dedupe window could otherwise silently
+    drop a second real wrong-layout word typed in the same window/tab
+    within DEDUPE_WINDOW_SECONDS (10 minutes) of the first.
     """
     try:
         if not ENABLED or _disabled_reason is not None:
@@ -151,9 +160,10 @@ def log_skip(exe_name, title, thread_id, reason, detail=None):
         now = time.time()
         key = (thread_id, title, reason)
         with _lock:
-            last = _last_logged.get(key)
-            if last is not None and now - last < DEDUPE_WINDOW_SECONDS:
-                return
+            if reason != REASON_GIBBERISH_SUSPECTED:
+                last = _last_logged.get(key)
+                if last is not None and now - last < DEDUPE_WINDOW_SECONDS:
+                    return
             cutoff = now - 3600
             while _recent_stamps and _recent_stamps[0] < cutoff:
                 _recent_stamps.popleft()

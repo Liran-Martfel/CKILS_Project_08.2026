@@ -1086,6 +1086,23 @@ class SkipLoggerTests(unittest.TestCase):
             skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_EMPTY_FIELD)
         self.assertEqual(skip_logger._queue.qsize(), 1)
 
+    def test_gibberish_suspected_is_exempt_from_dedupe(self):
+        """User request, 2026-10-11: Phase 1 needs every real Tier 4
+        detection counted, so a second real gibberish event in the SAME
+        window/tab within the 10-minute dedupe window must not be silently
+        dropped, unlike every other (noisier) reason."""
+        for _ in range(5):
+            skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_GIBBERISH_SUSPECTED, "x")
+        self.assertEqual(skip_logger._queue.qsize(), 5)
+
+    def test_other_reasons_are_still_deduped_in_the_same_window(self):
+        """The gibberish-suspected exemption must not loosen dedupe for
+        every other reason too — only that one, on purpose."""
+        skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_GIBBERISH_SUSPECTED, "x")
+        skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_EMPTY_FIELD)
+        skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_EMPTY_FIELD)
+        self.assertEqual(skip_logger._queue.qsize(), 2)  # one gibberish + one deduped empty_field
+
     def test_a_different_reason_is_still_logged(self):
         """De-duplication is per reason, so a new kind of failure is never hidden."""
         skip_logger.log_skip("chrome.exe", "New chat", 7, skip_logger.REASON_EMPTY_FIELD)
@@ -1285,6 +1302,28 @@ class GibberishCbawRuleTests(unittest.TestCase):
     def test_q_not_followed_by_u_is_impossible_in_english(self):
         """Q is followed by U in essentially every common English word."""
         self.assertIsNotNone(gibberish_detector.looks_impossible("qk", "english"))
+
+    def test_newly_added_english_bigrams_are_impossible(self):
+        """Real finding, 2026-10-11: user's deliberate wrong-layout test
+        words (rutv, vcghv, cghv, capv, ...) mostly went uncaught by the
+        English rules at the time — vcghv/cghv/capv specifically contain one
+        of the 4 bigrams added afterward (rutv itself still isn't caught:
+        its only unusual pair, 'tv', was deliberately NOT added — see
+        test_real_english_words_containing_rejected_candidate_bigrams_not_flagged).
+        vc/cg/hv/pv confirmed absent from common English vocabulary before
+        being added — see gibberish_detector.py's own comment for exactly
+        which candidate bigrams were checked and rejected for appearing in
+        real words instead (nx, ua, ao, ap, jr, ru, ut, gh, ch, he, ea)."""
+        self.assertIsNotNone(gibberish_detector.looks_impossible("vcghv", "english"))  # 'vc'
+        self.assertIsNotNone(gibberish_detector.looks_impossible("achv", "english"))   # 'hv'
+        self.assertIsNotNone(gibberish_detector.looks_impossible("capv", "english"))   # 'pv'
+
+    def test_real_english_words_containing_rejected_candidate_bigrams_not_flagged(self):
+        """The bigrams considered but NOT added, because they appear in real
+        English words — must never be flagged. Guards against a future
+        change accidentally reintroducing one of these false positives."""
+        for real_word in ("jinx", "usual", "chaos", "happy", "junior", "rule", "cut", "night", "chat", "eat"):
+            self.assertIsNone(gibberish_detector.looks_impossible(real_word, "english"), real_word)
 
     def test_known_q_exceptions_are_not_flagged(self):
         """Real loanwords/proper nouns are explicitly allowed, not guessed at."""

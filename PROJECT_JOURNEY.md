@@ -2656,6 +2656,35 @@ test-tool-only fix, not rebuilt into CKILS.exe.
 
 ---
 
+## 2026-10-11 (later) — Expanded English's CBAW rules; gibberish_suspected exempted from dedupe
+
+Live-testing with the user surfaced two real gaps, both fixed the same day.
+
+**Gap 1 — English's rules missed real wrong-layout words.** The user deliberately typed a batch of
+wrong-layout test words; none were caught. `rutv` turned out to physically spell **רואה** ("sees") under
+the Hebrew layout — a real word, so even a perfect check couldn't flag it (the whole point of the
+plausible-in-the-other-language guard). But `vcghv`/`cghv`/`capv` were genuinely missed gaps: legal
+under English's narrow rules, not because they're real English, just because nothing checked those
+specific letter pairs. Checked each candidate bigram from the batch by hand against ordinary English
+vocabulary (no dictionary/corpus was available on this machine, and using one at runtime was already
+ruled out earlier for privacy/false-positive reasons) and added only the ones confirmed absent from real
+words: `vc`, `cg`, `hv`, `pv`. Explicitly rejected `nx` (jinx, lynx), `ua` (usual, language), `ao`
+(chaos), `ap` (happy), `jr` (surnames, "Jr."), `ru`/`ut` (rule, cut), `gh`/`ch`/`he`/`ea` (night, chat,
+the, eat) — adding any of those would have reintroduced the exact false-positive risk a dictionary
+approach was rejected for. `xn`/`tj` left out too — lower confidence either way, not added without real
+evidence.
+
+**Gap 2 — a second real detection in the same window could be silently dropped.** `skip_logger.log_skip`
+dedupes repeats of the same (thread, title, reason) within a 10-minute window — correct for noisy
+reasons like `empty_field`, but the user explicitly asked that every Tier 4 detection be counted,
+since Phase 1's whole purpose is an accurate count. `gibberish_suspected` is now exempt from that dedupe
+window specifically (the hourly cap still applies as a safety net); every other reason keeps the old
+behavior unchanged.
+
+4 new tests (2 per gap). 139 tests pass (was 135).
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

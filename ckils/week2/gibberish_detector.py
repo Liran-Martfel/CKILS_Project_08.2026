@@ -62,10 +62,27 @@ HEBREW_SEED_IMPOSSIBLE_BIGRAMS = {
 # risking a false flag on a real name).
 ENGLISH_NEVER_DOUBLED = set("jqv")
 ENGLISH_Q_NOT_FOLLOWED_BY_U_ALLOWED = {"qat", "qi", "qoph", "qadi", "qanun", "iraq", "qatar", "qatari", "faqs"}
+# Real finding, 2026-10-11: user deliberately typed a batch of wrong-layout
+# test words (rutv, vcghv, nxni, achea, cghv, ruao, capv, tjr, ...) and the
+# ENGLISH side caught none of them — current rules are narrow enough to miss
+# plenty of real gibberish that happens to use only legal English letter
+# pairs (the honest limit stated in this module's own docstring). Checked
+# each candidate bigram from those words by hand against common real English
+# words before adding, same bar as the original seed list: "bk"/"dg"/etc.
+# above were never corpus-verified either, just confirmed absent from
+# ordinary vocabulary. Explicitly did NOT add bigrams that DO appear in real
+# words from that same batch — nx (jinx, lynx), ua (usual, language), ao
+# (chaos), ap (happy), jr (surnames, "Jr."), ru/ut (rule, cut), gh/ch/he/ea
+# (night, chat, the, eat) — adding those would have reintroduced exactly the
+# false-positive risk a dictionary approach was rejected for in the first
+# place. vc/cg/hv/pv: no common English word was found containing any of
+# them. xn/tj deliberately left out — lower confidence, not added without
+# real evidence either way.
 ENGLISH_SEED_IMPOSSIBLE_BIGRAMS = {
     "bk", "dg", "fq", "gq", "jq", "kq", "pq", "qb", "qc", "qd", "qf", "qg",
     "qh", "qj", "qk", "ql", "qm", "qn", "qp", "qr", "qs", "qt", "qv", "qw",
     "qx", "qy", "qz", "vq", "wq", "xq", "zq",
+    "vc", "cg", "hv", "pv",
 }
 
 WORD_BOUNDARY_PATTERN = re.compile(r"[\s.,!?;:()\[\]{}\"'/\\@#$%^&*+=<>~`|\n\r\t]")
