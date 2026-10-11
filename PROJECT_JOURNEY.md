@@ -2632,6 +2632,30 @@ tests, one per string. 135 tests pass (was 131).
 
 ---
 
+## 2026-10-11 — The live diagnostic tool itself gave a false "stuck" reading
+
+User deliberately typed gibberish, saw nothing logged for a bit, then retyped it live while
+`diagnose_keyboard_hook_live.py` watched. The tool showed the buffer stuck on an old 4-letter word
+("ttvr") through several more letters and a window switch into a Hebrew-titled Chrome window — looking
+exactly like the 2026-10-08 stuck-buffer bug had come back. Checked the REAL skip log for the same
+moment first, before touching any code: `gibberish_suspected hebrew->english len=4` had logged
+correctly, seconds after the window switch the diagnostic claimed never registered. The real app was
+right the whole time; the diagnostic tool was lying.
+
+**Root cause:** the tool predates both 2026-10-08 fixes and was never updated to use either. It only
+ever watched `VK_A..VK_Z` in its own polling loop, so Space/Enter/Tab — which `process_key_event` now
+resets on unconditionally — were invisible to it; and it called `process_key_event` directly without
+ever calling `_reset_on_focus_change`, so its own local `state` had no way to know a real window switch
+had happened, unlike the real `_consumer_loop`. Two fixes landed in the pipeline three days ago; the
+tool built to watch that pipeline silently kept simulating the OLD one.
+
+**Fixed:** the tool now watches Space/Enter/Tab alongside the letters and calls the same
+`_reset_on_focus_change` the real consumer loop calls, on every event, before anything else — so its
+`state` can no longer drift from what the real app is doing. No change to any shipped code; this is a
+test-tool-only fix, not rebuilt into CKILS.exe.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
