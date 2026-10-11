@@ -78,11 +78,16 @@ ENGLISH_Q_NOT_FOLLOWED_BY_U_ALLOWED = {"qat", "qi", "qoph", "qadi", "qanun", "ir
 # place. vc/cg/hv/pv: no common English word was found containing any of
 # them. xn/tj deliberately left out — lower confidence, not added without
 # real evidence either way.
+# Real finding, 2026-10-11 (same day, later): user's real typing produced
+# "nv zv" uncaught — checked both by hand before deciding. "nv" is common in
+# ordinary English (convenient, environment, invent, convene, canvas, unveil)
+# and must NEVER be added. "zv" is genuinely rare-to-absent from ordinary
+# vocabulary, so added; "nv" deliberately left out.
 ENGLISH_SEED_IMPOSSIBLE_BIGRAMS = {
     "bk", "dg", "fq", "gq", "jq", "kq", "pq", "qb", "qc", "qd", "qf", "qg",
     "qh", "qj", "qk", "ql", "qm", "qn", "qp", "qr", "qs", "qt", "qv", "qw",
     "qx", "qy", "qz", "vq", "wq", "xq", "zq",
-    "vc", "cg", "hv", "pv",
+    "vc", "cg", "hv", "pv", "zv",
 }
 
 WORD_BOUNDARY_PATTERN = re.compile(r"[\s.,!?;:()\[\]{}\"'/\\@#$%^&*+=<>~`|\n\r\t]")

@@ -1322,8 +1322,18 @@ class GibberishCbawRuleTests(unittest.TestCase):
         """The bigrams considered but NOT added, because they appear in real
         English words — must never be flagged. Guards against a future
         change accidentally reintroducing one of these false positives."""
-        for real_word in ("jinx", "usual", "chaos", "happy", "junior", "rule", "cut", "night", "chat", "eat"):
+        for real_word in ("jinx", "usual", "chaos", "happy", "junior", "rule", "cut", "night", "chat", "eat",
+                           "convenient", "environment", "invent", "canvas"):
             self.assertIsNone(gibberish_detector.looks_impossible(real_word, "english"), real_word)
+
+    def test_zv_is_impossible_in_english(self):
+        """Real finding, 2026-10-11 (later): user's real typing ('nv zv')
+        went uncaught. 'zv' confirmed absent from ordinary English
+        vocabulary and added; 'nv' deliberately NOT added — see the
+        previous test, 'convenient'/'environment'/'invent'/'canvas' all
+        contain it."""
+        self.assertIsNotNone(gibberish_detector.looks_impossible("zv", "english"))
+        self.assertIsNone(gibberish_detector.looks_impossible("nv", "english"))
 
     def test_known_q_exceptions_are_not_flagged(self):
         """Real loanwords/proper nouns are explicitly allowed, not guessed at."""

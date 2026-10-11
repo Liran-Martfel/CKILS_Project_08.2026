@@ -2685,6 +2685,16 @@ behavior unchanged.
 
 ---
 
+## 2026-10-11 (later still) — One more English bigram: zv
+
+User's own real typing ("nv zv") went uncaught. Checked both by hand before deciding, same bar as
+every other addition today: "nv" is common in ordinary English — convenient, environment, invent,
+convene, canvas, unveil — and must never be added; "zv" is genuinely rare-to-absent from ordinary
+vocabulary, so added. 2 new tests (one confirming `zv` is now caught, one confirming `nv` is correctly
+still not). 140 tests pass (was 139).
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
