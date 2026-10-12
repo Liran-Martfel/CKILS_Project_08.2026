@@ -2723,6 +2723,38 @@ to read or type. Classified Hebrew at 0.91-0.94 confidence, applied, repeatedly.
 
 ---
 
+## 2026-10-12 (later) — Manual-override detection investigated live; confirmed working, one real gap found, not yet fixed
+
+User reported a manual keyboard switch in a VS Code window not being detected/respected by CKILS at
+all. Investigated live, with real evidence at every step rather than guessing:
+
+- Confirmed the override mechanism genuinely works: watched it fire correctly, live, on a Chrome
+  window — mismatch detected, confirmed on the second check ~1.5s later, recorded, respected
+  afterward. Not dead in general.
+- The "it stopped recognizing anything" follow-up complaint was explained by the session's own
+  extensive back-and-forth testing: every successful override test intentionally freezes
+  auto-correction for that window, by design, and several windows had accumulated that state.
+  Restarting CKILS (which clears all in-memory override/visit state) resolved it.
+- A real, plausible structural gap was found (but not confirmed end-to-end): `_detect_and_record_
+  manual_override`'s poll-path check only runs if `thread_id in last_set` — and `last_set` for a
+  given thread is only written on a genuine arrival/focus-change event, or when a content-based
+  correction actually CHANGES something. A window that's already correct, visited continuously
+  without a real focus-change event (e.g., right after a fresh restart, never truly alt-tabbed away
+  from), may have no `last_set` entry at all, silently disabling override detection for it with no
+  error or log trace. A temporary diagnostic (`diag_poll.log`, added and removed same session, see
+  the commit) showed exactly this during two live attempts on the VS Code window in question;
+  a third attempt (alt-tab away and back, confirmed a decision DID populate `last_set` at 17:02:30)
+  still didn't cleanly reproduce a held Hebrew switch being detected, most likely a real-world
+  multi-step testing-sequence timing issue rather than disproof of the gap.
+
+**Status: real mechanism confirmed healthy; this specific "no last_set baseline yet" gap is a
+plausible but NOT fully confirmed root cause, not yet fixed.** Revisit if a real (not deliberately
+constructed) case of "override not respected" recurs — ideally reproduced by leaving a window, letting
+CKILS make its one fast-path/content decision on arrival, and ONLY THEN manually switching, so the
+baseline-populated and baseline-missing cases can be told apart cleanly.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
