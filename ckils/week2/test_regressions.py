@@ -135,6 +135,17 @@ class UiNoiseRejectionTests(unittest.TestCase):
         self.assertIsNotNone(
             rule_engine._rejected_as_ui_noise("File Edit Selection View Go Run Terminal Help"))
 
+    def test_chrome_translate_menu_item_rejected(self):
+        """Chrome's own right-click 'Translate selected text to...' menu
+        item rejected, regardless of which language it offers."""
+        # Real bug (2026-10-12): on an entirely English page (Microsoft's
+        # careers site), selecting text surfaced this Hebrew-language menu
+        # label (Hebrew because that's the OS/browser display language) as
+        # if it were real page content, confirmed from the decisions log
+        # (confidence 0.84, applied, forcing Hebrew over a real English page).
+        self.assertIsNotNone(
+            rule_engine._rejected_as_ui_noise("תרגום הטקסט שנבחר לעברית"))
+
     def test_vscode_claude_code_region_label_rejected(self):
         """The Claude Code extension's own accessible-text region label
         rejected — not something a person typed either."""
@@ -1213,7 +1224,7 @@ class SkipWiringTests(unittest.TestCase):
     this whole feature from altering any language decision.
     """
 
-    def _run(self, control, read_text="", foreground_matches=True):
+    def _run(self, control, read_text="", foreground_matches=True, title="Some Page - Google Chrome"):
         """Runs decide_with_content on fakes and returns (result, reasons logged)."""
         hwnd = 12345
         fg = hwnd if foreground_matches else 99999
@@ -1223,7 +1234,7 @@ class SkipWiringTests(unittest.TestCase):
              patch.object(rule_engine, "log_decision"), \
              patch.object(rule_engine.skip_logger, "log_skip") as mock_log:
             result = rule_engine.decide_with_content(
-                hwnd, rule_engine.English_HKL, "Some Page - Google Chrome", "chrome.exe", 7)
+                hwnd, rule_engine.English_HKL, title, "chrome.exe", 7)
         return result, [c.args[3] for c in mock_log.call_args_list]
 
     def test_empty_read_logs_empty_field_and_changes_nothing(self):
@@ -1258,6 +1269,34 @@ class SkipWiringTests(unittest.TestCase):
         """A normal confident read is a decision, not a skip: nothing is logged here."""
         control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="")
         result, reasons = self._run(control, read_text="This is a normal English sentence about the project")
+        self.assertEqual(result[0], rule_engine.English_HKL)
+        self.assertEqual(reasons, [])
+
+    def test_excluded_window_title_skips_before_any_read(self):
+        """Real bug (2026-10-12): Chrome's own 'מתורגם' ('Translated')
+        translation popup was read like any other window — its content is a
+        REAL translation, not UI noise, so content-level rejection couldn't
+        catch it. Confirmed from the decisions log: classified Hebrew at
+        0.91+ confidence and applied, forcing Hebrew onto an entirely
+        English page (Microsoft's careers site) the user had actually been
+        on. Windows with this exact title (direction marks stripped, since
+        Chrome wraps it in RLE/PDF marks — ‫מתורגם‬ — not plain text)
+        must be skipped before any control lookup or OCR/accessible-text
+        read is even attempted."""
+        control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="should never be read")
+        result, reasons = self._run(control, read_text="should never be read either",
+                                     title="‫מתורגם‬")
+        self.assertEqual(result, (rule_engine.English_HKL, None))
+        self.assertEqual(reasons, ["rejected_noise"])
+
+    def test_a_similarly_spelled_title_is_not_excluded(self):
+        """The excluded-title check must be an exact match (after stripping
+        direction marks) — a real page that merely MENTIONS the word must
+        never be silently skipped."""
+        control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="")
+        result, reasons = self._run(
+            control, read_text="This is a normal English sentence about the project",
+            title="מתורגם ועוד משהו - Google Chrome")
         self.assertEqual(result[0], rule_engine.English_HKL)
         self.assertEqual(reasons, [])
 

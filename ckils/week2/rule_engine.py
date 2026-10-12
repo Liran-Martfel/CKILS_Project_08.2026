@@ -544,9 +544,33 @@ PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude", "W
 # extension's own accessible-text region label ("Claude Code conversation")
 # were ALSO read as if they were the conversation itself — neither is
 # something a person ever typed, in either language, in any VS Code window.
+# Real finding, 2026-10-12: on an entirely English page (Microsoft's own
+# careers site), selecting text triggers Chrome's own right-click menu item
+# "תרגום הטקסט שנבחר לעברית" ("Translate selected text to Hebrew") — shown in
+# Hebrew because that's the OS/browser's own display language, nothing to do
+# with the page's real content. Read as accessible text and classified
+# Hebrew at 0.84 confidence, applied, forcing Hebrew over a real English job
+# page. Matched on the stable prefix (before the target-language word) so
+# it catches the menu item regardless of which language Chrome offers to
+# translate into. See EXCLUDED_WINDOW_TITLES just below for the matching fix
+# to the translation POPUP this menu item opens, a related but separate gap.
 UI_CHROME_MARKERS = ["Workplace", "וביטקוין בזמן-אמת ב-TradingView",
                       "esc to focus or unfocus Claude", "File Edit Selection View Go",
-                      "Claude Code conversation"]
+                      "Claude Code conversation", "תרגום הטקסט שנבחר ל"]
+
+# Real finding, 2026-10-12, same investigation as the UI_CHROME_MARKERS entry
+# above: choosing "Translate selected text to..." doesn't just show a menu
+# label, it also opens Chrome's own translation popup, always titled
+# "מתורגם" ("Translated") regardless of what was actually selected or
+# translated. Its content is a REAL, correctly-read translation — not OCR
+# noise, not UI boilerplate text — so content-level rejection can't catch
+# it the way UI_CHROME_MARKERS does. But it's not something the user is
+# reading or typing as their own content either: it's a disposable utility
+# popup layered over whatever real (often English) page they were actually
+# on, and letting it set the page's language left the user's REAL page
+# switched to Hebrew after they dismissed it. Windows with this exact title
+# are skipped before OCR/accessible-text is even attempted.
+EXCLUDED_WINDOW_TITLES = {"מתורגם"}
 
 # Real finding: on a Hebrew-titled YouTube video, OCR repeatedly read nothing
 # but YouTube's own logo/wordmark — always English, regardless of the video's
@@ -913,6 +937,17 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
         if DEBUG:
             print("  [content] skipped, focus moved before content could be read")
         skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_FOCUS_MOVED)
+        return fallback_hkl, None
+
+    # Real finding, 2026-10-12: a disposable utility window (Chrome's own
+    # "מתורגם"/"Translated" popup, see EXCLUDED_WINDOW_TITLES) is never worth
+    # reading at all — skip before any control lookup or OCR work, not just
+    # reject its content afterward.
+    if DIRECTION_MARKS_PATTERN.sub("", title or "").strip() in EXCLUDED_WINDOW_TITLES:
+        if DEBUG:
+            print(f"  [content] skipped, excluded window title: {title!r}")
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_REJECTED_NOISE,
+                             "excluded window title")
         return fallback_hkl, None
 
     try:

@@ -2695,6 +2695,34 @@ still not). 140 tests pass (was 139).
 
 ---
 
+## 2026-10-12 — Chrome's own "Translate selected text" feature forced Hebrew onto an English page
+
+User reported it directly, in Hebrew, mid-frustration: on an entirely English page (Microsoft's own
+careers site), the keyboard kept landing on Hebrew for no visible reason.
+
+**Confirmed from the decisions log, dumped to a UTF-8 file to read the real Hebrew text properly**
+(the terminal itself still mangles Hebrew via cp1252/cp437, a known, already-documented cosmetic-only
+issue): selecting text on the page had triggered Chrome's own right-click context menu item —
+**"תרגום הטקסט שנבחר לעברית"** ("Translate selected text to Hebrew"), shown in Hebrew only because
+that's the OS/browser's own display language — read as accessible text and classified Hebrew at 0.84
+confidence, applied. Then Chrome actually opened its translation popup, always titled **"מתורגם"**
+("Translated"), containing a REAL, correctly-read Hebrew translation of the selected English job
+description — not OCR noise, not UI boilerplate, genuinely Hebrew text, just not the user's own content
+to read or type. Classified Hebrew at 0.91-0.94 confidence, applied, repeatedly.
+
+**Two different shapes, two different fixes, both in `rule_engine.py`:**
+1. The menu item itself → added to `UI_CHROME_MARKERS` (same mechanism as Zoom's "Workplace" branding,
+   TradingView's tagline), matched on the stable prefix so it catches any target language Chrome offers.
+2. The translation popup's real-but-incidental content → a NEW mechanism, `EXCLUDED_WINDOW_TITLES`,
+   since content-level rejection can't work here (the text genuinely IS Hebrew) — windows with this
+   exact title (direction marks stripped first, since Chrome wraps it as `‫מתורגם‬`, not plain
+   text) are now skipped entirely, before any control lookup or OCR/accessible-text read is even
+   attempted.
+
+3 new tests. 143 tests pass (was 140).
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
