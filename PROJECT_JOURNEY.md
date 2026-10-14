@@ -2804,6 +2804,41 @@ only Phase 1's opt-in file exists until the user turns it on.
 
 ---
 
+## 2026-10-14 (later) — Phase 2 live; correction moved to the end of the word
+
+**First live tests.** Turned on at 18:18. An English-layout test sentence typed meaning Hebrew
+(`akuo nv akunl' ... rtaubv kphmr`) triggered nothing — none of those words break the English rules, so
+Phase 1 never detected them, so Phase 2 had nothing to act on (the known weak-English-rules gap, not a
+Phase 2 fault). The strong direction worked first try: `hello` typed on the Hebrew layout (`יקךךם`)
+switched to English at the 5th key, in VS Code (18:20:43) and in a Chrome tab (18:21:23), both logged as
+`tier4_gibberish`.
+
+**Why VS Code was on Hebrew to begin with — our own test.** Traced from the logs: this window's page
+history was 7/8 English (trusted) until the deliberate test switch to Hebrew at 18:18:02 was recorded
+as a real manual override and appended to it — 6/8 = 75%, just under the 80% trust bar. Coming back
+from a Hebrew Chrome tab, Windows carried Hebrew over; the fast path no longer had a trusted default to
+post; Tier 3 had only UI chrome / an empty box to read. Not a bug — correct learning from bad evidence
+we supplied. Self-heals after a few confident English reads.
+
+**The user's change: no mid-word flip.** A word that qualifies at 5 keys is now only marked pending;
+the switch fires when the word ENDS — space, Enter, or punctuation (the user's choice, over space-only,
+so a wrong-layout last word before Enter still triggers). Explicit allowlist, not "any non-letter":
+Backspace (user is fixing it), arrows, Ctrl/Alt shortcuts and a focus change all CANCEL the pending
+switch. Two real subtleties handled:
+- On the Hebrew layout `;` `,` `.` type ף ת ץ — letters. When the user means Hebrew, those keys are
+  part of the word, not its end; only when they mean English are they punctuation.
+- Shifted digits (`!` `@`...) end a word. And Shift itself must not cancel the pending switch, or
+  `hello?`/`hello!` would lose it one key before the `?`/`!`.
+
+**A real Phase 1 bug surfaced by that last point:** Shift and Caps Lock were being treated as word
+boundaries (any non-letter key reset the buffer), so every mixed-case word was split in two and
+detection restarted mid-word. They type nothing themselves; now ignored.
+
+13 new tests, most driving the REAL detector through the real consumer loop (`hello` on the Hebrew
+layout, then each word-end/cancel key). 174 tests pass (was 161).
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

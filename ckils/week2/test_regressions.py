@@ -1956,11 +1956,60 @@ class Tier4AutocorrectDecisionTests(unittest.TestCase):
         self.assertNotEqual(keyboard_hook._AUTOCORRECT_FLAG_FILENAME, keyboard_hook._ENABLE_FLAG_FILENAME)
 
 
+class Tier4WordEndTests(unittest.TestCase):
+    """ends_word — the user's call, 2026-10-14: switch only when the word
+    ends (space, Enter, punctuation), never mid-word. Explicit allowlist,
+    since Shift/Backspace/arrows are non-letters too."""
+
+    def setUp(self):
+        """Real HKL constants."""
+        self._orig = (keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE)
+        keyboard_hook.ENGLISH_HKL_VALUE = rule_engine.English_HKL
+        keyboard_hook.HEBREW_HKL_VALUE = rule_engine.Hebrew_HKL
+
+    def tearDown(self):
+        """Restores the module's HKL constants."""
+        keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE = self._orig
+
+    def test_space_and_enter_end_a_word_in_either_language(self):
+        """The two universal word ends."""
+        for target in (rule_engine.English_HKL, rule_engine.Hebrew_HKL):
+            self.assertTrue(keyboard_hook.ends_word(0x20, target))
+            self.assertTrue(keyboard_hook.ends_word(0x0D, target))
+
+    def test_non_character_keys_never_end_a_word(self):
+        """Shift, Caps Lock, Backspace, an arrow: firing on these is exactly
+        the mid-word flip the user asked to avoid."""
+        for vk in (0x10, 0xA0, 0xA1, 0x14, 0x08, 0x25):
+            self.assertFalse(keyboard_hook.ends_word(vk, rule_engine.English_HKL), hex(vk))
+
+    def test_period_ends_an_english_word_but_not_a_hebrew_one(self):
+        """On the Hebrew layout '.' types ץ (and ',' ת, ';' ף) — part of a
+        Hebrew word, not punctuation after it."""
+        for vk in (0xBE, 0xBC, 0xBA):
+            self.assertTrue(keyboard_hook.ends_word(vk, rule_engine.English_HKL), hex(vk))
+            self.assertFalse(keyboard_hook.ends_word(vk, rule_engine.Hebrew_HKL), hex(vk))
+
+    def test_other_punctuation_ends_a_word_either_way(self):
+        """'/' (types '.' on Hebrew) and '-' are punctuation on both layouts."""
+        for vk in (0xBF, 0xBD):
+            self.assertTrue(keyboard_hook.ends_word(vk, rule_engine.Hebrew_HKL), hex(vk))
+
+    def test_shifted_digit_ends_a_word(self):
+        """'!' is Shift+1 — a very common word end in chat."""
+        self.assertTrue(keyboard_hook.ends_word(0x31, rule_engine.English_HKL, shift_pressed=True))
+        self.assertFalse(keyboard_hook.ends_word(0x31, rule_engine.English_HKL, shift_pressed=False))
+
+
 class Tier4AutocorrectWiringTests(unittest.TestCase):
-    """The consumer loop only calls rule_engine's correction when all three
-    hold: a length-5 detection, the on/off file present, and focus still on
-    the window the keystroke was judged against. And what it hands over is
-    identity + layouts + a count — never typed characters."""
+    """End-to-end through the real _consumer_loop and the REAL detector:
+    'hello' typed on the Hebrew layout comes out as יקךךם (the user's own
+    real example). It qualifies at the 5th key but the switch must wait for
+    the word to end — and only fire with the on/off file present and focus
+    still on that window. What rule_engine receives is identity + layouts +
+    a count, never typed characters."""
+
+    HELLO = [0x48, 0x45, 0x4C, 0x4C, 0x4F]
 
     def setUp(self):
         """Real HKL constants; a recording callback in place of rule_engine's."""
@@ -1970,64 +2019,138 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
         keyboard_hook.HEBREW_HKL_VALUE = rule_engine.Hebrew_HKL
         self.calls = []
         keyboard_hook._autocorrect_callback = lambda *args: self.calls.append(args)
+        self.hello_call = (777, 4242, "chrome.exe", "Page", rule_engine.Hebrew_HKL, rule_engine.English_HKL, 5)
 
     def tearDown(self):
         """Restores module state."""
         (keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE,
          keyboard_hook._autocorrect_callback) = self._orig
 
-    def _run_one_event(self, result, enabled=True, foreground_hwnd=777):
-        """Feeds one key event through the real _consumer_loop with
-        process_key_event's answer fixed to `result`."""
-        with patch.object(keyboard_hook, "_current_window_identity", return_value=("chrome.exe", "Page", 4242)), \
-             patch.object(keyboard_hook.win32api, "GetKeyboardLayout",
-                          return_value=rule_engine.Hebrew_HKL & 0xFFFFFFFF), \
-             patch.object(keyboard_hook.win32api, "GetAsyncKeyState", return_value=0), \
+    def _run(self, events, enabled=True, foreground_hwnd=777, layout=None):
+        """Feeds events through the real _consumer_loop. Each event is a vk
+        code, or a dict {vk, thread, ctrl, shift} for anything unusual."""
+        layout = rule_engine.Hebrew_HKL if layout is None else layout
+        queue_ = [e if isinstance(e, dict) else {"vk": e} for e in events]
+        current = {}
+
+        def get():
+            if not queue_:
+                raise StopIteration
+            current.clear()
+            current.update(queue_.pop(0))
+            return (current["vk"], 0)
+
+        def async_state(vk):
+            if vk == keyboard_hook.VK_CONTROL and current.get("ctrl"):
+                return 0x8000
+            if vk == keyboard_hook.win32con.VK_SHIFT and current.get("shift"):
+                return 0x8000
+            return 0
+
+        with patch.object(keyboard_hook, "_current_window_identity",
+                          side_effect=lambda: ("chrome.exe", "Page", current.get("thread", 4242))), \
+             patch.object(keyboard_hook.win32api, "GetKeyboardLayout", return_value=layout & 0xFFFFFFFF), \
+             patch.object(keyboard_hook.win32api, "GetAsyncKeyState", side_effect=async_state), \
              patch.object(keyboard_hook.win32api, "GetKeyState", return_value=0), \
              patch.object(keyboard_hook, "_is_password_field_focused", return_value=False), \
-             patch.object(keyboard_hook, "process_key_event", return_value=result), \
              patch.object(keyboard_hook.skip_logger, "log_skip"), \
              patch.object(keyboard_hook, "_autocorrect_enabled", return_value=enabled), \
              patch.object(keyboard_hook, "_foreground_hwnd_for", return_value=foreground_hwnd), \
-             patch.object(keyboard_hook._event_queue, "get", side_effect=[(0x41, 30), StopIteration]):
+             patch.object(keyboard_hook._event_queue, "get", side_effect=get):
             with self.assertRaises(StopIteration):
                 keyboard_hook._consumer_loop()
 
-    def test_length_five_with_switch_on_calls_rule_engine(self):
-        """The one path that actually corrects."""
-        result = {"current_language": "hebrew", "other_language": "english", "length": 5}
-        self._run_one_event(result)
-        self.assertEqual(self.calls, [(777, 4242, "chrome.exe", "Page",
-                                       rule_engine.Hebrew_HKL, rule_engine.English_HKL, 5)])
+    def test_switches_at_the_space_not_at_the_fifth_key(self):
+        """The user's call: no mid-word flip. Five keys alone: nothing yet."""
+        self._run(self.HELLO)
+        self.assertEqual(self.calls, [])
+        self._run(self.HELLO + [0x20])
+        self.assertEqual(self.calls, [self.hello_call])
+
+    def test_enter_and_punctuation_also_end_the_word(self):
+        """Enter (often ends a chat message) and '.' — for an English target
+        '.' is punctuation."""
+        self._run(self.HELLO + [0x0D])
+        self._run(self.HELLO + [0xBE])
+        self.assertEqual(self.calls, [self.hello_call, self.hello_call])
+
+    def test_shift_does_not_cancel_and_shifted_digit_ends_the_word(self):
+        """'hello!' — Shift comes between the word and the '!' that ends it."""
+        self._run(self.HELLO + [{"vk": 0xA0, "shift": True}, {"vk": 0x31, "shift": True}])
+        self.assertEqual(self.calls, [self.hello_call])
+
+    def test_backspace_cancels(self):
+        """The user is fixing the word themselves — don't flip under them."""
+        self._run(self.HELLO + [0x08, 0x20])
+        self.assertEqual(self.calls, [])
+
+    def test_ctrl_shortcut_cancels(self):
+        """Ctrl+C after the word is a shortcut, not a word end."""
+        self._run(self.HELLO + [{"vk": 0x43, "ctrl": True}, 0x20])
+        self.assertEqual(self.calls, [])
+
+    def test_focus_change_cancels(self):
+        """The word was typed in another window — never switch this one."""
+        self._run(self.HELLO + [{"vk": 0x20, "thread": 9999}])
+        self.assertEqual(self.calls, [])
 
     def test_switch_off_never_corrects(self):
         """File absent: Phase 1 behavior exactly — log only."""
-        result = {"current_language": "hebrew", "other_language": "english", "length": 5}
-        self._run_one_event(result, enabled=False)
+        self._run(self.HELLO + [0x20], enabled=False)
         self.assertEqual(self.calls, [])
 
-    def test_shorter_detection_never_corrects(self):
-        """Length 4 with the switch on: still log-only."""
-        result = {"current_language": "hebrew", "other_language": "english", "length": 4}
-        self._run_one_event(result)
+    def test_a_four_letter_word_never_corrects(self):
+        """'hell' is detected at 4 keys — still log-only, never a switch."""
+        self._run(self.HELLO[:4] + [0x20])
         self.assertEqual(self.calls, [])
 
-    def test_focus_moved_never_corrects(self):
-        """If focus left the judged window before the event was processed,
-        switching whatever is focused now would switch the wrong window."""
-        result = {"current_language": "hebrew", "other_language": "english", "length": 5}
-        self._run_one_event(result, foreground_hwnd=None)
+    def test_focus_moved_at_the_word_end_never_corrects(self):
+        """Foreground no longer the judged window: switch nothing."""
+        self._run(self.HELLO + [0x20], foreground_hwnd=None)
         self.assertEqual(self.calls, [])
+
+    def test_hebrew_letter_key_does_not_end_an_intended_hebrew_word(self):
+        """On the English layout, 'zvush' is impossible English ('zv') but
+        reads as Hebrew (זהודי) — target Hebrew. The ',' key that follows is
+        ת in Hebrew, part of the word, so only the space fires."""
+        keys = [0x5A, 0x56, 0x55, 0x53, 0x48]
+        self._run(keys + [0xBC], layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+        self._run(keys + [0x20], layout=rule_engine.English_HKL)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.Hebrew_HKL)
 
     def test_callback_never_receives_typed_characters(self):
         """Privacy, structurally: every argument is an int or the window's
         own exe/title — no string that could be typed content."""
-        result = {"current_language": "hebrew", "other_language": "english", "length": 5}
-        self._run_one_event(result)
+        self._run(self.HELLO + [0x20])
         (hwnd, thread_id, exe, title, from_hkl, to_hkl, length), = self.calls
         for value in (hwnd, thread_id, from_hkl, to_hkl, length):
             self.assertIsInstance(value, int)
         self.assertEqual((exe, title), ("chrome.exe", "Page"))
+
+
+class ShiftDoesNotSplitAWordTests(unittest.TestCase):
+    """Found 2026-10-14 while building the word-end trigger: Shift and Caps
+    Lock were treated as word boundaries, splitting mixed-case words and
+    resetting detection mid-word. They type no character themselves."""
+
+    def test_shift_keeps_the_word_in_progress(self):
+        """Buffer survives a Shift press between letters."""
+        state = keyboard_hook._PerThreadState()
+        state.chars.push("a")
+        state.raw_keys.append((0x41, 0))
+        for vk in (0x10, 0xA0, 0xA1, 0x14):
+            self.assertIsNone(keyboard_hook.process_key_event(vk, 0, state, rule_engine.English_HKL, False, False))
+        self.assertEqual(state.chars.text(), "a")
+        self.assertEqual(len(state.raw_keys), 1)
+
+    def test_reset_cancels_a_pending_correction(self):
+        """Every reset path (focus, Ctrl/Alt, password field) cancels it."""
+        state = keyboard_hook._PerThreadState()
+        state.pending_correction = (rule_engine.English_HKL, 5)
+        state.reset()
+        self.assertIsNone(state.pending_correction)
 
 
 class ApplyTier4CorrectionTests(unittest.TestCase):
