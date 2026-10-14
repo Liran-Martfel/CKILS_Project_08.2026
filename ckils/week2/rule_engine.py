@@ -534,8 +534,19 @@ GENERIC_ACCESSIBLE_TEXT_MARKERS = ["מכיל", "דפים"]
 # the user ("every time i come to the app, it changes to english") and
 # confirmed from the decisions log, dozens of reads of this exact text,
 # always English, always applied.
+# Real finding, 2026-10-14: typing English into Chrome's address bar or
+# Google's search box flipped the layout to Hebrew mid-word, four times in
+# 12 minutes (Tier 4 then flipped it back at the word end, twice). The
+# focused control's accessible Name is its LABEL, not what's typed in it —
+# Chrome's address bar is "שורת חיפוש וכתובות אתרים" ("Address and search
+# bar") and Google's search box is "כאן אפשר לשאול מה שרוצים" ("Ask anything
+# here"), both in Hebrew only because that's the Windows display language.
+# Listed here, not in UI_CHROME_MARKERS: _looks_like_real_content checks
+# this list, so the label is skipped and the read falls through to OCR of
+# the box itself — which shows what the user is actually typing.
 PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude", "Write a message",
-                              "Search name, number or @username", "Queue another message"]
+                              "Search name, number or @username", "Queue another message",
+                              "שורת חיפוש וכתובות אתרים", "כאן אפשר לשאול מה שרוצים"]
 # Real finding, from auditing every manual override on record: TradingView's
 # own site tagline ("גרפי מניות, מדדים, חוזים עתידיים, מט"ח וביטקוין בזמן-אמת
 # ב-TradingView" — "Real-time stock charts, indices, futures, forex, and

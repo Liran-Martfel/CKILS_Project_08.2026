@@ -2839,6 +2839,36 @@ layout, then each word-end/cancel key). 174 tests pass (was 161).
 
 ---
 
+## 2026-10-14 (evening) — Chrome's own Hebrew labels flipped English typing to Hebrew
+
+User reported typing English in Google and the layout switching to Hebrew mid-query. Traced from the
+decision log (dumped to UTF-8 — the terminal still mangles Hebrew): it was Tier 3, not Tier 4. The
+accessible Name of a focused text box is its LABEL, not what's typed in it. Chrome's address bar is
+**"שורת חיפוש וכתובות אתרים"** ("Address and search bar") and Google's search box is **"כאן אפשר לשאול
+מה שרוצים"** ("Ask anything here") — Hebrew only because that's the Windows display language. Read as
+content, classified Hebrew, applied: four times in 12 minutes (19:54-20:06).
+
+**Phase 2 earned its keep here:** in both address-bar cases, Tier 4 caught the wrong-layout word and
+flipped back to English at the word end (19:58:21, 20:06:38) — the safety net doing exactly its job,
+on its first evening live.
+
+**Fix:** both labels added to `PLACEHOLDER_TEXT_PREFIXES` (not `UI_CHROME_MARKERS`) on purpose: that list
+is also checked by `_looks_like_real_content`, so the label is skipped and the read falls through to
+OCR of the box itself — which shows what's actually being typed, rather than skipping the read
+entirely. 2 new tests, incl. one confirming the fall-through reads the typed English. 176 pass.
+
+**Also surfaced, not yet acted on (awaiting the user's call):**
+- Phase 2 never fired on a ~25-character wrong-layout run ("e and good checklist with cl"): the words
+  were short (Phase 1 flagged "good" and "with", both under the 5-key trigger), and "checklist" only
+  reveals itself at letters 6-7 (ךן), past the 5-letter cap. Proposed: switch at a word end once 2 of
+  the last 3 words were flagged, whatever their length.
+- One switch to Hebrew at ~20:07 has no CKILS switch logged before it, yet was recorded as a manual
+  override; the user says they pressed nothing. Unexplained — needs a live capture.
+- The /code-review of the word-end commit (674fdfa) found real issues, chiefly that ת/ץ/ף keys cancel
+  a pending Hebrew correction. The user is reviewing them before deciding.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

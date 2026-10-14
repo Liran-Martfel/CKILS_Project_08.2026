@@ -63,6 +63,15 @@ class PlaceholderRejectionTests(unittest.TestCase):
             rule_engine._looks_like_real_content(
                 "Queue another message...", title="Claude Code"))
 
+    def test_chrome_address_bar_and_google_search_box_labels_rejected(self):
+        """Real bug (2026-10-14): the accessible Name of Chrome's address bar
+        and of Google's search box is their Hebrew UI label, not what's typed
+        — read as content, it flipped English typing to Hebrew mid-word, four
+        times in 12 minutes. Exact strings from the real decision log."""
+        for label in ("שורת חיפוש וכתובות אתרים", "כאן אפשר לשאול מה שרוצים"):
+            self.assertFalse(rule_engine._looks_like_real_content(label, title="Google - Google Chrome"))
+            self.assertIsNotNone(rule_engine._rejected_as_ui_noise(label))
+
     def test_claude_placeholder_rejected(self):
         """Claude placeholder rejected."""
         self.assertFalse(
@@ -1268,6 +1277,14 @@ class SkipWiringTests(unittest.TestCase):
     def test_a_real_read_logs_no_skip(self):
         """A normal confident read is a decision, not a skip: nothing is logged here."""
         control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="")
+        result, reasons = self._run(control, read_text="This is a normal English sentence about the project")
+        self.assertEqual(result[0], rule_engine.English_HKL)
+        self.assertEqual(reasons, [])
+
+    def test_address_bar_label_falls_through_to_reading_the_typed_text(self):
+        """Rejecting Chrome's address-bar label must not just skip the read —
+        it falls through to OCR of the box, where the typed English is."""
+        control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="שורת חיפוש וכתובות אתרים")
         result, reasons = self._run(control, read_text="This is a normal English sentence about the project")
         self.assertEqual(result[0], rule_engine.English_HKL)
         self.assertEqual(reasons, [])
