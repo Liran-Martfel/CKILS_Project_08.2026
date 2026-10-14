@@ -1898,5 +1898,246 @@ class KeyboardHookDecisionTests(unittest.TestCase):
             self.assertFalse(keyboard_hook._is_password_field_focused())
 
 
+class Tier4AutocorrectDecisionTests(unittest.TestCase):
+    """Tier 4 Phase 2 (2026-10-14): the pure "should this detection trigger
+    a real switch, and to what" decision, and the user's live on/off file.
+    The user's own call: act only at CORRECTION_TRIGGER_LENGTH (5) keys —
+    never on a 2-4 key detection, the least certain kind."""
+
+    def setUp(self):
+        """Points the module's HKL constants at the real values."""
+        self._orig = (keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE)
+        keyboard_hook.ENGLISH_HKL_VALUE = rule_engine.English_HKL
+        keyboard_hook.HEBREW_HKL_VALUE = rule_engine.Hebrew_HKL
+
+    def tearDown(self):
+        """Restores the module's HKL constants."""
+        keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE = self._orig
+
+    @staticmethod
+    def _result(length):
+        """A process_key_event-shaped result dict."""
+        return {"current_language": "hebrew", "other_language": "english", "length": length}
+
+    def test_trigger_length_is_one_past_the_old_cap_and_reachable(self):
+        """The trigger must be reachable: MAX_LENGTH was raised 4->5 for
+        exactly this, so a detection can actually report length 5."""
+        self.assertEqual(keyboard_hook.CORRECTION_TRIGGER_LENGTH, 5)
+        self.assertGreaterEqual(gibberish_detector.IncrementalWordBuffer.MAX_LENGTH,
+                                keyboard_hook.CORRECTION_TRIGGER_LENGTH)
+
+    def test_no_detection_never_corrects(self):
+        """No result, no switch."""
+        self.assertIsNone(keyboard_hook.autocorrect_target(None, rule_engine.Hebrew_HKL))
+
+    def test_detections_below_the_trigger_length_never_correct(self):
+        """Lengths 2-4 stay log-only, exactly as Phase 1."""
+        for length in (2, 3, 4):
+            self.assertIsNone(keyboard_hook.autocorrect_target(self._result(length), rule_engine.Hebrew_HKL), length)
+
+    def test_at_trigger_length_switches_to_the_other_layout(self):
+        """At length 5, typing on Hebrew switches to English and vice versa."""
+        self.assertEqual(keyboard_hook.autocorrect_target(self._result(5), rule_engine.Hebrew_HKL),
+                         rule_engine.English_HKL)
+        self.assertEqual(keyboard_hook.autocorrect_target(self._result(5), rule_engine.English_HKL),
+                         rule_engine.Hebrew_HKL)
+
+    def test_on_off_switch_follows_the_file_live(self):
+        """The user's on/off switch: present = on, absent = off, read at the
+        moment of the decision so no restart is needed either way."""
+        with patch.object(keyboard_hook.skip_logger.os.path, "exists", return_value=True):
+            self.assertTrue(keyboard_hook._autocorrect_enabled())
+        with patch.object(keyboard_hook.skip_logger.os.path, "exists", return_value=False):
+            self.assertFalse(keyboard_hook._autocorrect_enabled())
+
+    def test_on_off_switch_is_a_different_file_from_phase_1s_opt_in(self):
+        """Deleting the Phase 2 file must drop back to log-only, not turn
+        Tier 4 off entirely — so the two can never be the same file."""
+        self.assertNotEqual(keyboard_hook._AUTOCORRECT_FLAG_FILENAME, keyboard_hook._ENABLE_FLAG_FILENAME)
+
+
+class Tier4AutocorrectWiringTests(unittest.TestCase):
+    """The consumer loop only calls rule_engine's correction when all three
+    hold: a length-5 detection, the on/off file present, and focus still on
+    the window the keystroke was judged against. And what it hands over is
+    identity + layouts + a count — never typed characters."""
+
+    def setUp(self):
+        """Real HKL constants; a recording callback in place of rule_engine's."""
+        self._orig = (keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE,
+                      keyboard_hook._autocorrect_callback)
+        keyboard_hook.ENGLISH_HKL_VALUE = rule_engine.English_HKL
+        keyboard_hook.HEBREW_HKL_VALUE = rule_engine.Hebrew_HKL
+        self.calls = []
+        keyboard_hook._autocorrect_callback = lambda *args: self.calls.append(args)
+
+    def tearDown(self):
+        """Restores module state."""
+        (keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE,
+         keyboard_hook._autocorrect_callback) = self._orig
+
+    def _run_one_event(self, result, enabled=True, foreground_hwnd=777):
+        """Feeds one key event through the real _consumer_loop with
+        process_key_event's answer fixed to `result`."""
+        with patch.object(keyboard_hook, "_current_window_identity", return_value=("chrome.exe", "Page", 4242)), \
+             patch.object(keyboard_hook.win32api, "GetKeyboardLayout",
+                          return_value=rule_engine.Hebrew_HKL & 0xFFFFFFFF), \
+             patch.object(keyboard_hook.win32api, "GetAsyncKeyState", return_value=0), \
+             patch.object(keyboard_hook.win32api, "GetKeyState", return_value=0), \
+             patch.object(keyboard_hook, "_is_password_field_focused", return_value=False), \
+             patch.object(keyboard_hook, "process_key_event", return_value=result), \
+             patch.object(keyboard_hook.skip_logger, "log_skip"), \
+             patch.object(keyboard_hook, "_autocorrect_enabled", return_value=enabled), \
+             patch.object(keyboard_hook, "_foreground_hwnd_for", return_value=foreground_hwnd), \
+             patch.object(keyboard_hook._event_queue, "get", side_effect=[(0x41, 30), StopIteration]):
+            with self.assertRaises(StopIteration):
+                keyboard_hook._consumer_loop()
+
+    def test_length_five_with_switch_on_calls_rule_engine(self):
+        """The one path that actually corrects."""
+        result = {"current_language": "hebrew", "other_language": "english", "length": 5}
+        self._run_one_event(result)
+        self.assertEqual(self.calls, [(777, 4242, "chrome.exe", "Page",
+                                       rule_engine.Hebrew_HKL, rule_engine.English_HKL, 5)])
+
+    def test_switch_off_never_corrects(self):
+        """File absent: Phase 1 behavior exactly — log only."""
+        result = {"current_language": "hebrew", "other_language": "english", "length": 5}
+        self._run_one_event(result, enabled=False)
+        self.assertEqual(self.calls, [])
+
+    def test_shorter_detection_never_corrects(self):
+        """Length 4 with the switch on: still log-only."""
+        result = {"current_language": "hebrew", "other_language": "english", "length": 4}
+        self._run_one_event(result)
+        self.assertEqual(self.calls, [])
+
+    def test_focus_moved_never_corrects(self):
+        """If focus left the judged window before the event was processed,
+        switching whatever is focused now would switch the wrong window."""
+        result = {"current_language": "hebrew", "other_language": "english", "length": 5}
+        self._run_one_event(result, foreground_hwnd=None)
+        self.assertEqual(self.calls, [])
+
+    def test_callback_never_receives_typed_characters(self):
+        """Privacy, structurally: every argument is an int or the window's
+        own exe/title — no string that could be typed content."""
+        result = {"current_language": "hebrew", "other_language": "english", "length": 5}
+        self._run_one_event(result)
+        (hwnd, thread_id, exe, title, from_hkl, to_hkl, length), = self.calls
+        for value in (hwnd, thread_id, from_hkl, to_hkl, length):
+            self.assertIsInstance(value, int)
+        self.assertEqual((exe, title), ("chrome.exe", "Page"))
+
+
+class ApplyTier4CorrectionTests(unittest.TestCase):
+    """rule_engine.apply_tier4_correction — the three design decisions made
+    with the user on 2026-10-14, plus the false-override trap it exists to
+    avoid (a switch posted behind rule_engine's back would be recorded as
+    the USER's manual override)."""
+
+    HWND, THREAD = 555, 8080
+
+    def setUp(self):
+        """Clean per-thread state for the test thread id."""
+        for d in (rule_engine.last_set, rule_engine.last_switch_time, rule_engine.content_decision):
+            d.pop(self.THREAD, None)
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.tier4_corrected.discard(self.THREAD)
+
+    tearDown = setUp
+
+    def _apply(self, foreground=None):
+        """Calls apply_tier4_correction with every OS/disk side effect mocked."""
+        fg = self.HWND if foreground is None else foreground
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=fg), \
+             patch.object(rule_engine.win32api, "PostMessage") as post, \
+             patch.object(rule_engine.decision_logger, "log_auto_change") as log_auto, \
+             patch.object(rule_engine, "save_learned_default") as save_app, \
+             patch.object(rule_engine, "save_page_learned_default") as save_page, \
+             patch.object(rule_engine.skip_logger, "log_skip") as log_skip:
+            applied = rule_engine.apply_tier4_correction(
+                self.HWND, self.THREAD, "chrome.exe", "Page",
+                rule_engine.Hebrew_HKL, rule_engine.English_HKL, 5)
+        return applied, post, log_auto, save_app, save_page, log_skip
+
+    def test_switch_goes_through_rule_engines_own_bookkeeping(self):
+        """last_set/last_switch_time updated exactly like any CKILS switch,
+        so the override detector sees "layout == what CKILS set" and never
+        mistakes Tier 4's switch for the user's."""
+        applied, post, *_ = self._apply()
+        self.assertTrue(applied)
+        post.assert_called_once_with(self.HWND, rule_engine.win32con.WM_INPUTLANGCHANGEREQUEST,
+                                     0, rule_engine.English_HKL)
+        self.assertEqual(rule_engine.last_set[self.THREAD], rule_engine.English_HKL)
+        self.assertIn(self.THREAD, rule_engine.last_switch_time)
+        self.assertIn(self.THREAD, rule_engine.tier4_corrected)
+        self.assertEqual(rule_engine.content_decision[self.THREAD], rule_engine.English_HKL)
+
+    def test_manual_override_wins(self):
+        """Design decision 1: the user's own manual override is respected."""
+        rule_engine.overridden.add(self.THREAD)
+        applied, post, *_ = self._apply()
+        self.assertFalse(applied)
+        post.assert_not_called()
+        self.assertNotIn(self.THREAD, rule_engine.tier4_corrected)
+
+    def test_never_feeds_learned_defaults(self):
+        """Design decision 2: kept separate from trust history."""
+        _, _, _, save_app, save_page, _ = self._apply()
+        save_app.assert_not_called()
+        save_page.assert_not_called()
+
+    def test_logged_without_a_screenshot(self):
+        """Logged in the decision history, tagged, and with no screenshot
+        rect — a screenshot would capture the garbled text just typed."""
+        _, _, log_auto, *_ = self._apply()
+        reason = log_auto.call_args.args[5]
+        self.assertEqual(reason["mechanism"], "tier4_gibberish")
+        self.assertNotIn("screenshot_rect", reason)
+
+    def test_focus_moved_switches_nothing(self):
+        """Never switches a window that isn't the foreground one anymore."""
+        applied, post, *_ = self._apply(foreground=999)
+        self.assertFalse(applied)
+        post.assert_not_called()
+
+    def test_tier4_correction_clears_with_the_visit(self):
+        """Same lifecycle as a manual override: gone once focus leaves."""
+        self._apply()
+        rule_engine._reset_visit_state(self.THREAD)
+        self.assertNotIn(self.THREAD, rule_engine.tier4_corrected)
+
+
+class Tier3RespectsTier4Tests(unittest.TestCase):
+    """Without this, Tier 3's next poll could read English UI chrome,
+    disagree with Tier 4's correction, and flip it straight back — a
+    ping-pong between OCR and the user's own typing."""
+
+    HWND, THREAD = 556, 8081
+
+    def setUp(self):
+        """Clean state for the test thread."""
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.tier4_corrected.discard(self.THREAD)
+
+    tearDown = setUp
+
+    def test_tier3_holds_off_after_a_tier4_correction(self):
+        """A confident disagreeing Tier 3 read is NOT applied this visit."""
+        rule_engine.tier4_corrected.add(self.THREAD)
+        with patch.object(rule_engine.auto, "InitializeUIAutomationInCurrentThread"), \
+             patch.object(rule_engine, "decide_with_content", return_value=(rule_engine.English_HKL, {})), \
+             patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
+             patch.object(rule_engine.win32gui, "GetWindowText", return_value="Page"), \
+             patch.object(rule_engine.win32api, "PostMessage") as post, \
+             patch.object(rule_engine.skip_logger, "log_skip") as log_skip:
+            changed = rule_engine.apply_content_correction(
+                self.HWND, self.THREAD, "chrome.exe", rule_engine.Hebrew_HKL, "Page")
+        self.assertFalse(changed)
+        post.assert_not_called()
+        self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_TIER4_RESPECTED)
+
+
 if __name__ == "__main__":
     unittest.main()

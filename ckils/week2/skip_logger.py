@@ -42,6 +42,10 @@ REASON CODES (what each one means, and what it usually tells you)
                       corrects anything; `detail` is language names and a key COUNT
                       only, never the characters actually typed (see keyboard_hook.py's
                       own privacy guarantees).
+    tier4_respected   A Tier 3 result was ready, but Tier 4 Phase 2 had already
+                      auto-corrected this window's layout from the user's own
+                      keystrokes this visit, so Tier 3 left it alone (same idea as
+                      override_respected — typing evidence outranks an OCR read).
   Not logged, by design: routine "no change" results, the poll's backoff skips
   and its in-flight de-duplication — they are normal operation, not failures,
   and logging them would flood the file.
@@ -103,7 +107,8 @@ REASON_OVERRIDE_RESPECTED = "override_respected"
 REASON_DOCS_TITLE_USED = "docs_title_used"
 REASON_CARRYOVER_REASSERTED = "carryover_reasserted"
 REASON_CARRYOVER_ACCEPTED = "carryover_accepted"
-REASON_GIBBERISH_SUSPECTED = "gibberish_suspected"  # Tier 4 Phase 1 (keyboard_hook.py) — log-only, never corrects
+REASON_GIBBERISH_SUSPECTED = "gibberish_suspected"  # Tier 4 Phase 1 (keyboard_hook.py) — logged for every detection
+REASON_TIER4_RESPECTED = "tier4_respected"          # Tier 3 held off: Tier 4 already corrected this window from real typing this visit
 
 ENABLED = True
 KILL_SWITCH_FILENAME = "skip_logging.off"

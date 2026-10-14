@@ -311,6 +311,17 @@ last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
 overridden = set()     # hwnd the user manually overrode, not yet reset
 SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 
+# Tier 4 Phase 2 (2026-10-14): thread_ids whose layout Tier 4 auto-corrected
+# from the user's own keystrokes this visit. Tier 3 stays away from these for
+# the rest of the visit (same lifecycle as `overridden`, cleared in
+# _reset_visit_state) — otherwise its next poll could read English UI chrome,
+# disagree, and flip it straight back: a ping-pong between Tier 3's OCR and
+# Tier 4's typing evidence. Deliberately a SEPARATE set from `overridden`:
+# Tier 4 respects `overridden` (the user's own manual choice always wins), so
+# putting its own corrections in that same set would make a second Tier 4
+# correction in the same visit (bilingual typing) block itself.
+tier4_corrected = set()
+
 # Real bug found live: once Tier 3 corrected a window's language, the very next
 # focus/title event for that SAME window re-applied the raw learned default and
 # undid the correction — the fast path had no memory that content already
@@ -1133,6 +1144,7 @@ def _reset_visit_state(thread_id):
     reassert_attempts.pop(thread_id, None)
     pending_override.pop(thread_id, None)
     last_switch_time.pop(thread_id, None)
+    tier4_corrected.discard(thread_id)
 
 
 def _handle_carry_over(thread_id, hwnd, exe_name, title, actual_hkl):
@@ -1450,6 +1462,11 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
                 print(f"  [content] {exe_name}: user has manually overridden this window, leaving it alone ({elapsed_ms:.0f} ms)")
             skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_OVERRIDE_RESPECTED)
             return False
+        if thread_id in tier4_corrected:
+            if DEBUG:
+                print(f"  [content] {exe_name}: Tier 4 corrected this window from your typing, leaving it alone ({elapsed_ms:.0f} ms)")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_TIER4_RESPECTED)
+            return False
 
         win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, corrected_hkl)
         last_set[thread_id] = corrected_hkl
@@ -1475,6 +1492,52 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         return True
     finally:
         content_check_in_progress.discard(check_key)
+
+
+def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hkl, word_length):
+    """Tier 4 Phase 2 (2026-10-14): switches the layout because the user's
+    own keystrokes came out as wrong-layout gibberish (keyboard_hook.py calls
+    this through the callback handed to keyboard_hook.start()). Returns True
+    if the switch was posted.
+
+    Goes through the same bookkeeping as every other CKILS switch, on
+    purpose: posting WM_INPUTLANGCHANGEREQUEST behind this module's back
+    would leave last_set stale, and _detect_and_record_manual_override would
+    then see "layout != what CKILS last set" and record Tier 4's own switch
+    as the USER's manual override — the exact false-override bug class from
+    2026-09-17/19, freezing correction and teaching learned defaults the
+    wrong thing.
+
+    Design decisions made with the user, 2026-10-14:
+      - A real manual override always wins: skipped if thread_id is in
+        `overridden` (same lifecycle — clears when focus leaves and returns).
+      - Does NOT feed learned defaults (no save_learned_default /
+        save_page_learned_default): Tier 4 is a narrow structural signal,
+        not a full content read, and must not contaminate trust history.
+        content_decision IS set, so this visit's own fast path re-applies
+        it instead of undoing it — per-visit only, never persisted.
+      - Logged via decision_logger with mechanism "tier4_gibberish" and NO
+        screenshot_rect: a screenshot here would capture the very garbled
+        characters the user just typed, breaking Tier 4's guarantee that
+        typed content is never written to disk.
+    """
+    if thread_id in overridden:
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_OVERRIDE_RESPECTED, "tier4")
+        return False
+    if win32gui.GetForegroundWindow() != hwnd:
+        return False  # focus moved on between the keystroke and this call
+    win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
+    last_set[thread_id] = target_hkl
+    last_switch_time[thread_id] = time.time()
+    content_decision[thread_id] = target_hkl
+    tier4_corrected.add(thread_id)
+    decision_logger.log_auto_change(
+        exe_name, title, thread_id,
+        HKL_TO_LANGUAGE_NAME.get(from_hkl), HKL_TO_LANGUAGE_NAME.get(target_hkl),
+        {"mechanism": "tier4_gibberish", "word_length": word_length},
+    )
+    print(f"{exe_name}: Tier 4 auto-correction to {hex(target_hkl)} (wrong-layout word, {word_length} keys)")
+    return True
 
 # Real gap: switching conversations inside some chat apps (confirmed:
 # WhatsApp Web/Business) fires no Windows focus/title event at all — the
@@ -1586,11 +1649,16 @@ def _poll_apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, titl
 if __name__ == "__main__":
     threading.Thread(target=_poll_focused_window, daemon=True).start()
     decision_logger.start_background_pruning()
-    # Tier 4, Phase 1 (log-only, corrects nothing): off unless the user has
-    # explicitly created enable_gibberish_detection.on next to CKILS — see
-    # keyboard_hook.py's own module docstring for why this one, alone among
-    # everything else here, defaults to off rather than on.
-    keyboard_hook.start(English_HKL, Hebrew_HKL)
+    # Tier 4: off unless the user has explicitly created
+    # enable_gibberish_detection.on next to CKILS — see keyboard_hook.py's own
+    # module docstring for why this one, alone among everything else here,
+    # defaults to off rather than on. Phase 2's actual correction is a second,
+    # separate opt-in (enable_gibberish_autocorrect.on), checked live. The
+    # callback is passed in rather than imported by keyboard_hook: in the
+    # packaged exe this module runs as __main__, so `import rule_engine` from
+    # inside keyboard_hook would load a SECOND copy with its own empty
+    # `overridden`/`last_set` — silently breaking override respect.
+    keyboard_hook.start(English_HKL, Hebrew_HKL, on_autocorrect=apply_tier4_correction)
     skip_logger.start()
 
     callback = WinEventProcType(on_focus_change)

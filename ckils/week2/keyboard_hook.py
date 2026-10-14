@@ -1,15 +1,18 @@
 """
 Tier 4 safety net, piece 3 of 3 (see gibberish_detector.py for the CBAW
 rules, layout_remap.py for "what would another layout have produced"): the
-actual keystroke watcher. Phase 1 ONLY — this module never changes your
-keyboard layout. It only decides "would this have been flagged as
-gibberish", and records that decision through skip_logger — nothing about
-how CKILS actually switches languages is touched by this file.
+actual keystroke watcher. Phase 1: every suspected-gibberish detection is
+recorded through skip_logger. Phase 2 (2026-10-14), only when its own
+separate opt-in file (_AUTOCORRECT_FLAG_FILENAME) exists: once a detected
+word reaches CORRECTION_TRIGGER_LENGTH keys, this module asks rule_engine
+(through the on_autocorrect callback handed to start()) to switch the
+layout. It never posts a layout switch itself — rule_engine owns all
+switching bookkeeping, see rule_engine.apply_tier4_correction for why.
 
 PRIVACY, stated as a hard rule, not a hope: the only things this module ever
 keeps are (a) the CURRENT in-progress word's characters, in memory only,
 cleared on every word boundary and capped at gibberish_detector.IncrementalWordBuffer.MAX_LENGTH
-characters (4, as of 2026-10-08), and (b) counts
+characters (5, as of 2026-10-14), and (b) counts
 and reason codes it hands to skip_logger — never the characters themselves.
 Nothing here writes a raw keystroke to disk, ever. REPLACE_TIER4_PRIVACY_TEST
 in test_regressions.py exists specifically to keep that true — it fails
@@ -291,6 +294,42 @@ def _reset_on_focus_change(state, thread_id, last_thread_id):
     return thread_id
 
 
+# Tier 4 Phase 2 (2026-10-14). The user's own call: act only at 5 keys, one
+# letter past where Phase 1 can already detect — a 2-3 key detection is the
+# least certain kind, and flipping the layout mid-word on one of those would
+# be the most disruptive possible false positive. Waiting costs nothing: a
+# real wrong-layout word is still wrong one letter later.
+CORRECTION_TRIGGER_LENGTH = 5
+_AUTOCORRECT_FLAG_FILENAME = "enable_gibberish_autocorrect.on"
+_autocorrect_callback = None  # set by start(); see rule_engine.apply_tier4_correction
+
+
+def autocorrect_target(result, current_hkl):
+    """Pure decision: given a process_key_event result (or None) and the
+    layout the user is actually typing in, returns the HKL Phase 2 should
+    switch to, or None if this detection shouldn't trigger a correction
+    (no detection, or the word hasn't reached CORRECTION_TRIGGER_LENGTH yet).
+    """
+    if result is None or result["length"] < CORRECTION_TRIGGER_LENGTH:
+        return None
+    return ENGLISH_HKL_VALUE if current_hkl == HEBREW_HKL_VALUE else HEBREW_HKL_VALUE
+
+
+def _autocorrect_enabled():
+    """The user's on/off switch for Phase 2: true only while
+    _AUTOCORRECT_FLAG_FILENAME exists next to CKILS. Checked live, at the
+    moment a correction would fire (rare — once per wrong-layout word at
+    most), so creating or deleting the file takes effect immediately, no
+    restart. Independent of Phase 1's own opt-in: deleting this file drops
+    back to log-only without turning Tier 4 off.
+    """
+    try:
+        return skip_logger.os.path.exists(
+            skip_logger.os.path.join(skip_logger._persistent_dir(), _AUTOCORRECT_FLAG_FILENAME))
+    except Exception:
+        return False
+
+
 def _consumer_loop():
     """Pulls queued key events and runs the real analysis — everything the
     hook callback itself deliberately avoids doing. One _PerThreadState per
@@ -346,8 +385,31 @@ def _consumer_loop():
                 skip_logger.log_skip(
                     exe_name, title, thread_id, skip_logger.REASON_GIBBERISH_SUSPECTED,
                     f"{result['current_language']}->{result['other_language']} len={result['length']}")
+
+            target_hkl = autocorrect_target(result, current_hkl)
+            if target_hkl is not None and _autocorrect_callback is not None and _autocorrect_enabled():
+                hwnd = _foreground_hwnd_for(thread_id)
+                if hwnd is not None:
+                    _autocorrect_callback(hwnd, thread_id, exe_name, title, current_hkl, target_hkl, result["length"])
         except Exception:
             continue  # one bad event must never take down the whole consumer thread
+
+
+def _foreground_hwnd_for(thread_id):
+    """The current foreground window's hwnd, but only if it still belongs to
+    thread_id — the window this keystroke was actually judged against.
+    Events are processed slightly after they happen; if focus moved on in
+    between, correcting whatever is focused NOW would switch the wrong
+    window. Returns None in that case.
+    """
+    import win32gui
+    import win32process
+    try:
+        hwnd = win32gui.GetForegroundWindow()
+        fg_thread, _ = win32process.GetWindowThreadProcessId(hwnd)
+        return hwnd if fg_thread == thread_id else None
+    except Exception:
+        return None
 
 
 def check_panic_trigger_once():
@@ -405,14 +467,16 @@ def _current_window_identity():
 _ENABLE_FLAG_FILENAME = "enable_gibberish_detection.on"
 
 
-def start(english_hkl, hebrew_hkl):
-    """Starts Tier 4 Phase 1 (log-only) — OFF BY DEFAULT. Requires an
-    explicit opt-in file (_ENABLE_FLAG_FILENAME) next to CKILS, the inverse
-    of skip_logger's kill-switch: this feature watches keystrokes, so it
-    must be deliberately turned ON, never silently active. Registers the
-    real OS hook and starts the consumer thread; never raises.
+def start(english_hkl, hebrew_hkl, on_autocorrect=None):
+    """Starts Tier 4 — OFF BY DEFAULT. Requires an explicit opt-in file
+    (_ENABLE_FLAG_FILENAME) next to CKILS, the inverse of skip_logger's
+    kill-switch: this feature watches keystrokes, so it must be deliberately
+    turned ON, never silently active. Registers the real OS hook and starts
+    the consumer thread; never raises. on_autocorrect (Phase 2) is
+    rule_engine.apply_tier4_correction — only ever called while
+    _AUTOCORRECT_FLAG_FILENAME also exists (checked live).
     """
-    global _started, ENGLISH_HKL_VALUE, HEBREW_HKL_VALUE
+    global _started, ENGLISH_HKL_VALUE, HEBREW_HKL_VALUE, _autocorrect_callback
     try:
         if _started:
             return
@@ -421,6 +485,7 @@ def start(english_hkl, hebrew_hkl):
             print(f"  [keyboard_hook] not started: opt-in file {_ENABLE_FLAG_FILENAME} not present")
             return
         ENGLISH_HKL_VALUE, HEBREW_HKL_VALUE = english_hkl, hebrew_hkl
+        _autocorrect_callback = on_autocorrect
         _started = True
         threading.Thread(target=_consumer_loop, daemon=True).start()
 
@@ -447,7 +512,8 @@ def start(english_hkl, hebrew_hkl):
             win32gui.PumpMessages()
         threading.Thread(target=_run_hook, daemon=True).start()
         threading.Thread(target=_panic_watcher_loop, daemon=True).start()
-        print("  [keyboard_hook] Tier 4 Phase 1 active (log-only, corrects nothing) — "
-              f"create {PANIC_TRIGGER_FILENAME} next to CKILS.exe to disable it live, no restart needed")
+        print(f"  [keyboard_hook] Tier 4 active — auto-correction "
+              f"{'ON' if _autocorrect_enabled() else 'OFF (log-only)'} via {_AUTOCORRECT_FLAG_FILENAME}; "
+              f"create {PANIC_TRIGGER_FILENAME} next to CKILS.exe to disable Tier 4 live, no restart needed")
     except Exception as e:
         print(f"  [keyboard_hook] failed to start: {e}")

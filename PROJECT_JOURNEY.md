@@ -2755,6 +2755,55 @@ baseline-populated and baseline-missing cases can be told apart cleanly.
 
 ---
 
+## 2026-10-14 — Phase 1 check-in passed; Tier 4 Phase 2 (real auto-correction) built
+
+**Phase 1 check-in, a day early at the user's call.** 211 `gibberish_suspected` rows since the
+2026-10-08 restart: zero over the cap (no regression of the stuck-buffer bugs), 150 hebrew->english and
+61 english->hebrew (the reverse direction went from near-zero to real volume after the 2026-10-11 rule
+additions), across Chrome, a Store app, VS Code and Zoom. The one judgment only the user could make —
+true vs false positives — he gave directly: most were real wrong-layout moments. I'd recommended
+holding Phase 2 until after the 2026-10-27 deadline; the user disagreed ("I'm not rushing it"), and on
+reflection the risk was smaller than I'd framed it: the switch itself isn't new code, Tiers 1-3 post the
+same `WM_INPUTLANGCHANGEREQUEST` thousands of times a day; Phase 2 only wires Tier 4's already-validated
+detection into it. Phase 2 went ahead.
+
+**Design decisions, made with the user before any code:**
+- **Trigger at 5 keys, never fewer** (the user's number). `MAX_LENGTH` raised 4->5 so a detection can
+  actually reach 5. Lengths 2-4 stay log-only — the least certain detections never move the keyboard.
+- **A manual override always wins** — Tier 4 checks the same `overridden` set; same lifecycle (clears when
+  focus leaves and returns).
+- **Kept out of learned defaults** — a narrow structural signal shouldn't write into trust history built
+  around full content reads. Logged via `decision_logger` instead, tagged `tier4_gibberish`, with NO
+  screenshot (one would capture the garbled text just typed — breaking Tier 4's privacy guarantee).
+- **Its own on/off switch** — `enable_gibberish_autocorrect.on`, separate from Phase 1's opt-in, checked
+  live at the moment a correction would fire: delete it to drop back to log-only, no restart.
+
+**Two traps caught while designing, before they could ship:**
+1. *Tier 4 would have registered as the user's own manual override.* Posting the switch from
+   keyboard_hook.py directly would leave `last_set` stale; the override detector would see "layout !=
+   what CKILS last set" and record it as a manual override — the exact 2026-09-17/19 false-override bug
+   class, freezing correction and poisoning learned defaults. So keyboard_hook never posts the switch
+   itself; it calls `rule_engine.apply_tier4_correction` through a callback, which updates `last_set`/
+   `last_switch_time` like every other CKILS switch. It's a callback, not an import, on purpose: the
+   packaged exe runs rule_engine as `__main__`, so `import rule_engine` from keyboard_hook would load a
+   second copy with its own empty `overridden` set and silently break override respect.
+2. *Tier 3 would have fought Tier 4.* The poll uses `last_set` as Tier 3's baseline; after Tier 4
+   switches to Hebrew, Tier 3 reading English UI chrome would flip it straight back. New
+   `tier4_corrected` set: Tier 3 holds off (new skip reason `tier4_respected`) for the rest of that
+   visit, cleared in `_reset_visit_state`. Deliberately separate from `overridden` — Tier 4 respects
+   `overridden`, so reusing it would make a second Tier 4 correction in the same visit block itself.
+
+**Known limitation, not addressed:** apps whose title changes on their own (WhatsApp/Zoom unread
+counters) start a new "visit" on each change, clearing `tier4_corrected` — Tier 3 may then re-decide
+mid-conversation. Watch for it in real use before designing around it.
+
+18 new tests (pure trigger decision, the live switch, consumer-loop wiring incl. focus-moved and
+privacy of the callback's arguments, rule_engine bookkeeping, override respect, learned-defaults
+isolation, no screenshot, Tier 3 holding off). 161 tests pass (was 143). Shipped with Phase 2 OFF —
+only Phase 1's opt-in file exists until the user turns it on.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,
