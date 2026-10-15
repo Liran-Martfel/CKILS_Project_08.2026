@@ -2995,6 +2995,18 @@ works live. A "noise" answer is never a language decision — logged as `rejecte
 now takes optional data/model paths so a new model never overwrites the running one; the new training
 file (real screen text) is git-ignored like the original. 3 new tests. 204 pass.
 
+**A whole Hebrew sentence missed — two fixes.** The user typed "t,v juac aha scrho atpar kgau, fsh"
+(אתה חושב שיש דברים שאפשר לעשות, כדי) on the English layout; Tier 4 switched only at the 7th word.
+Replayed key by key through the real detector (read-only) to find why. First, a bug: the English
+exception check dropped every non-letter, so "t,v" (אתה) was read as "tv" — an allowed word. Now only
+punctuation after the word is dropped. Second, a new rule: on the English layout, a comma with a
+letter right after it is the Hebrew ת mid-word — English puts a space after a comma. Measured on local
+data first: 10% of Hebrew words have a mid-word ת, 28% of Hebrew sentences have one in their first 3
+words, and 0 of 6,822 real English words had a comma between letters. The same sentence now switches
+at word 1. Known edge: code like `x,y` typed in an editor would switch (`f(a,b)` doesn't — the Hebrew
+reading fails). The other missed words (juac, scrho...) look like possible English letter by letter;
+catching them needs a statistical comparison of both readings, not another rule. 3 new tests. 207 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

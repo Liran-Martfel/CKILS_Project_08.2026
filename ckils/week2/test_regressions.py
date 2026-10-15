@@ -2241,6 +2241,31 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
         self._run(caps + caps, layout=rule_engine.English_HKL)
         self.assertEqual(self.calls, [])
 
+    def test_a_comma_inside_the_word_is_not_an_allowed_word(self):
+        """Bug found live, 2026-10-15: "t,v" (אתה) was read as "tv", an
+        allowed English word, so the user's whole sentence went unswitched
+        until word 8. Real "tv" stays allowed."""
+        self._run(self._keys("tv "), layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+        self._run(self._keys("t,v "), layout=rule_engine.English_HKL)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.Hebrew_HKL)
+
+    def test_comma_between_letters_switches_to_hebrew(self):
+        """The comma-inside rule, on a word every other rule passes:
+        "kc,ho" is לבתים on the English layout — it has a vowel, no bad
+        ending and no bad letter pair. Only the comma between letters gives
+        it away (0 of 6,822 real English words had one)."""
+        self._run(self._keys("kc,ho "), layout=rule_engine.English_HKL)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.Hebrew_HKL)
+
+    def test_comma_after_a_word_is_ordinary_english(self):
+        """English puts the comma after the word: "fine, ok" and "item,"
+        never switch."""
+        self._run(self._keys("fine, ok item, next "), layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+
     def test_word_end_rule_catches_a_short_english_word(self):
         """The user's rule (2026-10-14): a Hebrew word never ends in a
         regular מ/נ/צ/כ. 'can' typed on the Hebrew layout is בשמ — only 3

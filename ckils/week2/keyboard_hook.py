@@ -41,6 +41,7 @@ import collections
 import ctypes
 import ctypes.wintypes
 import queue
+import re
 import threading
 import time
 
@@ -193,6 +194,11 @@ class _PerThreadState:
         self.en_has_vowel = False
         self.en_ending = ""
         self.en_capital_seen = False
+        # Comma-inside rule (2026-10-15): on the English layout, a comma with a
+        # letter right after it ("t,v") is the Hebrew ת mid-word — English puts
+        # a space after a comma. 0 of 6,822 real English words had one.
+        self.en_comma_pending = False  # the last key was a comma after a letter
+        self.en_comma_inside = False   # ...and a letter followed it
 
     def reset_word(self):
         """The word ended normally: clears everything about THIS word (the
@@ -208,6 +214,8 @@ class _PerThreadState:
         self.en_has_vowel = False
         self.en_ending = ""
         self.en_capital_seen = False
+        self.en_comma_pending = False
+        self.en_comma_inside = False
 
     def reset(self):
         """Full reset: the word AND everything spanning words. Every path that
@@ -286,10 +294,13 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
 
     english = layout_remap.remap_key_to_other_layout(vk_code, scan_code, ENGLISH_HKL_VALUE)
     if english and english.isalpha():
+        state.en_comma_inside = state.en_comma_inside or state.en_comma_pending
         state.en_letter_count += 1
         state.en_has_vowel = state.en_has_vowel or english in gibberish_detector.ENGLISH_VOWELS
         state.en_ending = (state.en_ending + english)[-2:]
         state.en_capital_seen = state.en_capital_seen or (shift_pressed != caps_lock_on)
+    state.en_comma_pending = (vk_code == layout_remap.VK_OEM_COMMA and not shift_pressed
+                              and state.en_letter_count > 0)
 
     char = layout_remap.remap_key_to_other_layout(vk_code, scan_code, current_hkl, shift_pressed, caps_lock_on)
     if not char or not char.isalpha():
@@ -502,9 +513,12 @@ def english_word_end_check(state, current_hkl):
         keys.append(state.last_letter_key)
     known_word = None
     if state.letter_count <= gibberish_detector.IncrementalWordBuffer.MAX_LENGTH:
-        known_word = "".join(c for c in (layout_remap.remap_key_to_other_layout(vk, s, ENGLISH_HKL_VALUE) or ""
-                                         for vk, s in keys) if c.isalpha())
-    if gibberish_detector.english_word_end_suspect(
+        # Only punctuation AFTER the word is dropped. Bug found live 2026-10-15:
+        # dropping all of it read "t,v" (אתה) as "tv", an allowed word.
+        reading = "".join(layout_remap.remap_key_to_other_layout(vk, s, ENGLISH_HKL_VALUE) or ""
+                          for vk, s in keys)
+        known_word = re.sub(r"[^A-Za-z]+$", "", reading).lower()
+    if not state.en_comma_inside and gibberish_detector.english_word_end_suspect(
             known_word, state.en_letter_count, state.en_has_vowel, state.en_ending) is None:
         return None
     hebrew = "".join(layout_remap.remap_key_to_other_layout(vk, s, HEBREW_HKL_VALUE) or "" for vk, s in keys)
