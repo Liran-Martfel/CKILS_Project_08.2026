@@ -186,6 +186,13 @@ class _PerThreadState:
         # switches the layout, whatever the word lengths.
         self.word_flag = None
         self.recent_word_flags = collections.deque(maxlen=2)
+        # Whole-word English rules (judged at the word's end): how many English
+        # letters, whether any was a vowel, the last two, and whether any was a
+        # capital (tickers and acronyms are typed in capitals; Hebrew has none).
+        self.en_letter_count = 0
+        self.en_has_vowel = False
+        self.en_ending = ""
+        self.en_capital_seen = False
 
     def reset_word(self):
         """The word ended normally: clears everything about THIS word (the
@@ -197,6 +204,10 @@ class _PerThreadState:
         self.last_letter_key = None
         self.letter_count = 0
         self.word_flag = None
+        self.en_letter_count = 0
+        self.en_has_vowel = False
+        self.en_ending = ""
+        self.en_capital_seen = False
 
     def reset(self):
         """Full reset: the word AND everything spanning words. Every path that
@@ -272,6 +283,13 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         # ask what character it would decode to first.
         state.reset_word()
         return None
+
+    english = layout_remap.remap_key_to_other_layout(vk_code, scan_code, ENGLISH_HKL_VALUE)
+    if english and english.isalpha():
+        state.en_letter_count += 1
+        state.en_has_vowel = state.en_has_vowel or english in gibberish_detector.ENGLISH_VOWELS
+        state.en_ending = (state.en_ending + english)[-2:]
+        state.en_capital_seen = state.en_capital_seen or (shift_pressed != caps_lock_on)
 
     char = layout_remap.remap_key_to_other_layout(vk_code, scan_code, current_hkl, shift_pressed, caps_lock_on)
     if not char or not char.isalpha():
@@ -461,6 +479,42 @@ def word_end_check(state, current_hkl):
     return {"current_language": "hebrew", "other_language": "english", "length": state.letter_count}
 
 
+# The user's choice, 2026-10-15: a single English whole-word hit switches the
+# keyboard on its own. Measured both ways first: switching alone doubles the
+# Hebrew-typed-on-English sentences caught by word 3 (31% -> 61%), at the cost
+# of about 1 in 100 correctly typed English sentences switching wrongly
+# (short code/chat words the exception list misses). Set False to make hits
+# only mark the word for the second-word rule instead.
+ENGLISH_WORD_END_SWITCHES_ALONE = True
+
+
+def english_word_end_check(state, current_hkl):
+    """Whole-word English rules (gibberish_detector.english_word_end_suspect)
+    for a word typed on the English layout that just ended with space, Enter
+    or Tab. Returns a process_key_event-shaped result if the word can't be
+    English AND the same keys read as plausible Hebrew; else None. Skipped
+    for any word typed with a capital: stock tickers and acronyms (SPDR,
+    HTML) are typed that way, and Hebrew has no capitals at all."""
+    if current_hkl != ENGLISH_HKL_VALUE or state.en_letter_count < 2 or state.en_capital_seen:
+        return None
+    keys = list(state.raw_keys)
+    if state.letter_count > len(keys) and state.last_letter_key is not None:
+        keys.append(state.last_letter_key)
+    known_word = None
+    if state.letter_count <= gibberish_detector.IncrementalWordBuffer.MAX_LENGTH:
+        known_word = "".join(c for c in (layout_remap.remap_key_to_other_layout(vk, s, ENGLISH_HKL_VALUE) or ""
+                                         for vk, s in keys) if c.isalpha())
+    if gibberish_detector.english_word_end_suspect(
+            known_word, state.en_letter_count, state.en_has_vowel, state.en_ending) is None:
+        return None
+    hebrew = "".join(layout_remap.remap_key_to_other_layout(vk, s, HEBREW_HKL_VALUE) or "" for vk, s in keys)
+    hebrew_letters = "".join(c for c in hebrew if c.isalpha())
+    if (gibberish_detector.looks_impossible(hebrew_letters, "hebrew") is not None
+            or (hebrew_letters and gibberish_detector.hebrew_word_cannot_end_with(hebrew_letters[-1]))):
+        return None  # not plausible Hebrew either — no evidence of a wrong layout
+    return {"current_language": "english", "other_language": "hebrew", "length": state.en_letter_count}
+
+
 def _autocorrect_enabled():
     """The user's on/off switch for Phase 2: true only while
     _AUTOCORRECT_FLAG_FILENAME exists next to CKILS. Checked live, at the
@@ -576,6 +630,15 @@ def _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_
             state.word_flag = ENGLISH_HKL_VALUE
             _fire_autocorrect(thread_id, exe_name, title, current_hkl, ENGLISH_HKL_VALUE, end_result["length"])
             fired = True
+        en_result = english_word_end_check(state, current_hkl)
+        if not fired and en_result is not None:
+            skip_logger.log_skip(
+                exe_name, title, thread_id, skip_logger.REASON_GIBBERISH_SUSPECTED,
+                f"english->hebrew len={en_result['length']} word-end")
+            state.word_flag = HEBREW_HKL_VALUE
+            if ENGLISH_WORD_END_SWITCHES_ALONE:
+                _fire_autocorrect(thread_id, exe_name, title, current_hkl, HEBREW_HKL_VALUE, en_result["length"])
+                fired = True
 
     flag = state.word_flag
     if flag is not None and ends_word(vk_code, flag, shift_pressed):

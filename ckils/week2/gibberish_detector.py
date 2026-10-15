@@ -113,6 +113,50 @@ ENGLISH_SEED_IMPOSSIBLE_BIGRAMS = {
     "vc", "cg", "hv", "pv", "zv",
 }
 
+# Whole-word English rules (2026-10-15, user's request, after measuring that
+# only ~5% of Hebrew words typed on the English layout were caught). These
+# can only be judged once the word has ENDED, so keyboard_hook.py applies them
+# at the space, like the Hebrew word-end rule. Each was scored against every
+# real word in training_data.csv before going in. English has more exceptions
+# than Hebrew's final-letter rule (chat slang, code, abbreviations), so a hit
+# here only marks the word as suspect — it counts toward the second-word rule
+# but never switches the keyboard on its own.
+ENGLISH_VOWELS = set("aeiouy")
+# Real words and common abbreviations that break a rule below anyway.
+ENGLISH_WORD_END_OK = {
+    # no vowel
+    "tbh", "brb", "pls", "plz", "thx", "msg", "btw", "smh", "ngl", "lmk", "ttyl", "wtf", "hmm", "hmmm",
+    "shh", "shhh", "brr", "nth", "html", "http", "https", "css", "sql", "xml", "pdf", "txt", "jpg",
+    "png", "gif", "www", "cmd", "npm", "src", "pwd", "csv", "ppl", "srs", "cfg", "ctx", "btn", "tmp",
+    "std", "str", "pkg", "cnt", "nxt", "dvd", "sms", "mkt", "sgt", "dr", "mr", "mrs", "st", "kg", "km",
+    # ends in v
+    "dev", "rev", "gov", "lav", "nav", "luv", "tv", "venv", "env", "div", "kv", "iv", "mv", "srv",
+    "priv", "conv", "prev", "adv", "nov", "mov",
+    # ends in j
+    "raj", "haj", "hajj", "taj",
+}
+_INTERJECTION_HH = re.compile(r"^[aous]?h+$")  # ahh, ohh, uhh, shh, hhh
+
+
+def english_word_end_suspect(word, length, has_vowel, ending):
+    """Whole-word English check, once the word has ended. `word` is the full
+    word when it's short enough to have been kept (else None — exceptions
+    are all short), `length` its letter count, `has_vowel` whether any of
+    a/e/i/o/u/y appeared, `ending` its last two letters. Returns a short
+    reason, or None."""
+    if word is not None and word in ENGLISH_WORD_END_OK:
+        return None
+    if length >= 3 and not has_vowel:
+        return "no vowel"
+    if ending.endswith("v"):
+        return "ends in v"
+    if ending.endswith("j"):
+        return "ends in j"
+    if ending.endswith("hh") and not (word and _INTERJECTION_HH.match(word)):
+        return "ends in hh"
+    return None
+
+
 WORD_BOUNDARY_PATTERN = re.compile(r"[\s.,!?;:()\[\]{}\"'/\\@#$%^&*+=<>~`|\n\r\t]")
 
 

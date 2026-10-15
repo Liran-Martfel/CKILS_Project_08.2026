@@ -1352,6 +1352,18 @@ class GibberishCbawRuleTests(unittest.TestCase):
         for word in ("edge", "judge", "bridge", "ridge", "badge"):
             self.assertIsNone(gibberish_detector.looks_impossible(word, "english"), word)
 
+    def test_english_whole_word_rules(self):
+        """2026-10-15, scored on real words first: no vowel (3+ letters),
+        ends in v / j / hh — with real-word and abbreviation exceptions."""
+        s = gibberish_detector.english_word_end_suspect
+        self.assertEqual(s("nkt", 3, False, "kt"), "no vowel")      # מלא
+        self.assertEqual(s("nv", 2, False, "nv"), "ends in v")     # מה
+        self.assertEqual(s("tuhh", 4, True, "hh"), "ends in hh")   # אויי
+        for word in ("tbh", "html", "tv", "env", "prev", "shh", "ahh", "raj", "ctx"):
+            self.assertIsNone(s(word, len(word), any(c in "aeiouy" for c in word), word[-2:]), word)
+        self.assertIsNone(s("my", 2, True, "my"))
+        self.assertIsNone(s(None, 9, True, "ng"))  # a long word with vowels
+
     def test_regular_form_can_never_end_a_hebrew_word_except_pe(self):
         """The mirror of the final-form rule (2026-10-14): מ נ צ כ never end
         a word. פ is allowed — loanwords like טיפ and אפ end in it."""
@@ -2199,6 +2211,34 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
         and_ = [0x41, 0x4E, 0x44, 0x20]
         with_ = [0x57, 0x49, 0x54, 0x48, 0x20]
         self._run(good + and_ + and_ + with_)
+        self.assertEqual(self.calls, [])
+
+    @staticmethod
+    def _keys(text):
+        """English-layout keys for a string of a-z, space and ','."""
+        return [0x20 if c == " " else 0xBC if c == "," else 0x41 + ord(c) - ord("a") for c in text]
+
+    def test_the_users_own_sentence_switches_at_the_first_word(self):
+        """Real typing, 2026-10-15: "tuhh tz to tbh t,jhk krauo nkt" is
+        אויי אז אם אני אתחיל לרשום מלא on the English layout. Before: nothing
+        until word 8. Now tuhh (ends in hh) switches at its own space."""
+        self._run(self._keys("tuhh "), layout=rule_engine.English_HKL)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.Hebrew_HKL)
+
+    def test_marks_only_mode_waits_for_a_second_word(self):
+        """With ENGLISH_WORD_END_SWITCHES_ALONE off, one hit only marks; two
+        marked words within three (t,jhk and nkt) switch at nkt."""
+        with patch.object(keyboard_hook, "ENGLISH_WORD_END_SWITCHES_ALONE", False):
+            self._run(self._keys("nkt "), layout=rule_engine.English_HKL)
+            self.assertEqual(self.calls, [])
+            self._run(self._keys("tuhh tz to tbh t,jhk krauo nkt "), layout=rule_engine.English_HKL)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_capitals_skip_the_english_rules(self):
+        """Tickers and acronyms are typed in capitals; Hebrew has none."""
+        caps = [{"vk": vk, "shift": True} for vk in self._keys("grnt")] + [0x20]
+        self._run(caps + caps, layout=rule_engine.English_HKL)
         self.assertEqual(self.calls, [])
 
     def test_word_end_rule_catches_a_short_english_word(self):

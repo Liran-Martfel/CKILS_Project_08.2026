@@ -2946,6 +2946,37 @@ words — typing היסטוריה or "judge" correctly could switch the keyboard
 without spaces, `ישלךשאלה`) or abbreviations the measuring script split at the quote mark — not real
 typing. The user's own `זש` stays: no real word found with it. 1 new test with the real words. 197 pass.
 
+**English whole-word rules — the Hebrew-typed-on-English gap, measured and narrowed.** The user typed a
+real Hebrew sentence on the English layout (`tuhh tz to tbh t,jhk krauo nkt cgcrh,` = אויי אז אם אני
+אתחיל לרשום מלא בעברית) and nothing switched until word 8 — 7 words broke no English rule, and two of
+them (`to`, `tbh`) ARE English. He asked whether English has spelling rules, and attached a guide he'd
+had three AI assistants write. Its letter-level rules were usable; its dictionary, grammar, meaning
+and coherence checks (most of it) were not — they'd need whole sentences kept in memory (breaking
+Tier 4's only-the-current-word privacy promise) or a dictionary (rejected earlier), and some of its
+examples were wrong for this use (`tb` is in football, notebook).
+
+Each candidate was scored on real words before going in. Added, judged at the word's end:
+**no vowel in 3+ letters** (the user's pick over 4+, `y` counts as a vowel), **ends in v** (Hebrew ה),
+**ends in j** (Hebrew ח), **ends in hh** (Hebrew יי); with an exception list for real short words,
+chat and code abbreviations (`tbh`, `html`, `tv`, `env`, `ctx`, `ppl`...), and skipped entirely for a
+word typed with a capital (stock tickers, acronyms — Hebrew has no capitals). Three identical letters
+was measured and left out: 0.2% gain, and chat elongation ("yesss") would hit it.
+
+Because English has real exceptions, a hit only **marks** the word — it counts toward the second-word
+rule, never switches alone. Measured both ways:
+
+| | Before | Marks only (shipped) | Would switch alone |
+|---|---|---|---|
+| Hebrew-on-English words caught | 5.6% | 29.3% | 29.3% |
+| ...sentences switched by word 3 | 0% | **31.1%** | 61.1% |
+| English typed correctly: sentences wrongly switched | 0% | **0%** | 1.0% |
+
+The measurement lowercases the English data, so its false-alarm figure is pessimistic (real tickers
+are typed in capitals and skipped). **Then, the user's call: single hits switch on their own**
+(`ENGLISH_WORD_END_SWITCHES_ALONE = True`) — 61% of sentences by word 3, accepting ~1% of correct
+English sentences switching wrongly. His own sentence now switches at word 1 (`tuhh`, ends in hh).
+Marks-only stays available behind the same constant and is still tested. 201 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
