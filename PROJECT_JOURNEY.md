@@ -2892,6 +2892,30 @@ and full length past the 5-letter buffer — still one key and a count, memory o
 exclusions: **פ** (loanwords end in it — טיפ, אפ, סקייפ), and **apostrophe/quote word ends** (מס', מנכ"ל
 put a regular letter right before them). 7 new tests through the real detector. 183 pass.
 
+**Later the same day: every /code-review finding fixed, plus the second-word rule.**
+- **One answer to "is this key a letter"** — `layout_remap.is_letter_key`, now also knowing that ; , .
+  type ף ת ץ on Hebrew (unshifted). A key belongs to the word if it's a letter in EITHER layout. This
+  fixes the main finding: those keys used to end the word and cancel a pending Hebrew correction, so a
+  Hebrew word with ת after letter 5 (-ות) was never corrected. The test that missed it now runs the
+  real sequence in one go.
+- **Word end vs. editing are now different things.** A word end (space, Enter, Tab — new — punctuation,
+  Shift+digit) ends only the word; Backspace/arrows/Delete mean the user is editing and cancel
+  everything pending. The apostrophe no longer ends a word the user meant in English ("couldn't").
+- **No fake corrections:** nothing fires if the layout is already the target one by the word end.
+- **Shift/Ctrl/Alt are read inside the hook, at press time**, and queued with the key — not later, after
+  a fast typist has let go of Shift.
+- **Raw key codes replaced with names** (`win32con.VK_SHIFT`, `layout_remap.VK_OEM_7`, ...).
+- **Second-word rule (user's call, "in addition" to the 5-letter one):** a word flagged in the same
+  direction as one of the two words before it switches at its end, whatever the lengths. Catches "and
+  good with" — `good` (עםםג) and `with` ('ןאי) are both flagged but both under 5 letters.
+
+On the user's question of which ML model this is: none. Tier 4 is deliberately rule-based (his own
+earlier choice over a dictionary or a trained model): each rule is a fact about spelling, explainable
+and fixable one at a time, with no training data needed and no latency on every keystroke. Tier 3's
+content classifier is the ML part — character 1-3-gram TF-IDF into logistic regression.
+
+16 new tests. 191 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

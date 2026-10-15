@@ -1621,7 +1621,7 @@ class ConsumerLoopUsesTheFocusedWindowsLayoutTests(unittest.TestCase):
              patch.object(keyboard_hook.win32api, "GetAsyncKeyState", return_value=0), \
              patch.object(keyboard_hook.win32api, "GetKeyState", return_value=0), \
              patch.object(keyboard_hook, "_is_password_field_focused", return_value=True), \
-             patch.object(keyboard_hook._event_queue, "get", side_effect=[(0x41, 30), StopIteration]):
+             patch.object(keyboard_hook._event_queue, "get", side_effect=[(0x41, 30, False, False, False), StopIteration]):
             with self.assertRaises(StopIteration):
                 keyboard_hook._consumer_loop()
         mock_get_layout.assert_called_once_with(4242)  # the real window's thread — never the literal 0 that broke this
@@ -2063,7 +2063,7 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
                 raise StopIteration
             current.clear()
             current.update(queue_.pop(0))
-            return (current["vk"], 0)
+            return (current["vk"], 0, bool(current.get("shift")), bool(current.get("ctrl")), False)
 
         def async_state(vk):
             if vk == keyboard_hook.VK_CONTROL and current.get("ctrl"):
@@ -2145,6 +2145,52 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.calls[0][5], rule_engine.Hebrew_HKL)
 
+    def test_tav_mid_word_keeps_a_pending_hebrew_correction(self):
+        """/code-review finding 1+2, 2026-10-14: the real sequence the old
+        test split into two runs. On English, ',' is ת for someone who meant
+        Hebrew — part of the word. It used to end the word and cancel the
+        pending switch, so Hebrew words with ת after letter 5 (-ות) were
+        never corrected. Only the space fires."""
+        keys = [0x5A, 0x56, 0x55, 0x53, 0x48]  # 'zvush' -> זהודי, target Hebrew
+        self._run(keys + [0xBC, 0x20], layout=rule_engine.English_HKL)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.Hebrew_HKL)
+
+    def test_apostrophe_inside_an_english_word_does_not_switch_mid_word(self):
+        """Finding 3: "couldn't" — the apostrophe is inside the English word.
+        Waits for the space instead of switching between "could" and "n't"."""
+        self._run(self.HELLO + [0xDE])
+        self.assertEqual(self.calls, [])
+        self._run(self.HELLO + [0xDE, 0x4E, 0x54, 0x20])
+        self.assertEqual(self.calls, [self.hello_call])
+
+    def test_tab_ends_the_word(self):
+        """Finding 6: Tab between form fields ends the word — it used to
+        cancel the switch instead."""
+        self._run(self.HELLO + [0x09])
+        self.assertEqual(self.calls, [self.hello_call])
+
+    def test_second_flagged_word_switches_whatever_the_lengths(self):
+        """User's call, 2026-10-15: 'and good with' on the Hebrew layout.
+        'good' (עםםג) and 'with' ('ןאי) are both flagged but both under 5
+        letters; the second one switches at its space."""
+        and_ = [0x41, 0x4E, 0x44, 0x20]
+        good = [0x47, 0x4F, 0x4F, 0x44, 0x20]
+        with_ = [0x57, 0x49, 0x54, 0x48, 0x20]
+        self._run(and_ + good)
+        self.assertEqual(self.calls, [])
+        self._run(and_ + good + with_)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
+
+    def test_two_flagged_words_too_far_apart_do_not_switch(self):
+        """'good' then two clean words then 'with': not within three words."""
+        good = [0x47, 0x4F, 0x4F, 0x44, 0x20]
+        and_ = [0x41, 0x4E, 0x44, 0x20]
+        with_ = [0x57, 0x49, 0x54, 0x48, 0x20]
+        self._run(good + and_ + and_ + with_)
+        self.assertEqual(self.calls, [])
+
     def test_word_end_rule_catches_a_short_english_word(self):
         """The user's rule (2026-10-14): a Hebrew word never ends in a
         regular מ/נ/צ/כ. 'can' typed on the Hebrew layout is בשמ — only 3
@@ -2192,6 +2238,53 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
         for value in (hwnd, thread_id, from_hkl, to_hkl, length):
             self.assertIsInstance(value, int)
         self.assertEqual((exe, title), ("chrome.exe", "Page"))
+
+
+class Tier4ReviewFixTests(unittest.TestCase):
+    """The remaining /code-review findings on commit 674fdfa, 2026-10-14."""
+
+    def setUp(self):
+        """Real HKL constants."""
+        self._orig = (keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE,
+                      keyboard_hook._autocorrect_callback)
+        keyboard_hook.ENGLISH_HKL_VALUE = rule_engine.English_HKL
+        keyboard_hook.HEBREW_HKL_VALUE = rule_engine.Hebrew_HKL
+
+    def tearDown(self):
+        """Restores module state."""
+        (keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE,
+         keyboard_hook._autocorrect_callback) = self._orig
+
+    def test_no_correction_when_the_layout_is_already_right(self):
+        """Finding 5: the layout changed between the 5th key and the space.
+        Switching English to English would log a fake correction."""
+        calls = []
+        keyboard_hook._autocorrect_callback = lambda *a: calls.append(a)
+        with patch.object(keyboard_hook, "_autocorrect_enabled", return_value=True), \
+             patch.object(keyboard_hook, "_foreground_hwnd_for", return_value=777):
+            keyboard_hook._fire_autocorrect(1, "x.exe", "t", rule_engine.English_HKL, rule_engine.English_HKL, 5)
+        self.assertEqual(calls, [])
+
+    def test_modifiers_are_captured_when_the_key_is_pressed(self):
+        """Finding 4: Shift is read inside the hook, at press time, and
+        queued with the key — not later, after the user may have let go."""
+        event = keyboard_hook.LowLevelKeyboardInputEvent(0x31, 2, 0, 0, None)
+        shift_only = lambda vk: 0x8000 if vk == keyboard_hook.win32con.VK_SHIFT else 0
+        with patch.object(keyboard_hook.win32api, "GetAsyncKeyState", side_effect=shift_only), \
+             patch.object(keyboard_hook.user32, "CallNextHookEx", return_value=0), \
+             patch.object(keyboard_hook, "_event_queue", queue.Queue()) as q:
+            keyboard_hook._hook_proc(0, keyboard_hook.WM_KEYDOWN, ctypes.addressof(event))
+            self.assertEqual(q.get_nowait(), (0x31, 2, True, False, False))
+
+    def test_one_shared_answer_for_letter_keys(self):
+        """Finding 7: layout_remap.is_letter_key is the single answer, used by
+        both the word buffer and the word-end trigger."""
+        for vk in (layout_remap.VK_OEM_1, layout_remap.VK_OEM_COMMA, layout_remap.VK_OEM_PERIOD):
+            self.assertTrue(layout_remap.is_letter_key(vk, rule_engine.Hebrew_HKL))
+            self.assertFalse(layout_remap.is_letter_key(vk, rule_engine.Hebrew_HKL, shift_pressed=True))
+            self.assertFalse(layout_remap.is_letter_key(vk, rule_engine.English_HKL))
+        self.assertTrue(layout_remap.is_letter_key(0x51, rule_engine.English_HKL))   # q
+        self.assertFalse(layout_remap.is_letter_key(0x51, rule_engine.Hebrew_HKL))   # q -> '/'
 
 
 class ShiftDoesNotSplitAWordTests(unittest.TestCase):

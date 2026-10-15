@@ -51,6 +51,15 @@ ENGLISH_TO_HEBREW_KEY_MAP = {
 VK_A = 0x41
 _VK_TO_ENGLISH_LETTER = {VK_A + i: chr(ord("a") + i) for i in range(26)}  # VK_A..VK_Z -> 'a'..'z'
 
+# Punctuation-row keys (win32con doesn't name these). On US English they type
+# punctuation; on SI-1452 Hebrew, three of them type LETTERS when unshifted.
+VK_OEM_1, VK_OEM_PLUS, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD = 0xBA, 0xBB, 0xBC, 0xBD, 0xBE
+VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7 = 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE
+# Found 2026-10-14 by /code-review: which keys are letters in which layout
+# used to be decided in three places that disagreed — this map is now the one
+# answer every caller uses (see is_letter_key). ; -> ף, , -> ת, . -> ץ.
+HEBREW_OEM_LETTERS = {VK_OEM_1: "ף", VK_OEM_COMMA: "ת", VK_OEM_PERIOD: "ץ"}
+
 
 def remap_key_to_other_layout(vk_code, scan_code, target_hkl, shift_pressed=False, caps_lock_on=False):
     """Returns the character that target_hkl (ENGLISH_HKL or HEBREW_HKL —
@@ -63,6 +72,10 @@ def remap_key_to_other_layout(vk_code, scan_code, target_hkl, shift_pressed=Fals
     case — case never changes which letter it is, and Hebrew has no case at
     all, so it carries no information gibberish_detector.py's rules need.
     """
+    if vk_code in HEBREW_OEM_LETTERS:
+        # Only the Hebrew layout types a letter here, and only unshifted
+        # (Shift gives punctuation). Never a letter on English.
+        return HEBREW_OEM_LETTERS[vk_code] if target_hkl == HEBREW_HKL and not shift_pressed else None
     base_letter = _VK_TO_ENGLISH_LETTER.get(vk_code)
     if base_letter is None:
         return None
@@ -71,3 +84,11 @@ def remap_key_to_other_layout(vk_code, scan_code, target_hkl, shift_pressed=Fals
     if target_hkl == HEBREW_HKL:
         return ENGLISH_TO_HEBREW_KEY_MAP.get(base_letter)
     return None
+
+
+def is_letter_key(vk_code, target_hkl, shift_pressed=False):
+    """True if this key types a LETTER (not punctuation) in target_hkl's
+    layout — the single answer to "is this key part of a word" that both
+    the word buffer and the word-end trigger rely on."""
+    char = remap_key_to_other_layout(vk_code, 0, target_hkl, shift_pressed)
+    return bool(char) and char.isalpha()

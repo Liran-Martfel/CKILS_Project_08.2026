@@ -37,6 +37,7 @@ than a wrong keyboard language ever was. The callback only records the bare
 minimum (which key, up or down, a timestamp) onto a small queue and returns
 immediately; a separate consumer thread does everything else.
 """
+import collections
 import ctypes
 import ctypes.wintypes
 import queue
@@ -82,13 +83,12 @@ LLKHF_INJECTED = 0x00000010
 VK_CONTROL = 0x11
 VK_MENU = 0x12  # Alt
 # Shift (generic, left, right) and Caps Lock: type nothing themselves.
-# WH_KEYBOARD_LL reports the left/right-specific codes, not just 0x10.
-_MODIFIER_ONLY_VKS = {0x10, 0xA0, 0xA1, 0x14}
+# WH_KEYBOARD_LL reports the left/right-specific codes, not just VK_SHIFT.
+_MODIFIER_ONLY_VKS = {win32con.VK_SHIFT, win32con.VK_LSHIFT, win32con.VK_RSHIFT, win32con.VK_CAPITAL}
 
-# Only plain letter keys are ever considered "typed text" here — anything
-# else (digits, punctuation, function keys) either ends the current word
-# (see gibberish_detector.is_word_boundary_char, applied to the DECODED
-# character, not the vk code) or is simply not a letter to judge.
+# A key is part of a word if it types a letter in EITHER layout — decided
+# in one place, layout_remap.is_letter_key. Anything else either ends the
+# word or is an edit key (Backspace, arrows) that cancels it.
 VK_A, VK_Z = 0x41, 0x5A
 
 _event_queue = queue.Queue(maxsize=200)  # bounded — a burst of keys never blocks the hook callback
@@ -133,8 +133,16 @@ def _hook_proc(n_code, w_param, l_param):
         if n_code == 0 and w_param in (WM_KEYDOWN, WM_SYSKEYDOWN):
             event = ctypes.cast(l_param, ctypes.POINTER(LowLevelKeyboardInputEvent)).contents
             if not (event.flags & LLKHF_INJECTED):
+                # Modifiers read HERE, at press time — found by /code-review
+                # 2026-10-14: reading Shift later, when the consumer thread
+                # gets to the event, raced with the user's fingers ("hello!"
+                # typed fast lost its "!" once Shift was already released).
+                # GetAsyncKeyState is a cheap read; nothing slow runs here.
+                shift = bool(win32api.GetAsyncKeyState(win32con.VK_SHIFT) & 0x8000)
+                ctrl = bool(win32api.GetAsyncKeyState(VK_CONTROL) & 0x8000)
+                alt = bool(win32api.GetAsyncKeyState(VK_MENU) & 0x8000)
                 try:
-                    _event_queue.put_nowait((event.vk_code, event.scan_code))
+                    _event_queue.put_nowait((event.vk_code, event.scan_code, shift, ctrl, alt))
                 except queue.Full:
                     pass  # a burst of keys is dropped rather than ever blocking real typing
     except Exception:
@@ -172,19 +180,32 @@ class _PerThreadState:
         # count — still only the current word, still memory only.
         self.last_letter_key = None
         self.letter_count = 0
+        # Second-word rule (2026-10-15, user's call): which direction this word
+        # was flagged in (the HKL it should have been typed in), and the same
+        # for the previous two words. A second flagged word within three
+        # switches the layout, whatever the word lengths.
+        self.word_flag = None
+        self.recent_word_flags = collections.deque(maxlen=2)
 
-    def reset(self):
-        """Clears both the decoded-character buffer and the raw (vk, scan)
-        pairs together, so they can never drift out of sync with each other.
-        Also cancels any pending Phase 2 correction — every path that resets
-        (focus change, Ctrl/Alt, password field) is one where switching the
-        layout at the next word end would be wrong.
-        """
+    def reset_word(self):
+        """The word ended normally: clears everything about THIS word (the
+        buffer and the raw (vk, scan) pairs together, so they can never drift
+        out of sync), but keeps what spans words — a pending correction still
+        waiting for its word end, and the recent-words history."""
         self.chars.reset()
         self.raw_keys = []
-        self.pending_correction = None
         self.last_letter_key = None
         self.letter_count = 0
+        self.word_flag = None
+
+    def reset(self):
+        """Full reset: the word AND everything spanning words. Every path that
+        calls this (focus change, Ctrl/Alt, password field, Backspace/arrows)
+        is one where switching the layout at the next word end would be wrong.
+        """
+        self.reset_word()
+        self.pending_correction = None
+        self.recent_word_flags.clear()
 
 
 def _is_password_field_focused():
@@ -220,7 +241,17 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         # before the "?" or "!" that actually ends the word.
         return None
 
-    if not (VK_A <= vk_code <= VK_Z):
+    other_hkl = ENGLISH_HKL_VALUE if current_hkl == HEBREW_HKL_VALUE else HEBREW_HKL_VALUE
+    if not (layout_remap.is_letter_key(vk_code, current_hkl, shift_pressed)
+            or layout_remap.is_letter_key(vk_code, other_hkl, shift_pressed)):
+        # 2026-10-15: "is this key part of a word" is now ONE question — does
+        # it type a letter in either layout (layout_remap.is_letter_key). The
+        # old test, "is it A-Z", made the ; , . keys word boundaries even
+        # when the user meant Hebrew and they type ף ת ץ — cancelling the
+        # pending correction for any Hebrew word with ת after its 5th letter
+        # (found by /code-review). Ends only this word: a pending correction
+        # and the recent-words history are handled by the consumer loop.
+        #
         # Real bug found live, 2026-10-08: this used to ask layout_remap what
         # character this key would produce, and only reset on a boundary if
         # THAT lookup returned one. But layout_remap only ever maps VK_A..VK_Z
@@ -239,11 +270,20 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         # Fixed by treating ANY non-letter key as an unconditional boundary —
         # it can never be part of a word either way, so there's no reason to
         # ask what character it would decode to first.
-        state.reset()
+        state.reset_word()
         return None
 
     char = layout_remap.remap_key_to_other_layout(vk_code, scan_code, current_hkl, shift_pressed, caps_lock_on)
-    if not char:
+    if not char or not char.isalpha():
+        # A letter only in the OTHER layout (on English, the , key that is ת
+        # in Hebrew; on Hebrew, the W key that is ' here but w in English).
+        # Mid-word for whoever meant the other language: keep the raw key so
+        # the other-layout reading stays whole, but there's no letter to add
+        # to this layout's buffer.
+        if len(state.raw_keys) < gibberish_detector.IncrementalWordBuffer.MAX_LENGTH:
+            state.raw_keys.append((vk_code, scan_code))
+        state.last_letter_key = (vk_code, scan_code)
+        state.letter_count += 1
         return None
 
     still_going = state.chars.push(char)
@@ -350,32 +390,46 @@ def autocorrect_target(result, current_hkl):
 
 # The user's call, 2026-10-14: never flip the layout mid-word — a qualifying
 # word is only marked pending, and the switch fires when that word ENDS:
-# space, Enter, or punctuation. Explicit allowlist, not "any non-letter key":
-# Shift, Backspace, arrows and Caps Lock are non-letters too, and firing on
-# those would flip the layout mid-word again (Shift before a capital,
-# Backspace while the user fixes the word themselves).
-VK_SPACE, VK_RETURN = 0x20, 0x0D
-_OEM_PUNCTUATION_VKS = {0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE}
-# On the Hebrew layout (SI-1452) these three keys type LETTERS, not
-# punctuation: ; -> ף, , -> ת, . -> ץ. When the user means Hebrew (target is
-# Hebrew), pressing one of them is the middle or end of a Hebrew word, not
-# punctuation after it — so they don't end the word for that direction.
-_HEBREW_LETTER_OEM_VKS = {0xBA, 0xBC, 0xBE}
+# space, Enter, Tab or punctuation. Explicit allowlist, not "any non-letter
+# key": Backspace, arrows and Delete are non-letters too, but they mean the
+# user is editing — they cancel instead (see _handle_non_letter_key).
+VK_SPACE, VK_RETURN, VK_TAB = win32con.VK_SPACE, win32con.VK_RETURN, win32con.VK_TAB
+_OEM_PUNCTUATION_VKS = {
+    layout_remap.VK_OEM_1, layout_remap.VK_OEM_PLUS, layout_remap.VK_OEM_COMMA, layout_remap.VK_OEM_MINUS,
+    layout_remap.VK_OEM_PERIOD, layout_remap.VK_OEM_2, layout_remap.VK_OEM_3, layout_remap.VK_OEM_4,
+    layout_remap.VK_OEM_5, layout_remap.VK_OEM_6, layout_remap.VK_OEM_7,
+}
+# The word-end rule (Hebrew never ends in a regular מ/נ/צ/כ) only fires on
+# these: an apostrophe or quote mark can end a Hebrew abbreviation (מס',
+# מנכ"ל) right after a regular letter.
+_WORD_END_RULE_VKS = {VK_SPACE, VK_RETURN, VK_TAB}
+
+
+def is_word_end_key(vk_code, shift_pressed=False):
+    """Space, Enter, Tab, punctuation, or Shift+digit (! @ # ...)."""
+    if vk_code in (VK_SPACE, VK_RETURN, VK_TAB):
+        return True
+    if shift_pressed and 0x30 <= vk_code <= 0x39:
+        return True
+    return vk_code in _OEM_PUNCTUATION_VKS
 
 
 def ends_word(vk_code, target_hkl, shift_pressed=False):
     """True if vk_code ends the word for someone typing in target_hkl's
     language (the language they actually meant — the one Phase 2 is about
     to switch to)."""
-    if vk_code in (VK_SPACE, VK_RETURN):
-        return True
-    if shift_pressed and 0x30 <= vk_code <= 0x39:
-        return True  # ! @ # ... on the digit row
-    if vk_code in _OEM_PUNCTUATION_VKS:
-        if target_hkl == HEBREW_HKL_VALUE and vk_code in _HEBREW_LETTER_OEM_VKS and not shift_pressed:
-            return False  # ף / ת / ץ — a Hebrew letter, not punctuation
-        return True
-    return False
+    if target_hkl == HEBREW_HKL_VALUE and layout_remap.is_letter_key(vk_code, HEBREW_HKL_VALUE, shift_pressed):
+        return False  # ; , . type ף ת ץ in Hebrew — part of the word, not punctuation after it
+    if continues_word(vk_code, target_hkl, shift_pressed):
+        return False
+    return is_word_end_key(vk_code, shift_pressed)
+
+
+def continues_word(vk_code, target_hkl, shift_pressed=False):
+    """The apostrophe, for someone who meant English: inside the word
+    ("couldn't"), not after it. Found by /code-review 2026-10-14 — it used
+    to fire the switch between "could" and "n't"."""
+    return target_hkl == ENGLISH_HKL_VALUE and vk_code == layout_remap.VK_OEM_7 and not shift_pressed
 
 
 def word_end_check(state, current_hkl):
@@ -386,9 +440,10 @@ def word_end_check(state, current_hkl):
     result; else None. Catches short English words typed on the Hebrew
     layout ("can" -> בשמ, "man", "pin") that the 5-letter trigger can't.
 
-    Only space/Enter, on purpose: in Hebrew, an apostrophe or a quote mark
-    ends abbreviations and acronyms (מס', עמ', מנכ"ל) right after a regular
-    letter, so treating those as word ends would flag real Hebrew.
+    Only space/Enter/Tab (_WORD_END_RULE_VKS), on purpose: in Hebrew, an
+    apostrophe or a quote mark ends abbreviations and acronyms (מס', עמ',
+    מנכ"ל) right after a regular letter, so treating those as word ends
+    would flag real Hebrew.
     """
     if current_hkl != HEBREW_HKL_VALUE or state.letter_count < 2 or state.last_letter_key is None:
         return None
@@ -429,7 +484,7 @@ def _consumer_loop():
     state = _PerThreadState()
     last_thread_id = None
     while True:
-        vk_code, scan_code = _event_queue.get()
+        vk_code, scan_code, shift_pressed, ctrl_held, alt_held = _event_queue.get()
         try:
             # Real bug found live, 2026-09-25: keyboard layout is tracked PER
             # THREAD in Windows (the same fact rule_engine.py is built around
@@ -451,9 +506,6 @@ def _consumer_loop():
 
             last_thread_id = _reset_on_focus_change(state, thread_id, last_thread_id)
 
-            ctrl_held = bool(win32api.GetAsyncKeyState(VK_CONTROL) & 0x8000)
-            alt_held = bool(win32api.GetAsyncKeyState(VK_MENU) & 0x8000)
-            shift_pressed = bool(win32api.GetAsyncKeyState(win32con.VK_SHIFT) & 0x8000)
             caps_lock_on = bool(win32api.GetKeyState(win32con.VK_CAPITAL) & 0x0001)
             # Normalize to this module's signed HKL constants for comparison —
             # see layout_remap.py's own note on the same sign-representation gap.
@@ -468,29 +520,12 @@ def _consumer_loop():
                 state.reset()
                 continue
 
-            # Phase 2: the word that qualified earlier has just ended — switch
-            # now, before this key's own processing resets the buffer (and
-            # with it the pending flag). Ctrl/Alt combos are shortcuts, never
-            # a word end; process_key_event below cancels the pending for those.
-            fired = False
-            if state.pending_correction is not None and not (ctrl_held or alt_held):
-                target_hkl, word_length = state.pending_correction
-                if ends_word(vk_code, target_hkl, shift_pressed):
-                    state.pending_correction = None
-                    fired = True
-                    _fire_autocorrect(thread_id, exe_name, title, current_hkl, target_hkl, word_length)
-
-            # The word-end rule: a whole word just ended, so a hit can switch
-            # right away, whatever its length — unlike the 5-letter trigger,
-            # this judges the complete word, not a guess about a partial one.
-            if not fired and vk_code in (VK_SPACE, VK_RETURN) and not (ctrl_held or alt_held):
-                end_result = word_end_check(state, current_hkl)
-                if end_result is not None:
-                    skip_logger.log_skip(
-                        exe_name, title, thread_id, skip_logger.REASON_GIBBERISH_SUSPECTED,
-                        f"hebrew->english len={end_result['length']} word-end")
-                    _fire_autocorrect(thread_id, exe_name, title, current_hkl, ENGLISH_HKL_VALUE,
-                                      end_result["length"])
+            # Phase 2 decisions happen BEFORE process_key_event, which ends the
+            # word (and with it this word's letters and flag) on a non-letter.
+            # Ctrl/Alt combos are shortcuts, never a word end;
+            # process_key_event cancels everything for those.
+            if not (ctrl_held or alt_held) and vk_code not in _MODIFIER_ONLY_VKS:
+                _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_name, title)
 
             result = process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_held,
                                        shift_pressed, caps_lock_on)
@@ -500,6 +535,7 @@ def _consumer_loop():
                 skip_logger.log_skip(
                     exe_name, title, thread_id, skip_logger.REASON_GIBBERISH_SUSPECTED,
                     f"{result['current_language']}->{result['other_language']} len={result['length']}")
+                state.word_flag = ENGLISH_HKL_VALUE if current_hkl == HEBREW_HKL_VALUE else HEBREW_HKL_VALUE
 
             target_hkl = autocorrect_target(result, current_hkl)
             if target_hkl is not None:
@@ -508,11 +544,65 @@ def _consumer_loop():
             continue  # one bad event must never take down the whole consumer thread
 
 
+def _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_name, title):
+    """Runs for every non-modifier key outside a shortcut, before the key is
+    added to (or ends) the word. Three ways a word can trigger a switch when
+    it ends, checked in order, at most one switch per word end:
+      1. a word that qualified at 5 keys (pending_correction);
+      2. the word-end rule — Hebrew never ends in a regular מ/נ/צ/כ;
+      3. the second-word rule — this word was flagged and so was one of the
+         two words before it, in the same direction (user's call, 2026-10-15:
+         catches runs of short wrong-layout words like "and good with").
+    A non-letter that isn't a word end (Backspace, arrows, Delete, a plain
+    digit) means the user is editing: everything pending is cancelled."""
+    fired = False
+    pending = state.pending_correction
+    if pending is not None and ends_word(vk_code, pending[0], shift_pressed):
+        state.pending_correction = None
+        _fire_autocorrect(thread_id, exe_name, title, current_hkl, pending[0], pending[1])
+        fired = True
+
+    other_hkl = ENGLISH_HKL_VALUE if current_hkl == HEBREW_HKL_VALUE else HEBREW_HKL_VALUE
+    if (layout_remap.is_letter_key(vk_code, current_hkl, shift_pressed)
+            or layout_remap.is_letter_key(vk_code, other_hkl, shift_pressed)):
+        return  # still inside a word
+
+    if not fired and vk_code in _WORD_END_RULE_VKS:
+        end_result = word_end_check(state, current_hkl)
+        if end_result is not None:
+            skip_logger.log_skip(
+                exe_name, title, thread_id, skip_logger.REASON_GIBBERISH_SUSPECTED,
+                f"hebrew->english len={end_result['length']} word-end")
+            state.word_flag = ENGLISH_HKL_VALUE
+            _fire_autocorrect(thread_id, exe_name, title, current_hkl, ENGLISH_HKL_VALUE, end_result["length"])
+            fired = True
+
+    flag = state.word_flag
+    if flag is not None and ends_word(vk_code, flag, shift_pressed):
+        if not fired and flag in state.recent_word_flags:
+            _fire_autocorrect(thread_id, exe_name, title, current_hkl, flag, state.letter_count)
+            fired = True
+        state.recent_word_flags.append(flag)
+    elif is_word_end_key(vk_code, shift_pressed):
+        state.recent_word_flags.append(None)
+    elif not (state.pending_correction and continues_word(vk_code, state.pending_correction[0], shift_pressed)):
+        state.reset()  # an edit key: the user is changing the text, not ending a word
+        return
+    if fired:
+        state.recent_word_flags.clear()  # the layout just changed: count from scratch
+
+
 def _fire_autocorrect(thread_id, exe_name, title, from_hkl, target_hkl, word_length):
     """Hands a ready correction to rule_engine — only if Phase 2's on/off
     file is present right now and focus is still on the window the word was
     typed in. Never raises."""
     try:
+        if from_hkl == target_hkl:
+            # Found by /code-review 2026-10-14: the layout already changed
+            # since the word qualified (Tier 3, or the user's own click on the
+            # language bar). "Correcting" it would log a fake correction and
+            # make Tier 3 stand down for the rest of the visit.
+            return
         if _autocorrect_callback is None or not _autocorrect_enabled():
             return
         hwnd = _foreground_hwnd_for(thread_id)
