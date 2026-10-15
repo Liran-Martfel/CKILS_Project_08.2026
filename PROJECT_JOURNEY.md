@@ -2926,6 +2926,26 @@ site still gets today's behavior, a title that doesn't parse cleanly is ignored,
 another window doesn't count as a rename. Tier 3 still checks the content afterward. Logged as fast-path
 source `same_site_title_change`. 5 new tests (incl. the real Gemini titles). 196 pass.
 
+**Tier 3 model comparison (read-only, at the user's request — no code or model file touched).**
+Logistic regression vs. Naive Bayes vs. linear SVM, same features, 5-fold cross-validation on the 228
+labeled examples: accuracy 99.1% / 98.2% / 99.6%; LR acts on 92.5% of reads and was never wrong when it
+did; NB acts on 97.4% at 99.6%; SVM has no confidence score, which CKILS needs. With ~46 examples per
+fold the differences are one or two examples — effectively equal. Kept LR. (My earlier claim that NB's
+confidence is badly calibrated was wrong on this data — its log loss was lower, 0.050 vs 0.186.)
+
+**Measuring Tier 4 instead of guessing — and what it found.** A read-only script now "types" every real
+word from `training_data.csv` through the real detector on the wrong layout (should be caught) and on
+the right one (false alarms). Baseline: Hebrew typed on English is caught for only **5.6%** of words and
+**0%** of sentences by their third word; English typed on Hebrew, 53.4% / 83%. The measured gap now
+has numbers.
+
+It also found **real bugs in the original seed rules, live under Phase 2**: Hebrew pairs חכ/כח (מחכה,
+שכחת), סט/טס (היסטוריה, אינסטגרם, הסטארטאפ, טס), and English `dg` (edge, judge, bridge) occur in ordinary
+words — typing היסטוריה or "judge" correctly could switch the keyboard at the word end. Removed, plus
+שז (שזיף). Hebrew false-alarm words: 1.1% -> 0.5%; what remains is OCR noise in the data (words glued
+without spaces, `ישלךשאלה`) or abbreviations the measuring script split at the quote mark — not real
+typing. The user's own `זש` stays: no real word found with it. 1 new test with the real words. 197 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
@@ -2990,7 +3010,8 @@ yet. A genuine safety net, not a replacement for the existing tiers.
 - Where this sits relative to the existing 3-tier architecture and the content-aware correction
   layer — likely a 4th, independent tier that can fire regardless of what the other three decided.
 
-**Status:** written down only. Not scheduled, not designed, not started.
+**Status:** built — Tier 4. Phase 1 (log-only) from 2026-09-25, Phase 2 (real switching) from
+2026-10-14. See the dated entries above.
 
 ---
 
@@ -3019,6 +3040,34 @@ depending on another app's internal UI structure versus just accepting the "alwa
 cost for this specific category of app.
 
 **Status:** written down only. Not designed, not started.
+
+**2026-10-15 — Stronger detection for Hebrew typed on the English layout**
+
+Tier 4 catches English typed on the Hebrew layout far better than the reverse. Hebrew has a hard
+spelling rule the detector can check (final letters only at the end of a word, and now the mirror rule
+for מ/נ/צ/כ at the end); English has only a handful (doubled j/q/v, q without u, ~35 letter pairs). So a
+Hebrew word typed on the English layout usually comes out as legal-looking English and goes unflagged
+(`rutv`, `akunl`, `cshev`). Needs more English rules that are true facts about English spelling, each
+checked against real words before it goes in — never a dictionary.
+
+**Status:** started 2026-10-15 — measuring first (see the entry for that day).
+
+**2026-10-15 — Retrain the Tier 3 classifier on more data**
+
+The content classifier was trained on 228 labeled examples. The decision log now holds thousands of
+real reads, and `review_decisions.py` exists for exactly this. More (reviewed) examples would make the
+confidence scores more trustworthy, especially for short and mixed-language text.
+
+**Status:** written down only.
+
+**2026-10-15 — A clean measure of manual corrections**
+
+Recorded manual corrections per day haven't dropped since the 2026-09-19 fix (22.8 -> 21.5 -> 23.8),
+but the log still counts some false detections, and deliberate test switches, as real corrections.
+Needs a way to tell real corrections apart (e.g. an override right after a CKILS switch vs. one with no
+CKILS switch nearby) before the number means anything.
+
+**Status:** written down only.
 
 ---
 

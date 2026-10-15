@@ -60,8 +60,15 @@ HEBREW_LETTERS = "אבגדהוזחטיכלמנסעפצקרשתךםןףץ"
 # vanishingly rare-to-nonexistent in real Hebrew, unlike the final-form rule
 # above these ARE a curated guess and are expected to need correction from
 # real Phase 1 data, not treated as authoritative.
+# Real finding, 2026-10-15: measured against every real Hebrew word in
+# training_data.csv, most of the original seed pairs turned out to be in
+# ordinary words — חכ/כח (מחכה, מחכים, שכחת, תשכח), סט/טס (היסטוריה,
+# אינסטגרם, אסטרואידים, הסטארטאפ, and טס itself), and שז (שזיף, משזר; none in
+# the data, but common words). With Phase 2 live, typing היסטוריה correctly
+# could switch the keyboard to English at the end of the word. Removed; only
+# the user's own example is left, with no real word found containing it.
 HEBREW_SEED_IMPOSSIBLE_BIGRAMS = {
-    "זש", "שז", "טס", "סט", "חכ", "כח",  # the user's own "זש" example, plus close analogues
+    "זש",  # the user's own example
 }
 
 # ============================================================================
@@ -96,8 +103,11 @@ ENGLISH_Q_NOT_FOLLOWED_BY_U_ALLOWED = {"qat", "qi", "qoph", "qadi", "qanun", "ir
 # ordinary English (convenient, environment, invent, convene, canvas, unveil)
 # and must NEVER be added. "zv" is genuinely rare-to-absent from ordinary
 # vocabulary, so added; "nv" deliberately left out.
+# Real finding, 2026-10-15: "dg" was in the original seed list but is in
+# common words — edge, judge, bridge, ridge, badge. Typing "judge" correctly
+# could switch the keyboard to Hebrew. Removed.
 ENGLISH_SEED_IMPOSSIBLE_BIGRAMS = {
-    "bk", "dg", "fq", "gq", "jq", "kq", "pq", "qb", "qc", "qd", "qf", "qg",
+    "bk", "fq", "gq", "jq", "kq", "pq", "qb", "qc", "qd", "qf", "qg",
     "qh", "qj", "qk", "ql", "qm", "qn", "qp", "qr", "qs", "qt", "qv", "qw",
     "qx", "qy", "qz", "vq", "wq", "xq", "zq",
     "vc", "cg", "hv", "pv", "zv",

@@ -1342,6 +1342,16 @@ class GibberishCbawRuleTests(unittest.TestCase):
         confirm it catches a different final form (ך) the same way."""
         self.assertIsNotNone(gibberish_detector.looks_impossible("ךל", "hebrew"))
 
+    def test_real_words_with_removed_seed_pairs_are_never_flagged(self):
+        """Real finding, 2026-10-15, measured against the training data: the
+        original seed pairs חכ/כח, סט/טס, שז and dg occur in ordinary words.
+        Exact words from the data (plus common ones for שז and dg)."""
+        for word in ("מחכה", "מחכים", "שכחת", "תשכח", "היסטוריה", "אינסטגרם",
+                     "אסטרואידים", "הסטארטאפ", "טס", "שזיף"):
+            self.assertIsNone(gibberish_detector.looks_impossible(word, "hebrew"), word)
+        for word in ("edge", "judge", "bridge", "ridge", "badge"):
+            self.assertIsNone(gibberish_detector.looks_impossible(word, "english"), word)
+
     def test_regular_form_can_never_end_a_hebrew_word_except_pe(self):
         """The mirror of the final-form rule (2026-10-14): מ נ צ כ never end
         a word. פ is allowed — loanwords like טיפ and אפ end in it."""
