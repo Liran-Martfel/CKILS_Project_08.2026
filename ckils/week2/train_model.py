@@ -10,14 +10,18 @@ captured data first (see review_decisions.py) — blindly retraining on
 whatever was captured would just teach the model to repeat its own mistakes.
 """
 import csv
+import sys
+
 import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 
-DATA_FILE = "training_data.csv"
-MODEL_FILE = "language_model.joblib"
+# Overridable as `python train_model.py <data.csv> <model.joblib>`, so a new
+# model can be trained next to the one CKILS runs without touching it.
+DATA_FILE = sys.argv[1] if len(sys.argv) > 1 else "training_data.csv"
+MODEL_FILE = sys.argv[2] if len(sys.argv) > 2 else "language_model.joblib"
 
 
 def load_data():

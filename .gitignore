@@ -32,6 +32,6 @@ ckils/week2/CKILS_release/
 # (collect_data.py's own output) - the trained model (language_model.joblib)
 # is the compiled artifact that ships and is meant to be shared; this raw
 # corpus stays local-only.
-ckils/week2/training_data.csv
+ckils/week2/training_data*.csv
 
 ckils/week2/ckils_skips.db

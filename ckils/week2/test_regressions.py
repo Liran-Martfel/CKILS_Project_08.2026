@@ -2382,6 +2382,46 @@ class SameSiteTitleChangeTests(unittest.TestCase):
         self.assertEqual(posted, [rule_engine.English_HKL])
 
 
+class RetrainedModelSwapTests(unittest.TestCase):
+    """2026-10-15: Tier 3 now runs a model retrained with 700 hand-labeled
+    real texts and a third answer, "noise". The user's condition for the
+    swap: the old model is kept and he can switch back any time."""
+
+    def test_both_models_exist_and_only_the_new_one_knows_noise(self):
+        """The old file is still there, untouched in shape; the new one adds noise."""
+        import predict_language as pl
+        import joblib
+        old = joblib.load(pl.OLD_MODEL_FILE)["clf"].classes_
+        new = joblib.load(pl.MODEL_FILE)["clf"].classes_
+        self.assertEqual(sorted(old), ["english", "hebrew"])
+        self.assertEqual(sorted(new), ["english", "hebrew", "noise"])
+
+    def test_rollback_file_switches_back_to_the_old_model_live(self):
+        """use_old_language_model.on next to the exe -> the old model, read
+        on every call so no restart is needed."""
+        import predict_language as pl
+        with patch.object(pl.os.path, "exists", return_value=True):
+            self.assertEqual(pl.active_model_file(), pl.OLD_MODEL_FILE)
+        with patch.object(pl.os.path, "exists", return_value=False):
+            self.assertEqual(pl.active_model_file(), pl.MODEL_FILE)
+
+    def test_not_real_text_is_never_a_language_decision(self):
+        """A "noise" answer keeps the current layout and is logged as noise,
+        however confident it is."""
+        control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="")
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=12345), \
+             patch.object(rule_engine.auto, "GetFocusedControl", return_value=control), \
+             patch.object(rule_engine, "read_region", return_value="File Edit Selection View"), \
+             patch.object(rule_engine, "_rejected_as_ui_noise", return_value=None), \
+             patch.object(rule_engine, "predict_language",
+                          return_value=("noise", {"noise": 0.97, "english": 0.02, "hebrew": 0.01})), \
+             patch.object(rule_engine, "log_decision"), \
+             patch.object(rule_engine.skip_logger, "log_skip") as log_skip:
+            result = rule_engine.decide_with_content(12345, rule_engine.English_HKL, "Page", "x.exe", 7)
+        self.assertEqual(result, (rule_engine.English_HKL, None))
+        self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_REJECTED_NOISE)
+
+
 class Tier4ReviewFixTests(unittest.TestCase):
     """The remaining /code-review findings on commit 674fdfa, 2026-10-14."""
 

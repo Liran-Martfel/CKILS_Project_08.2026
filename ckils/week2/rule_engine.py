@@ -1095,6 +1095,14 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     if DEBUG:
         print(f"  [content] read {text[:60]!r} -> {label} ({confidence:.2f} confidence)")
 
+    # 2026-10-15: the retrained model can answer "noise" — not real text (a
+    # menu, a label, garbled OCR). That is never a language decision.
+    if label not in LANGUAGE_TO_HKL:
+        log_decision(exe_name, title, thread_id, source, text, label, confidence, False)
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_REJECTED_NOISE,
+                             f"model: not real text ({confidence:.2f}): {text}")
+        return fallback_hkl, None
+
     applied = confidence >= CONTENT_CONFIDENCE_THRESHOLD
     # Logged regardless of outcome — this is the raw material for the monthly
     # review pass (review_decisions.py), not something retrained on directly.

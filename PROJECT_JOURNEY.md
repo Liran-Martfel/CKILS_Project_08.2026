@@ -2977,6 +2977,24 @@ are typed in capitals and skipped). **Then, the user's call: single hits switch 
 English sentences switching wrongly. His own sentence now switches at word 1 (`tuhh`, ends in hh).
 Marks-only stays available behind the same constant and is still tested. 201 pass.
 
+**Tier 3 retrained — and swapped in with a live rollback switch.** The user hand-labeled 700 real texts
+from the decision log on a local labeling page (built from the log read-only, with each text's page
+title and, where one existed, the cropped screenshot CKILS read; nothing uploaded): 336 English, 258
+Hebrew, 106 "not real text". The first finding was uncomfortable and important: on real screen text
+the model is ~92% accurate, not the 98-99% the clean training set suggested, and it acted on more than
+half of the junk (menus, labels, garbled OCR) — the main source of wrong switches. Three options were
+compared, all on held-out real texts (5 rounds): the current model (33 wrong switches, acted on junk 65
+times), a plain retrain (30, junk 74 — worse on junk), and a retrain with a third answer, "noise" (23,
+junk 53). The 3-answer model also held at 99.1% / 0 wrong on the original 228. Its one cost: it acts on
+81% of real text instead of 89% — more "not sure, do nothing", fewer wrong switches.
+
+Swapped in on the user's condition that the old model is kept and he can return to it any time:
+`language_model_v2.joblib` (new) and the untouched `language_model.joblib` (old) are both bundled; the
+file `use_old_language_model.on` next to CKILS.exe selects the old one, checked on every read, so it
+works live. A "noise" answer is never a language decision — logged as `rejected_noise`. `train_model.py`
+now takes optional data/model paths so a new model never overwrites the running one; the new training
+file (real screen text) is git-ignored like the original. 3 new tests. 204 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
