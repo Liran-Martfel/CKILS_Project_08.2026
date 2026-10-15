@@ -200,6 +200,9 @@ class _PerThreadState:
         # just past letter_model.MAX_LETTERS. Still only the current word,
         # memory only, cleared at its end.
         self.word_keys = []
+        # A word flag carried across an apostrophe inside an English word
+        # ("don't"): the buffer splits the word there, the flag must not.
+        self.carried_flag = None
 
     def reset_word(self):
         """The word ended normally: clears everything about THIS word (the
@@ -225,6 +228,7 @@ class _PerThreadState:
         self.reset_word()
         self.pending_correction = None
         self.recent_word_flags.clear()
+        self.carried_flag = None
 
 
 def _is_password_field_focused():
@@ -764,19 +768,33 @@ def _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_
             if ENGLISH_WORD_END_SWITCHES_ALONE:
                 _fire_autocorrect(thread_id, exe_name, title, current_hkl, HEBREW_HKL_VALUE, en_result["length"])
                 fired = True
-        lm_result = None if fired or state.word_flag is not None else letter_model_check(state, current_hkl)
+        lm_result = None if fired else letter_model_check(state, current_hkl)
         if lm_result is not None:
             target = HEBREW_HKL_VALUE if lm_result["other_language"] == "hebrew" else ENGLISH_HKL_VALUE
+            # Two independent signals agreeing switch at once (found live
+            # 2026-10-15: "ok," typed on Hebrew is םלת — the rules flagged the
+            # final ם mid-word, the model preferred "ok", yet nothing switched
+            # until the 5th word, because a short flagged word only counted
+            # toward the second-word rule and skipped the model).
+            agrees = state.word_flag == target
             skip_logger.log_skip(
                 exe_name, title, thread_id, skip_logger.REASON_GIBBERISH_SUSPECTED,
                 f"{lm_result['current_language']}->{lm_result['other_language']} len={lm_result['length']} "
-                f"letter-model{'' if lm_result['switch'] else ' mark'}")
-            state.word_flag = target
-            if lm_result["switch"]:
+                f"letter-model{' + rule' if agrees else '' if lm_result['switch'] else ' mark'}")
+            if state.word_flag is None:
+                state.word_flag = target
+            if lm_result["switch"] or agrees:
                 _fire_autocorrect(thread_id, exe_name, title, current_hkl, target, lm_result["length"])
                 fired = True
 
-    flag = state.word_flag
+    flag = state.word_flag or state.carried_flag
+    state.carried_flag = None
+    if flag is not None and continues_word(vk_code, flag, shift_pressed):
+        # "don't" on the Hebrew layout: the apostrophe splits the buffer's word,
+        # but for English it's inside the word. Carry this part's flag to the
+        # word's real end instead of losing it (found live, 2026-10-15).
+        state.carried_flag = flag
+        return
     if flag is not None and ends_word(vk_code, flag, shift_pressed):
         if not fired and flag in state.recent_word_flags:
             _fire_autocorrect(thread_id, exe_name, title, current_hkl, flag, state.letter_count)

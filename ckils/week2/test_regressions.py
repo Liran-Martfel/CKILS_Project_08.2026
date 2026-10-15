@@ -2147,8 +2147,11 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_a_four_letter_word_never_corrects(self):
-        """'hell' is detected at 4 keys — still log-only, never a switch."""
-        self._run(self.HELLO[:4] + [0x20])
+        """'hell' is detected at 4 keys — on its own, still log-only, never a
+        switch. (With the letter model on, rule + model agree and it does
+        switch — see LetterModelTests.)"""
+        with patch.object(keyboard_hook, "_letter_model_disabled", return_value=True):
+            self._run(self.HELLO[:4] + [0x20])
         self.assertEqual(self.calls, [])
 
     def test_focus_moved_at_the_word_end_never_corrects(self):
@@ -2232,7 +2235,7 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
     def test_marks_only_mode_waits_for_a_second_word(self):
         """With ENGLISH_WORD_END_SWITCHES_ALONE off, one hit only marks; two
         marked words within three (t,jhk and nkt) switch at nkt."""
-        with patch.object(keyboard_hook, "ENGLISH_WORD_END_SWITCHES_ALONE", False):
+        with patch.object(keyboard_hook, "ENGLISH_WORD_END_SWITCHES_ALONE", False),              patch.object(keyboard_hook, "_letter_model_disabled", return_value=True):
             self._run(self._keys("nkt "), layout=rule_engine.English_HKL)
             self.assertEqual(self.calls, [])
             self._run(self._keys("tuhh tz to tbh t,jhk krauo nkt "), layout=rule_engine.English_HKL)
@@ -2736,6 +2739,26 @@ class LetterModelTests(unittest.TestCase):
         self.assertEqual(keyboard_hook._english_word("b.t.w."), "btw")
         self.assertTrue(keyboard_hook._comma_between_letters(keys))
         self.assertFalse(keyboard_hook._comma_between_letters([(vk, 0) for vk in self._keys("tv,")]))
+
+    def test_rule_and_model_agreeing_switch_at_once(self):
+        """Found live, 2026-10-15: "ok," on the Hebrew layout is םלת. The
+        rules flag the final ם mid-word and the model prefers "ok" — two
+        signals, so it switches at the first word, not the fifth."""
+        self._run([0x4F, 0x4B, 0xBC, 0x20])
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
+
+    def test_an_apostrophe_keeps_the_word_flag(self):
+        """"don't" on the Hebrew layout: the apostrophe splits the buffer's
+        word, but the flag on "don" (final ם mid-word) must reach the word's
+        end and count for the second-word rule. With the model off, "don't"
+        then "good" (flagged) switches at "good"."""
+        dont = [0x44, 0x4F, 0x4E, 0xDE, 0x54, 0x20]
+        good = [0x47, 0x4F, 0x4F, 0x44, 0x20]
+        with patch.object(keyboard_hook, "_letter_model_disabled", return_value=True):
+            self._run(dont + good)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
 
     def test_keeps_only_the_current_word(self):
         """Privacy: the whole-word keys are cleared at every word end."""

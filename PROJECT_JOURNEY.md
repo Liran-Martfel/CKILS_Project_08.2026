@@ -3066,6 +3066,18 @@ without one (0.94% vs 0.95%), after one more fix: a 2-letter word before a comma
 to judge — the comma isn't ת there. 96% of Hebrew words with a mid-word ת are caught. 6 new tests. 223
 pass.
 
+**Rule and model agreeing switch at once; the apostrophe keeps a word's flag.** Found live the same
+evening: "ok, so we don't need anything" typed on the Hebrew layout switched only at the 5th word. The
+log showed why. "ok," (םלת) was flagged at once — a final ם mid-word is impossible Hebrew — but a short
+flagged word only counted toward the second-word rule, and skipped the letter model, which on its own
+preferred "ok" strongly enough (1.30) to switch. Now the model runs on flagged words too, and a rule
+flag plus a model mark in the same direction — two independent signals — switch at once. Second,
+"don't": the apostrophe splits the buffer's word (it's no letter in either layout), and the flag on
+"don" was dropped there instead of reaching the word's end; it's now carried across. The sentence now
+switches at word 1. Re-measured: English typed on Hebrew caught by word 3 94.6% -> 95.7%; English
+unchanged; one more Hebrew test word switched wrongly — "ףויש", garbled OCR that starts with a final
+ף, not something anyone types. 2 new tests; 2 older tests now isolate their own rule. 225 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
