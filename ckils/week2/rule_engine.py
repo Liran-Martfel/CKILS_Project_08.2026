@@ -1283,6 +1283,43 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, h
     return True
 
 
+_TITLE_COUNTER_PREFIX = re.compile(r"^\(\d+\)\s*")
+
+
+def _site_of(title):
+    """(site, app) from a window title shaped "page - site - app", e.g.
+    ("Google Gemini", "Google Chrome") for both "Google Gemini - Google
+    Chrome" and "My chat - Google Gemini - Google Chrome". None when the
+    title doesn't have that shape — the caller then changes nothing.
+    Direction marks and a leading unread counter ("(3) ") are ignored."""
+    clean = _TITLE_COUNTER_PREFIX.sub("", DIRECTION_MARKS_PATTERN.sub("", title or "").strip())
+    parts = [p.strip() for p in clean.split(" - ")]
+    if len(parts) < 2 or not parts[-2] or not parts[-1]:
+        return None
+    return parts[-2], parts[-1]
+
+
+def _same_site_hkl(thread_id, old_title, new_title):
+    """Real finding, 2026-10-15: Gemini renamed a Hebrew chat ("Google
+    Gemini" -> "חוקי סיום מילה בעברית - Google Gemini") and the layout
+    flipped to English — no focus change, nothing typed. The new title had
+    no page history, so the fast path fell back to Chrome's app-wide
+    default, which for a browser hosting every kind of site is the weakest
+    guess there is. When the SAME tab's title changes but the site stays the
+    same, the language you're on right now is better evidence: returns it,
+    or None to leave today's behavior. Deliberately conservative — titles
+    whose site can't be read the same way on both sides change nothing.
+    """
+    old_site = _site_of(old_title)
+    if old_site is None or old_site != _site_of(new_title):
+        return None
+    try:
+        actual = win32api.GetKeyboardLayout(thread_id)
+    except Exception:
+        return None
+    return actual if actual in (English_HKL, Hebrew_HKL) else None
+
+
 def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp):
     """The Windows event callback (registered below via SetWinEventHook)
     that fires on every real foreground-window change and window-title
@@ -1302,6 +1339,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             return
         if hwnd != win32gui.GetForegroundWindow():
             return
+    same_thread_as_before = previous_thread == thread_id
     if previous_thread is not None and previous_thread != thread_id:
         if previous_thread in overridden:
             overridden.discard(previous_thread)
@@ -1338,7 +1376,10 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     # A real title change on a shared thread (e.g. switching Chrome tabs) means
     # this is genuinely different content, even though thread_id didn't change —
     # see last_title_by_thread above for why this matters.
+    same_site_hkl = None
     if last_title_by_thread.get(thread_id) != title:
+        if same_thread_as_before and last_title_by_thread.get(thread_id) is not None:
+            same_site_hkl = _same_site_hkl(thread_id, last_title_by_thread[thread_id], title)
         content_decision.pop(thread_id, None)
         google_docs_title_already_applied.discard(thread_id)
         _reset_visit_state(thread_id)
@@ -1356,7 +1397,14 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     # trust, automatically, for any app with that shape.
     page_hkl = LANGUAGE_NAME_TO_HKL.get(_trust(_history_of(page_learned_defaults.get(_page_key(exe_name, title)))))
     app_hkl = LANGUAGE_NAME_TO_HKL.get(_trust(_history_of(learned_defaults.get(exe_name))))
-    default_hkl = page_hkl if page_hkl is not None else app_hkl
+    # A trusted history for this exact page still wins; only when there's
+    # none does "same site, same tab" beat the app-wide guess.
+    if page_hkl is not None:
+        default_hkl = page_hkl
+    elif same_site_hkl is not None:
+        default_hkl = same_site_hkl
+    else:
+        default_hkl = app_hkl
     target_hkl = content_decision.get(thread_id, default_hkl)
 
     if target_hkl is not None:
@@ -1378,6 +1426,8 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
                     fast_source = "sticky_content_decision"
                 elif page_hkl is not None:
                     fast_source = "page_learned_default"
+                elif same_site_hkl is not None:
+                    fast_source = "same_site_title_change"
                 elif app_hkl is not None:
                     fast_source = "app_learned_default"
                 else:

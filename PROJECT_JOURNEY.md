@@ -2916,6 +2916,16 @@ content classifier is the ML part — character 1-3-gram TF-IDF into logistic re
 
 16 new tests. 191 pass.
 
+**The Gemini rename, fixed — conservatively, at the user's request ("smartly, don't enter anything not
+correct").** When the SAME window's title changes and both titles name the same site the same way
+(`page - site - app`, e.g. both end "Google Gemini - Google Chrome"; direction marks and a leading
+"(3) " counter ignored), and the new page has no trusted history of its own, the fast path keeps the
+language you're on now instead of Chrome's app-wide default — for a browser that default is the
+weakest guess there is. Anything else changes nothing: a trusted page history still wins, a different
+site still gets today's behavior, a title that doesn't parse cleanly is ignored, and arriving from
+another window doesn't count as a rename. Tier 3 still checks the content afterward. Logged as fast-path
+source `same_site_title_change`. 5 new tests (incl. the real Gemini titles). 196 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

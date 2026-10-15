@@ -2240,6 +2240,98 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
         self.assertEqual((exe, title), ("chrome.exe", "Page"))
 
 
+class SameSiteTitleChangeTests(unittest.TestCase):
+    """Real finding, 2026-10-15: Gemini renamed a Hebrew chat and the layout
+    flipped to English with no focus change and nothing typed — the new
+    title had no page history, so Chrome's app-wide default (English) won.
+    Same tab + same site now keeps the current language instead."""
+
+    THREAD, HWND = 8256, 4444
+    GEMINI_NEW = "‫Google Gemini - Google Chrome‬"
+    GEMINI_NAMED = "‫חוקי סיום מילה בעברית - Google Gemini - Google Chrome‬"
+
+    def setUp(self):
+        """Clean per-thread state; Chrome's app-wide default trusted English."""
+        self._prev = rule_engine.previous_thread
+        for d in (rule_engine.last_title_by_thread, rule_engine.content_decision, rule_engine.last_set):
+            d.pop(self.THREAD, None)
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.content_check_in_progress.clear()
+        self._patches = [
+            patch.dict(rule_engine.learned_defaults, {"chrome.exe": {"history": ["english"] * 5}}),
+            patch.dict(rule_engine.page_learned_defaults, {}, clear=True),
+        ]
+        for p in self._patches:
+            p.start()
+
+    def tearDown(self):
+        """Restores module state."""
+        for p in self._patches:
+            p.stop()
+        rule_engine.previous_thread = self._prev
+        for d in (rule_engine.last_title_by_thread, rule_engine.content_decision, rule_engine.last_set):
+            d.pop(self.THREAD, None)
+        rule_engine.content_check_in_progress.clear()
+
+    def _title_event(self, title, layout):
+        """One real title-change event for the Chrome window; returns the
+        layouts the fast path posted."""
+        proc = type("P", (), {"name": lambda self: "chrome.exe"})()
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
+             patch.object(rule_engine.win32gui, "GetWindowText", return_value=title), \
+             patch.object(rule_engine.win32gui, "GetWindowRect", return_value=(0, 0, 1, 1)), \
+             patch.object(rule_engine.win32process, "GetWindowThreadProcessId", return_value=(self.THREAD, 1)), \
+             patch.object(rule_engine.psutil, "Process", return_value=proc), \
+             patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=layout), \
+             patch.object(rule_engine.win32api, "PostMessage") as post, \
+             patch.object(rule_engine.decision_logger, "log_auto_change"), \
+             patch.object(rule_engine, "_detect_and_record_manual_override", return_value=False), \
+             patch.object(rule_engine.threading, "Thread"):
+            rule_engine.on_focus_change(None, rule_engine.win32con.EVENT_OBJECT_NAMECHANGE, self.HWND,
+                                        rule_engine.win32.lib.win32con.OBJID_WINDOW,
+                                        rule_engine.win32.lib.win32con.CHILDID_SELF, self.THREAD, 0)
+        return [c.args[3] for c in post.call_args_list]
+
+    def test_site_is_read_from_the_title(self):
+        """Same site for a new chat and a named chat; counters and direction
+        marks ignored; titles without the shape give None."""
+        self.assertEqual(rule_engine._site_of(self.GEMINI_NEW), ("Google Gemini", "Google Chrome"))
+        self.assertEqual(rule_engine._site_of(self.GEMINI_NAMED), ("Google Gemini", "Google Chrome"))
+        self.assertEqual(rule_engine._site_of("(3) WhatsApp Business - Google Chrome"),
+                         rule_engine._site_of("(4) WhatsApp Business - Google Chrome"))
+        self.assertIsNone(rule_engine._site_of("Untitled"))
+
+    def test_gemini_renaming_a_hebrew_chat_keeps_hebrew(self):
+        """The real sequence: on the new chat in Hebrew, Gemini renames it."""
+        rule_engine.previous_thread = self.THREAD
+        rule_engine.last_title_by_thread[self.THREAD] = self.GEMINI_NEW
+        posted = self._title_event(self.GEMINI_NAMED, rule_engine.Hebrew_HKL)
+        self.assertEqual(posted, [rule_engine.Hebrew_HKL])
+
+    def test_switching_to_a_different_site_still_uses_the_app_default(self):
+        """A tab with a different site is not a rename — today's behavior."""
+        rule_engine.previous_thread = self.THREAD
+        rule_engine.last_title_by_thread[self.THREAD] = self.GEMINI_NAMED
+        posted = self._title_event("Some video - YouTube - Google Chrome", rule_engine.Hebrew_HKL)
+        self.assertEqual(posted, [rule_engine.English_HKL])
+
+    def test_a_trusted_page_history_still_wins(self):
+        """The rule only fills the gap when the page has no trusted history."""
+        rule_engine.previous_thread = self.THREAD
+        rule_engine.last_title_by_thread[self.THREAD] = self.GEMINI_NEW
+        key = rule_engine._page_key("chrome.exe", self.GEMINI_NAMED)
+        rule_engine.page_learned_defaults[key] = {"history": ["english"] * 5}
+        posted = self._title_event(self.GEMINI_NAMED, rule_engine.Hebrew_HKL)
+        self.assertEqual(posted, [rule_engine.English_HKL])
+
+    def test_arriving_from_another_window_is_not_a_rename(self):
+        """Only a title change inside the same window counts."""
+        rule_engine.previous_thread = 1111
+        rule_engine.last_title_by_thread[self.THREAD] = self.GEMINI_NEW
+        posted = self._title_event(self.GEMINI_NAMED, rule_engine.Hebrew_HKL)
+        self.assertEqual(posted, [rule_engine.English_HKL])
+
+
 class Tier4ReviewFixTests(unittest.TestCase):
     """The remaining /code-review findings on commit 674fdfa, 2026-10-14."""
 
