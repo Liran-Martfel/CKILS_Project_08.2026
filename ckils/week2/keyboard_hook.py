@@ -167,6 +167,11 @@ class _PerThreadState:
         self.chars = gibberish_detector.IncrementalWordBuffer()
         self.raw_keys = []
         self.pending_correction = None  # (target_hkl, word_length) once a word qualifies; fired at its end
+        # The word-end rule needs the word's LAST letter and full length, which
+        # the 5-letter buffer stops tracking. Kept as one (vk, scan) pair and a
+        # count — still only the current word, still memory only.
+        self.last_letter_key = None
+        self.letter_count = 0
 
     def reset(self):
         """Clears both the decoded-character buffer and the raw (vk, scan)
@@ -178,6 +183,8 @@ class _PerThreadState:
         self.chars.reset()
         self.raw_keys = []
         self.pending_correction = None
+        self.last_letter_key = None
+        self.letter_count = 0
 
 
 def _is_password_field_focused():
@@ -263,8 +270,17 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         # change IncrementalWordBuffer's own interface.
         if not state.chars.text():
             state.raw_keys = []
+            state.last_letter_key = None
+            state.letter_count = 0
+        else:
+            # Capped, not ended: the word goes on past MAX_LENGTH. Keep its
+            # last letter and length current for the word-end rule.
+            state.last_letter_key = (vk_code, scan_code)
+            state.letter_count += 1
         return None
     state.raw_keys.append((vk_code, scan_code))
+    state.last_letter_key = (vk_code, scan_code)
+    state.letter_count += 1
 
     current_language = "hebrew" if current_hkl == HEBREW_HKL_VALUE else "english"
     other_language = "english" if current_language == "hebrew" else "hebrew"
@@ -362,6 +378,34 @@ def ends_word(vk_code, target_hkl, shift_pressed=False):
     return False
 
 
+def word_end_check(state, current_hkl):
+    """The user's word-end rule (2026-10-14): called when a word typed on
+    the Hebrew layout ends with a space or Enter. If its last letter is a
+    regular מ/נ/צ/כ — impossible at the end of a Hebrew word — and the same
+    keys read as plausible English, returns a process_key_event-shaped
+    result; else None. Catches short English words typed on the Hebrew
+    layout ("can" -> בשמ, "man", "pin") that the 5-letter trigger can't.
+
+    Only space/Enter, on purpose: in Hebrew, an apostrophe or a quote mark
+    ends abbreviations and acronyms (מס', עמ', מנכ"ל) right after a regular
+    letter, so treating those as word ends would flag real Hebrew.
+    """
+    if current_hkl != HEBREW_HKL_VALUE or state.letter_count < 2 or state.last_letter_key is None:
+        return None
+    last_vk, last_scan = state.last_letter_key
+    last_letter = layout_remap.remap_key_to_other_layout(last_vk, last_scan, HEBREW_HKL_VALUE)
+    if not last_letter or not gibberish_detector.hebrew_word_cannot_end_with(last_letter):
+        return None
+    keys = list(state.raw_keys)
+    if state.letter_count > len(keys):
+        keys.append(state.last_letter_key)  # the buffer capped before the last letter
+    english = "".join(layout_remap.remap_key_to_other_layout(vk, scan, ENGLISH_HKL_VALUE) or ""
+                      for vk, scan in keys)
+    if gibberish_detector.looks_impossible(english, "english") is not None:
+        return None  # not plausible English either — no evidence of a wrong layout
+    return {"current_language": "hebrew", "other_language": "english", "length": state.letter_count}
+
+
 def _autocorrect_enabled():
     """The user's on/off switch for Phase 2: true only while
     _AUTOCORRECT_FLAG_FILENAME exists next to CKILS. Checked live, at the
@@ -428,11 +472,25 @@ def _consumer_loop():
             # now, before this key's own processing resets the buffer (and
             # with it the pending flag). Ctrl/Alt combos are shortcuts, never
             # a word end; process_key_event below cancels the pending for those.
+            fired = False
             if state.pending_correction is not None and not (ctrl_held or alt_held):
                 target_hkl, word_length = state.pending_correction
                 if ends_word(vk_code, target_hkl, shift_pressed):
                     state.pending_correction = None
+                    fired = True
                     _fire_autocorrect(thread_id, exe_name, title, current_hkl, target_hkl, word_length)
+
+            # The word-end rule: a whole word just ended, so a hit can switch
+            # right away, whatever its length — unlike the 5-letter trigger,
+            # this judges the complete word, not a guess about a partial one.
+            if not fired and vk_code in (VK_SPACE, VK_RETURN) and not (ctrl_held or alt_held):
+                end_result = word_end_check(state, current_hkl)
+                if end_result is not None:
+                    skip_logger.log_skip(
+                        exe_name, title, thread_id, skip_logger.REASON_GIBBERISH_SUSPECTED,
+                        f"hebrew->english len={end_result['length']} word-end")
+                    _fire_autocorrect(thread_id, exe_name, title, current_hkl, ENGLISH_HKL_VALUE,
+                                      end_result["length"])
 
             result = process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_held,
                                        shift_pressed, caps_lock_on)

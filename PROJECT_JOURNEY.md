@@ -2869,6 +2869,31 @@ entirely. 2 new tests, incl. one confirming the fall-through reads the typed Eng
 
 ---
 
+## 2026-10-15 — Two real-use findings; a new word-end rule
+
+**Gemini renamed the chat, and the layout flipped to English** (10:41:07) — no focus change, nothing
+typed. The new title had no page history, so the fast path fell back to Chrome's app-wide default
+(English). Then three manual corrections back to Hebrew (10:41, 10:43, 10:47): Chrome's tabs here share
+one input thread, so each return from an English tab carried English in. After the third, the page's
+own history was trusted and CKILS took over (10:48:18). Proposed, not built: on a same-tab title change
+with no trusted page history, keep the current language instead of the browser-wide default.
+
+**A pasted "rule specification" was reviewed and mostly rejected.** Most of its rules false-positive on
+real words (`האהבה` breaks its 3-gutturals rule, `queue` its 4-vowels rule, `hmm`/`brb`/`TV` its
+vowel rule) and its cross-layout examples were wrong mappings (`the` on the Hebrew layout is `איק`, not
+`אהע`). One idea was right and the user asked for it:
+
+**Word-end rule: a Hebrew word never ends in a regular מ/נ/צ/כ.** Checked when a word typed on the Hebrew
+layout ends with space or Enter; if the last letter is one of those and the same keys read as plausible
+English, it switches right away, whatever the word's length — it judges a complete word, unlike the
+5-letter trigger's partial one. Catches short English words the 5-letter trigger never could: `can` ->
+`בשמ`, `man`, `garden` -> `עשרגקמ` (the giveaway is letter 6, so the hook now keeps the word's last letter
+and full length past the 5-letter buffer — still one key and a count, memory only). Two deliberate
+exclusions: **פ** (loanwords end in it — טיפ, אפ, סקייפ), and **apostrophe/quote word ends** (מס', מנכ"ל
+put a regular letter right before them). 7 new tests through the real detector. 183 pass.
+
+---
+
 ## Future ideas (not yet implemented)
 
 Ideas worth keeping for later, written down as they come up so they don't get lost — not scheduled,

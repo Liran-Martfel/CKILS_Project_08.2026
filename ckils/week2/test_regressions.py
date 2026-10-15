@@ -1342,6 +1342,14 @@ class GibberishCbawRuleTests(unittest.TestCase):
         confirm it catches a different final form (ך) the same way."""
         self.assertIsNotNone(gibberish_detector.looks_impossible("ךל", "hebrew"))
 
+    def test_regular_form_can_never_end_a_hebrew_word_except_pe(self):
+        """The mirror of the final-form rule (2026-10-14): מ נ צ כ never end
+        a word. פ is allowed — loanwords like טיפ and אפ end in it."""
+        for letter in "מנצכ":
+            self.assertTrue(gibberish_detector.hebrew_word_cannot_end_with(letter), letter)
+        for letter in "פםןץךאל":
+            self.assertFalse(gibberish_detector.hebrew_word_cannot_end_with(letter), letter)
+
     def test_final_form_at_the_actual_end_is_fine(self):
         """A final form IS legal — at the end of a word, which is its whole purpose."""
         self.assertIsNone(gibberish_detector.looks_impossible("של", "hebrew"))  # ends in ל, not a final form
@@ -2136,6 +2144,45 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
         self._run(keys + [0x20], layout=rule_engine.English_HKL)
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.calls[0][5], rule_engine.Hebrew_HKL)
+
+    def test_word_end_rule_catches_a_short_english_word(self):
+        """The user's rule (2026-10-14): a Hebrew word never ends in a
+        regular מ/נ/צ/כ. 'can' typed on the Hebrew layout is בשמ — only 3
+        letters, under the 5-letter trigger, but caught and switched at the
+        space because the whole word is known by then."""
+        self._run([0x43, 0x41, 0x4E, 0x20])
+        self.assertEqual(self.calls, [(777, 4242, "chrome.exe", "Page",
+                                       rule_engine.Hebrew_HKL, rule_engine.English_HKL, 3)])
+
+    def test_word_end_rule_sees_past_the_five_letter_cap(self):
+        """'garden' on Hebrew is עשרגקמ — the giveaway מ is the 6th letter,
+        after the buffer stopped growing."""
+        self._run([0x47, 0x41, 0x52, 0x44, 0x45, 0x4E, 0x20])
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][6], 6)
+
+    def test_word_end_rule_leaves_real_hebrew_alone(self):
+        """שלום ends in a final ם; אפ/טיפ-style words end in a regular פ,
+        which is allowed on purpose (loanwords)."""
+        self._run([0x41, 0x4B, 0x55, 0x4F, 0x20])  # שלום
+        self._run([0x55, 0x50, 0x20])              # 'up' -> ופ
+        self.assertEqual(self.calls, [])
+
+    def test_word_end_rule_skips_abbreviations(self):
+        """מס' — the apostrophe (the W key on Hebrew) ends the abbreviation
+        right after a regular ס/מ; it must not count as a wrong-layout word."""
+        self._run([0x4E, 0x58, 0x57, 0x20])
+        self.assertEqual(self.calls, [])
+
+    def test_word_end_rule_only_applies_on_the_hebrew_layout(self):
+        """Typing 'can' on the English layout is just 'can'."""
+        self._run([0x43, 0x41, 0x4E, 0x20], layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+
+    def test_word_end_rule_ignores_a_single_letter(self):
+        """One letter isn't a word to judge."""
+        self._run([0x4E, 0x20])
+        self.assertEqual(self.calls, [])
 
     def test_callback_never_receives_typed_characters(self):
         """Privacy, structurally: every argument is an int or the window's

@@ -41,6 +41,19 @@ import re
 # impossible by definition. This single rule needs no curation and will
 # never need "fixing" — it's a hard fact about the alphabet, not a heuristic.
 HEBREW_FINAL_FORMS = "ךםןףץ"
+
+# The mirror rule, added 2026-10-14 at the user's request: a Hebrew word never
+# ENDS in the regular form of those letters — מ נ צ כ at the very end can't
+# be a real word. Only checkable once the word is over, so keyboard_hook.py
+# applies it at the space/Enter, not keystroke by keystroke. פ is left out on
+# purpose: modern Hebrew writes a final "p" sound in loanwords with a regular
+# פ (טיפ, אפ, סקייפ, שופ), so flagging it would hit real words.
+HEBREW_NON_FINAL_NEVER_LAST = "מנצכ"
+
+
+def hebrew_word_cannot_end_with(letter):
+    """True if a Hebrew word ending in `letter` can't be a real word."""
+    return letter in HEBREW_NON_FINAL_NEVER_LAST
 HEBREW_LETTERS = "אבגדהוזחטיכלמנסעפצקרשתךםןףץ"
 
 # Seed list only (see module docstring) — a handful of bigrams that are
