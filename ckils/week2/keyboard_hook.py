@@ -51,6 +51,7 @@ import uiautomation as auto
 
 import gibberish_detector
 import layout_remap
+import letter_model
 import skip_logger
 
 user32 = ctypes.windll.user32
@@ -199,6 +200,11 @@ class _PerThreadState:
         # a space after a comma. 0 of 6,822 real English words had one.
         self.en_comma_pending = False  # the last key was a comma after a letter
         self.en_comma_inside = False   # ...and a letter followed it
+        # The letter model (letter_model.py) scores the WHOLE word, which the
+        # 5-key buffer doesn't keep: every key of the current word, capped
+        # just past letter_model.MAX_LETTERS. Still only the current word,
+        # memory only, cleared at its end.
+        self.word_keys = []
 
     def reset_word(self):
         """The word ended normally: clears everything about THIS word (the
@@ -216,6 +222,7 @@ class _PerThreadState:
         self.en_capital_seen = False
         self.en_comma_pending = False
         self.en_comma_inside = False
+        self.word_keys = []
 
     def reset(self):
         """Full reset: the word AND everything spanning words. Every path that
@@ -292,6 +299,9 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         state.reset_word()
         return None
 
+    if len(state.word_keys) <= letter_model.MAX_LETTERS:
+        state.word_keys.append((vk_code, scan_code))
+
     english = layout_remap.remap_key_to_other_layout(vk_code, scan_code, ENGLISH_HKL_VALUE)
     if english and english.isalpha():
         state.en_comma_inside = state.en_comma_inside or state.en_comma_pending
@@ -339,6 +349,7 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         # change IncrementalWordBuffer's own interface.
         if not state.chars.text():
             state.raw_keys = []
+            state.word_keys = []
             state.last_letter_key = None
             state.letter_count = 0
         else:
@@ -529,6 +540,51 @@ def english_word_end_check(state, current_hkl):
     return {"current_language": "english", "other_language": "hebrew", "length": state.en_letter_count}
 
 
+_LETTER_MODEL_OFF_FILENAME = "disable_letter_model.on"
+
+
+def _letter_model_disabled():
+    """The user's off switch for the letter model alone: while this file
+    exists next to CKILS, it neither switches nor marks — the rules work as
+    before. Checked live, only when a word actually scores high."""
+    try:
+        return skip_logger.os.path.exists(
+            skip_logger.os.path.join(skip_logger._persistent_dir(), _LETTER_MODEL_OFF_FILENAME))
+    except Exception:
+        return False
+
+
+def letter_model_check(state, current_hkl):
+    """The letter model (letter_model.py), for a word that just ended with
+    space, Enter or Tab: is the OTHER layout's reading of the same keys far
+    more typical than the one typed? Returns a process_key_event-shaped
+    result plus "switch" (True: strong enough to switch on its own; False:
+    only marks the word for the second-word rule), or None.
+
+    Punctuation after the word is dropped from both readings ("fine," must
+    not become כןמקת). Skipped for words typed with a capital and for the
+    allowed English words, like the English whole-word rules."""
+    if state.en_capital_seen or len(state.word_keys) > letter_model.MAX_LETTERS:
+        return None
+    keys = list(state.word_keys)
+    while keys and not layout_remap.is_letter_key(keys[-1][0], current_hkl):
+        keys.pop()
+    english = "".join(c for c in (layout_remap.remap_key_to_other_layout(vk, s, ENGLISH_HKL_VALUE) or ""
+                                  for vk, s in keys) if c.isalpha()).lower()
+    hebrew = "".join(c for c in (layout_remap.remap_key_to_other_layout(vk, s, HEBREW_HKL_VALUE) or ""
+                                 for vk, s in keys) if c.isalpha())
+    typed = "english" if current_hkl == ENGLISH_HKL_VALUE else "hebrew"
+    if len(english if typed == "english" else hebrew) < letter_model.MIN_LETTERS:
+        return None
+    if typed == "english" and english in gibberish_detector.ENGLISH_WORD_END_OK:
+        return None
+    margin = letter_model.other_reading_margin(english, hebrew, typed)
+    if margin is None or margin <= letter_model.MARK_THRESHOLD or _letter_model_disabled():
+        return None
+    return {"current_language": typed, "other_language": "hebrew" if typed == "english" else "english",
+            "length": len(keys), "switch": margin > letter_model.SWITCH_THRESHOLD}
+
+
 def _autocorrect_enabled():
     """The user's on/off switch for Phase 2: true only while
     _AUTOCORRECT_FLAG_FILENAME exists next to CKILS. Checked live, at the
@@ -621,6 +677,9 @@ def _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_
       3. the second-word rule — this word was flagged and so was one of the
          two words before it, in the same direction (user's call, 2026-10-15:
          catches runs of short wrong-layout words like "and good with").
+    Before 3, a word no rule flagged gets the letter model (letter_model.py):
+    a strong score switches on its own, a weaker one only flags the word
+    for the second-word rule.
     A non-letter that isn't a word end (Backspace, arrows, Delete, a plain
     digit) means the user is editing: everything pending is cancelled."""
     fired = False
@@ -652,6 +711,17 @@ def _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_
             state.word_flag = HEBREW_HKL_VALUE
             if ENGLISH_WORD_END_SWITCHES_ALONE:
                 _fire_autocorrect(thread_id, exe_name, title, current_hkl, HEBREW_HKL_VALUE, en_result["length"])
+                fired = True
+        lm_result = None if fired or state.word_flag is not None else letter_model_check(state, current_hkl)
+        if lm_result is not None:
+            target = HEBREW_HKL_VALUE if lm_result["other_language"] == "hebrew" else ENGLISH_HKL_VALUE
+            skip_logger.log_skip(
+                exe_name, title, thread_id, skip_logger.REASON_GIBBERISH_SUSPECTED,
+                f"{lm_result['current_language']}->{lm_result['other_language']} len={lm_result['length']} "
+                f"letter-model{'' if lm_result['switch'] else ' mark'}")
+            state.word_flag = target
+            if lm_result["switch"]:
+                _fire_autocorrect(thread_id, exe_name, title, current_hkl, target, lm_result["length"])
                 fired = True
 
     flag = state.word_flag

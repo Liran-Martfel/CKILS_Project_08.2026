@@ -2199,9 +2199,11 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
         and_ = [0x41, 0x4E, 0x44, 0x20]
         good = [0x47, 0x4F, 0x4F, 0x44, 0x20]
         with_ = [0x57, 0x49, 0x54, 0x48, 0x20]
-        self._run(and_ + good)
-        self.assertEqual(self.calls, [])
-        self._run(and_ + good + with_)
+        # The rule alone: the letter model would catch 'and' (שמג) itself.
+        with patch.object(keyboard_hook, "_letter_model_disabled", return_value=True):
+            self._run(and_ + good)
+            self.assertEqual(self.calls, [])
+            self._run(and_ + good + with_)
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
 
@@ -2210,7 +2212,8 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
         good = [0x47, 0x4F, 0x4F, 0x44, 0x20]
         and_ = [0x41, 0x4E, 0x44, 0x20]
         with_ = [0x57, 0x49, 0x54, 0x48, 0x20]
-        self._run(good + and_ + and_ + with_)
+        with patch.object(keyboard_hook, "_letter_model_disabled", return_value=True):
+            self._run(good + and_ + and_ + with_)
         self.assertEqual(self.calls, [])
 
     @staticmethod
@@ -2624,6 +2627,84 @@ class Tier3RespectsTier4Tests(unittest.TestCase):
         self.assertFalse(changed)
         post.assert_not_called()
         self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_TIER4_RESPECTED)
+
+
+class LetterModelTests(unittest.TestCase):
+    """The letter model (2026-10-15): compares how typical the English and
+    Hebrew readings of the same keys are. Built from public word lists only.
+    Runs through the real _consumer_loop, with the wiring tests' harness."""
+
+    setUp = Tier4AutocorrectWiringTests.setUp
+    tearDown = Tier4AutocorrectWiringTests.tearDown
+    _run = Tier4AutocorrectWiringTests._run
+    _keys = staticmethod(Tier4AutocorrectWiringTests._keys)
+
+    def test_model_file_loads_and_prefers_the_real_reading(self):
+        """juac/חושב leans Hebrew; hello/יקךךם leans English."""
+        import letter_model
+        self.assertIsNotNone(letter_model.models())
+        self.assertGreater(letter_model.other_reading_margin("juac", "חושב", "english"),
+                           letter_model.MARK_THRESHOLD)
+        self.assertLess(letter_model.other_reading_margin("hello", "יקךךם", "english"), 0)
+
+    def test_a_strong_word_switches_on_its_own(self):
+        """"akuo" is שלום on the English layout — no rule catches it."""
+        self._run(self._keys("akuo "), layout=rule_engine.English_HKL)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.Hebrew_HKL)
+
+    def test_two_weaker_words_switch_at_the_second(self):
+        """The user's own words, found live: juac (חושב) alone only marks;
+        aha (שיש) after it switches."""
+        self._run(self._keys("juac "), layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+        self._run(self._keys("juac aha "), layout=rule_engine.English_HKL)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_english_typed_on_hebrew_switches_back(self):
+        """"think" typed on the Hebrew layout reads איןמל."""
+        self._run([0x54, 0x48, 0x49, 0x4E, 0x4B, 0x20])
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
+
+    def test_ordinary_english_never_switches(self):
+        """A normal English sentence, with a comma after a word."""
+        self._run(self._keys("the quick brown fox jumps over the lazy dog, while people watch "),
+                  layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+
+    def test_ordinary_hebrew_never_switches(self):
+        """שלום אני רוצה לעבוד עכשיו typed on the Hebrew layout."""
+        self._run(self._keys("akuo tbh rumv kgcus gfahu "))
+        self.assertEqual(self.calls, [])
+
+    def test_off_switch_file_turns_only_the_model_off(self):
+        """disable_letter_model.on: the model neither switches nor marks."""
+        with patch.object(keyboard_hook, "_letter_model_disabled", return_value=True):
+            self._run(self._keys("akuo juac aha "), layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+
+    def test_missing_model_file_means_rules_only(self):
+        """No letter_model.json: never fires, never crashes."""
+        import letter_model
+        with patch.object(letter_model, "_models", {}):
+            self._run(self._keys("akuo "), layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+
+    def test_capitals_and_allowed_words_skip_the_model(self):
+        """Tickers are typed in capitals; "csv" is an allowed word."""
+        caps = [{"vk": vk, "shift": True} for vk in self._keys("akuo")] + [0x20]
+        self._run(caps + self._keys("csv "), layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+
+    def test_keeps_only_the_current_word(self):
+        """Privacy: the whole-word keys are cleared at every word end."""
+        state = keyboard_hook._PerThreadState()
+        for vk in self._keys("juac"):
+            keyboard_hook.process_key_event(vk, 0, state, rule_engine.English_HKL, False, False)
+        self.assertEqual(len(state.word_keys), 4)
+        keyboard_hook.process_key_event(0x20, 0, state, rule_engine.English_HKL, False, False)
+        self.assertEqual(state.word_keys, [])
 
 
 if __name__ == "__main__":

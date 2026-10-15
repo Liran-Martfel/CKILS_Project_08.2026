@@ -3007,6 +3007,39 @@ at word 1. Known edge: code like `x,y` typed in an editor would switch (`f(a,b)`
 reading fails). The other missed words (juac, scrho...) look like possible English letter by letter;
 catching them needs a statistical comparison of both readings, not another rule. 3 new tests. 207 pass.
 
+**The letter model — Tier 4's own small ML model.** Every Tier 4 rule asks "is this word impossible in
+English (or Hebrew)?" — and English letters allow almost anything, so "juac" (חושב) and "atpar"
+(שאפשר) pass. A person compares instead: "juac" is an odd English word, חושב a very common Hebrew one.
+`letter_model.py` does that comparison: a letter-trigram model per language (how likely each letter is
+after the two before it, interpolated with bigram and single-letter odds), and at each word end it
+scores both readings of the same keys. Average log-probability per letter, so long and short words
+compare fairly.
+
+Training data: public word-frequency lists only (FrequencyWords, OpenSubtitles 2018 — MIT code,
+CC-BY-SA-4.0 content), each word weighted by the square root of its frequency (plain counts, log and
+equal weights all measured within ~2 points). Never anything the user typed or saw. Built by
+`build_letter_model.py` into `letter_model.json` (250 KB). Tested on the user's own labeled screen
+text, which the model never saw — an honest held-out test.
+
+Measured before going in (read-only, scratchpad), then again through the real hook:
+
+| | Rules only | With the letter model |
+|---|---|---|
+| Hebrew typed on English, sentences caught by word 3 | 65% | 93% |
+| English typed on Hebrew, sentences caught by word 3 | 82% | 94% |
+| Correct English sentences wrongly switched by word 3 | 2.2% | 2.2% |
+| Correct Hebrew sentences wrongly switched by word 3 | 3.4% | 3.4% |
+
+Two levels, chosen from the numbers: a word over 1.25 (the other reading ~3.5x more likely per letter)
+switches alone; over 0.5 it only marks the word for the second-word rule. A single level at 1.0 caught
+slightly more but added wrong switches on Hebrew. The few English words it newly misjudged were mostly
+allowed abbreviations (csv, mkt — now skipped) and stock tickers (typed in capitals live — skipped).
+3+ letters only; punctuation after the word is dropped from both readings. It keeps the whole current
+word's keys in memory (the 5-key buffer is too short) — still only the current word, cleared at its
+end. Off switch: `disable_letter_model.on` next to CKILS.exe, live, turns only the model off. A missing
+model file means rules only, never a crash. 10 new tests; two older second-word-rule tests now turn
+the model off, since it catches their "and" by itself. 217 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
