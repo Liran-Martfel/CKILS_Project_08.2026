@@ -195,11 +195,6 @@ class _PerThreadState:
         self.en_has_vowel = False
         self.en_ending = ""
         self.en_capital_seen = False
-        # Comma-inside rule (2026-10-15): on the English layout, a comma with a
-        # letter right after it ("t,v") is the Hebrew ת mid-word — English puts
-        # a space after a comma. 0 of 6,822 real English words had one.
-        self.en_comma_pending = False  # the last key was a comma after a letter
-        self.en_comma_inside = False   # ...and a letter followed it
         # The letter model (letter_model.py) scores the WHOLE word, which the
         # 5-key buffer doesn't keep: every key of the current word, capped
         # just past letter_model.MAX_LETTERS. Still only the current word,
@@ -220,8 +215,6 @@ class _PerThreadState:
         self.en_has_vowel = False
         self.en_ending = ""
         self.en_capital_seen = False
-        self.en_comma_pending = False
-        self.en_comma_inside = False
         self.word_keys = []
 
     def reset(self):
@@ -304,13 +297,10 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
 
     english = layout_remap.remap_key_to_other_layout(vk_code, scan_code, ENGLISH_HKL_VALUE)
     if english and english.isalpha():
-        state.en_comma_inside = state.en_comma_inside or state.en_comma_pending
         state.en_letter_count += 1
         state.en_has_vowel = state.en_has_vowel or english in gibberish_detector.ENGLISH_VOWELS
         state.en_ending = (state.en_ending + english)[-2:]
         state.en_capital_seen = state.en_capital_seen or (shift_pressed != caps_lock_on)
-    state.en_comma_pending = (vk_code == layout_remap.VK_OEM_COMMA and not shift_pressed
-                              and state.en_letter_count > 0)
 
     char = layout_remap.remap_key_to_other_layout(vk_code, scan_code, current_hkl, shift_pressed, caps_lock_on)
     if not char or not char.isalpha():
@@ -472,6 +462,66 @@ def continues_word(vk_code, target_hkl, shift_pressed=False):
     return target_hkl == ENGLISH_HKL_VALUE and vk_code == layout_remap.VK_OEM_7 and not shift_pressed
 
 
+def _word_keys(state):
+    """Every (vk, scan) of the current word — state.word_keys, or for a word
+    longer than letter_model.MAX_LETTERS (which word_keys stops tracking) its
+    first 5 keys plus its last letter, as before word_keys existed."""
+    if len(state.word_keys) <= letter_model.MAX_LETTERS:
+        return list(state.word_keys)
+    keys = list(state.raw_keys)
+    if state.last_letter_key is not None:
+        keys.append(state.last_letter_key)
+    return keys
+
+
+def _readings(keys):
+    """The same keys read on each layout, one character per key — the ONE
+    definition of a word's two readings, shared by every word-end check.
+    Punctuation stays in; each caller keeps what it needs: _letters() for
+    scoring, _english_word() for the allowed-word list. layout_remap gives
+    None for the ; , . keys on English (it maps letters only), so their
+    English punctuation is filled in here — without it "t,v" read as "tv"."""
+    def read(hkl):
+        return "".join(layout_remap.remap_key_to_other_layout(vk, scan, hkl)
+                       or (_ENGLISH_PUNCTUATION.get(vk, "") if hkl == ENGLISH_HKL_VALUE else "")
+                       for vk, scan in keys)
+    return read(ENGLISH_HKL_VALUE), read(HEBREW_HKL_VALUE)
+
+
+# What the keys that are Hebrew letters (ף ת ץ) type on the English layout.
+_ENGLISH_PUNCTUATION = {layout_remap.VK_OEM_1: ";", layout_remap.VK_OEM_COMMA: ",",
+                        layout_remap.VK_OEM_PERIOD: "."}
+
+
+def _letters(text):
+    """Only the letters of a reading. Each reading drops only its OWN
+    non-letters, so a key that's a letter in one layout stays in that
+    layout's reading: the W key ending "few" on the Hebrew layout (an
+    apostrophe there), or the , . ; keys ending a Hebrew word typed on the
+    English layout (ת ץ ף) — found by /code-review 2026-10-15, when one
+    shared strip dropped them from both readings."""
+    return "".join(c for c in text if c.isalpha())
+
+
+def _english_word(english):
+    """The English reading as the allowed-word list sees it: lowercase,
+    punctuation after the word dropped, dots dropped (b.t.w is btw). A comma
+    inside stays — it's the Hebrew ת, and "t,v" (אתה) is not "tv" (bug found
+    live 2026-10-15)."""
+    return re.sub(r"[^a-z]+$", "", english.lower()).replace(".", "")
+
+
+def _comma_between_letters(keys):
+    """A comma key with an English letter right before AND after it, inside
+    one word: the Hebrew ת mid-word ("t,v" = אתה). English puts a space
+    after a comma."""
+    vks = [vk for vk, _ in keys]
+    return any(vk == layout_remap.VK_OEM_COMMA and 0 < i < len(vks) - 1
+               and layout_remap.is_letter_key(vks[i - 1], ENGLISH_HKL_VALUE)
+               and layout_remap.is_letter_key(vks[i + 1], ENGLISH_HKL_VALUE)
+               for i, vk in enumerate(vks))
+
+
 def word_end_check(state, current_hkl):
     """The user's word-end rule (2026-10-14): called when a word typed on
     the Hebrew layout ends with a space or Enter. If its last letter is a
@@ -491,11 +541,7 @@ def word_end_check(state, current_hkl):
     last_letter = layout_remap.remap_key_to_other_layout(last_vk, last_scan, HEBREW_HKL_VALUE)
     if not last_letter or not gibberish_detector.hebrew_word_cannot_end_with(last_letter):
         return None
-    keys = list(state.raw_keys)
-    if state.letter_count > len(keys):
-        keys.append(state.last_letter_key)  # the buffer capped before the last letter
-    english = "".join(layout_remap.remap_key_to_other_layout(vk, scan, ENGLISH_HKL_VALUE) or ""
-                      for vk, scan in keys)
+    english, _ = _readings(_word_keys(state))
     if gibberish_detector.looks_impossible(english, "english") is not None:
         return None  # not plausible English either — no evidence of a wrong layout
     return {"current_language": "hebrew", "other_language": "english", "length": state.letter_count}
@@ -519,25 +565,32 @@ def english_word_end_check(state, current_hkl):
     HTML) are typed that way, and Hebrew has no capitals at all."""
     if current_hkl != ENGLISH_HKL_VALUE or state.en_letter_count < 2 or state.en_capital_seen:
         return None
-    keys = list(state.raw_keys)
-    if state.letter_count > len(keys) and state.last_letter_key is not None:
-        keys.append(state.last_letter_key)
-    known_word = None
-    if state.letter_count <= gibberish_detector.IncrementalWordBuffer.MAX_LENGTH:
-        # Only punctuation AFTER the word is dropped. Bug found live 2026-10-15:
-        # dropping all of it read "t,v" (אתה) as "tv", an allowed word.
-        reading = "".join(layout_remap.remap_key_to_other_layout(vk, s, ENGLISH_HKL_VALUE) or ""
-                          for vk, s in keys)
-        known_word = re.sub(r"[^A-Za-z]+$", "", reading).lower()
-    if not state.en_comma_inside and gibberish_detector.english_word_end_suspect(
-            known_word, state.en_letter_count, state.en_has_vowel, state.en_ending) is None:
+    keys = _word_keys(state)
+    english, hebrew = _readings(keys)
+    known_word = _english_word(english) if len(state.word_keys) <= letter_model.MAX_LETTERS else None
+    reason = gibberish_detector.english_word_end_suspect(
+        known_word, state.en_letter_count, state.en_has_vowel, state.en_ending, _comma_between_letters(keys))
+    if reason is None:
         return None
-    hebrew = "".join(layout_remap.remap_key_to_other_layout(vk, s, HEBREW_HKL_VALUE) or "" for vk, s in keys)
-    hebrew_letters = "".join(c for c in hebrew if c.isalpha())
+    hebrew_letters = _letters(hebrew)
     if (gibberish_detector.looks_impossible(hebrew_letters, "hebrew") is not None
             or (hebrew_letters and gibberish_detector.hebrew_word_cannot_end_with(hebrew_letters[-1]))):
         return None  # not plausible Hebrew either — no evidence of a wrong layout
+    if reason == gibberish_detector.COMMA_INSIDE and not _comma_word_reads_hebrew(english, hebrew_letters):
+        return None  # "yes,but": a missing space between two English words
     return {"current_language": "english", "other_language": "hebrew", "length": state.en_letter_count}
+
+
+def _comma_word_reads_hebrew(english, hebrew_letters):
+    """For a word caught only by the comma-inside rule: is it really one
+    Hebrew word, or two English words with the space missing? Found by
+    /code-review 2026-10-15 — "yes,but" and "sure,thanks" switched to Hebrew.
+    The letter model compares the English pieces either side of the comma
+    with the Hebrew reading of the whole. Without the model file, the rule
+    works as before."""
+    pieces = [p for p in re.split(r"[^a-z]+", english.lower()) if p]
+    margin = letter_model.pieces_margin(pieces, hebrew_letters)
+    return margin is None or margin > letter_model.COMMA_WORD_THRESHOLD
 
 
 _LETTER_MODEL_OFF_FILENAME = "disable_letter_model.on"
@@ -561,28 +614,27 @@ def letter_model_check(state, current_hkl):
     result plus "switch" (True: strong enough to switch on its own; False:
     only marks the word for the second-word rule), or None.
 
-    Punctuation after the word is dropped from both readings ("fine," must
-    not become כןמקת). Skipped for words typed with a capital and for the
-    allowed English words, like the English whole-word rules."""
+    Each reading keeps only its own letters (_letters). Skipped for words
+    typed with a capital and for the allowed English words, like the English
+    whole-word rules."""
     if state.en_capital_seen or len(state.word_keys) > letter_model.MAX_LETTERS:
         return None
-    keys = list(state.word_keys)
-    while keys and not layout_remap.is_letter_key(keys[-1][0], current_hkl):
-        keys.pop()
-    english = "".join(c for c in (layout_remap.remap_key_to_other_layout(vk, s, ENGLISH_HKL_VALUE) or ""
-                                  for vk, s in keys) if c.isalpha()).lower()
-    hebrew = "".join(c for c in (layout_remap.remap_key_to_other_layout(vk, s, HEBREW_HKL_VALUE) or ""
-                                 for vk, s in keys) if c.isalpha())
+    english_text, hebrew_text = _readings(state.word_keys)
+    english, hebrew = _letters(english_text).lower(), _letters(hebrew_text)
     typed = "english" if current_hkl == ENGLISH_HKL_VALUE else "hebrew"
-    if len(english if typed == "english" else hebrew) < letter_model.MIN_LETTERS:
+    # The typed reading must be long enough; on the Hebrew layout the English
+    # reading may supply it ("few" is כק + an apostrophe there). Not the other
+    # way: a comma after a short English word ("np,") is punctuation, not ת.
+    typed_length = len(english) if typed == "english" else max(len(english), len(hebrew))
+    if typed_length < letter_model.MIN_LETTERS:
         return None
-    if typed == "english" and english in gibberish_detector.ENGLISH_WORD_END_OK:
+    if typed == "english" and _english_word(english_text) in gibberish_detector.ENGLISH_WORD_END_OK:
         return None
     margin = letter_model.other_reading_margin(english, hebrew, typed)
     if margin is None or margin <= letter_model.MARK_THRESHOLD or _letter_model_disabled():
         return None
     return {"current_language": typed, "other_language": "hebrew" if typed == "english" else "english",
-            "length": len(keys), "switch": margin > letter_model.SWITCH_THRESHOLD}
+            "length": len(state.word_keys), "switch": margin > letter_model.SWITCH_THRESHOLD}
 
 
 def _autocorrect_enabled():
@@ -851,6 +903,9 @@ def start(english_hkl, hebrew_hkl, on_autocorrect=None):
         ENGLISH_HKL_VALUE, HEBREW_HKL_VALUE = english_hkl, hebrew_hkl
         _autocorrect_callback = on_autocorrect
         _started = True
+        # Load the letter model now, not at the first word end of the
+        # session — parsing it there would hold up typing (/code-review).
+        letter_model.models()
         threading.Thread(target=_consumer_loop, daemon=True).start()
 
         def _run_hook():

@@ -134,16 +134,24 @@ ENGLISH_WORD_END_OK = {
     "priv", "conv", "prev", "adv", "nov", "mov",
     # ends in j
     "raj", "haj", "hajj", "taj",
+    # terminal and chat words the letter model would otherwise take for
+    # Hebrew (/code-review, 2026-10-15: "npx" scored 1.96, over the line)
+    "npx", "zsh", "ssh", "nvm", "pnpm", "rpm", "mph", "gps", "url", "urls", "afk", "cnn", "knn", "rgb",
 }
+COMMA_INSIDE = "comma inside"
 _INTERJECTION_HH = re.compile(r"^[aous]?h+$")  # ahh, ohh, uhh, shh, hhh
 
 
-def english_word_end_suspect(word, length, has_vowel, ending):
+def english_word_end_suspect(word, length, has_vowel, ending, comma_inside=False):
     """Whole-word English check, once the word has ended. `word` is the full
     word when it's short enough to have been kept (else None — exceptions
     are all short), `length` its letter count, `has_vowel` whether any of
-    a/e/i/o/u/y appeared, `ending` its last two letters. Returns a short
-    reason, or None."""
+    a/e/i/o/u/y appeared, `ending` its last two letters, `comma_inside`
+    whether a comma sat between two letters (the Hebrew ת mid-word; 2026-10-15).
+    Returns a short reason, or None. The comma rule is checked last: a word
+    that breaks another rule too is reported by that rule, which needs no
+    confirmation — COMMA_INSIDE alone can also be two English words with
+    the space missing ("yes,but"), so the caller confirms it."""
     if word is not None and word in ENGLISH_WORD_END_OK:
         return None
     if length >= 3 and not has_vowel:
@@ -154,6 +162,8 @@ def english_word_end_suspect(word, length, has_vowel, ending):
         return "ends in j"
     if ending.endswith("hh") and not (word and _INTERJECTION_HH.match(word)):
         return "ends in hh"
+    if comma_inside:
+        return COMMA_INSIDE
     return None
 
 

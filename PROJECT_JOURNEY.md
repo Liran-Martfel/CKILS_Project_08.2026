@@ -3040,6 +3040,32 @@ end. Off switch: `disable_letter_model.on` next to CKILS.exe, live, turns only t
 model file means rules only, never a crash. 10 new tests; two older second-word-rule tests now turn
 the model off, since it catches their "and" by itself. 217 pass.
 
+**/code-review of the comma rule and the letter model — 10 findings, all fixed.** Five real bugs, two
+confirmed by replaying keys through the real code before fixing:
+1. "yes,but" and "sure,thanks" switched to Hebrew under the comma rule — a missing space in English
+   chat. The "0 of 6,822" check had used screen text, where that typo hardly appears. Now a comma word
+   switches only if the letter model says its Hebrew reading beats the English pieces either side of
+   the comma ("t,v": +1.34; "yes,but": -1.30).
+2. "npx" and "zsh" switched; "url" and "afk" marked. Added to the allowed list with a few more terminal
+   words (and cnn/knn/rgb, found by the re-measurement).
+3. "few", "now", "new" on the Hebrew layout lost their W (an apostrophe in Hebrew) — too short to judge.
+4. Hebrew words ending in ת/ף/ץ typed on English lost their last letter — the strongest end clue.
+5. The allowed-word check still read "t,v" as "tv" — and so did the earlier fix: layout_remap returns
+   nothing for the , . ; keys on English, so the comma never reached the reading. The comma rule had
+   been catching it first, hiding this.
+Behind 3–5 was one cause: three checks each built the word's readings their own way. Now one shared
+`_readings()`, where each reading keeps only its own letters, and one `_english_word()` for the allowed
+list (dots dropped, so b.t.w is btw). The comma rule moved into `english_word_end_suspect`, after the
+allowed list, and is worked out from the word's keys instead of two extra per-keystroke flags. The
+model now loads when CKILS starts, not at the first space.
+
+Re-measured through the real hook, with new checks for the comma cases: Hebrew on English caught by
+word 3 93%, English on Hebrew 95%; correct English sentences wrongly switched by word 3 fell 2.2% ->
+1.6% (Hebrew unchanged, 3.4%). An English word with a comma after it switches no more often than
+without one (0.94% vs 0.95%), after one more fix: a 2-letter word before a comma ("np,") is too short
+to judge — the comma isn't ת there. 96% of Hebrew words with a mid-word ת are caught. 6 new tests. 223
+pass.
+
 ---
 
 ## Future ideas (not yet implemented)

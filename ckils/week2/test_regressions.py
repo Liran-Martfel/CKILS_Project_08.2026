@@ -2697,6 +2697,46 @@ class LetterModelTests(unittest.TestCase):
         self._run(caps + self._keys("csv "), layout=rule_engine.English_HKL)
         self.assertEqual(self.calls, [])
 
+    def test_a_missing_space_after_a_comma_stays_english(self):
+        """/code-review, 2026-10-15: "yes,but" and "sure,thanks" switched
+        to Hebrew under the comma-inside rule. The letter model now checks
+        that the Hebrew reading beats the English pieces."""
+        self._run(self._keys("yes,but sure,thanks ok,thanks "), layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+
+    def test_terminal_and_chat_words_stay_english(self):
+        """npx scored 1.96 — over the switch line — and zsh/url/afk marked."""
+        self._run(self._keys("npx zsh url afk cnn "), layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+
+    def test_a_short_english_word_before_a_comma_stays_english(self):
+        """"np," — the comma isn't ת here, so "np" is too short to judge."""
+        self._run(self._keys("np, db, "), layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+
+    def test_a_word_ending_in_w_on_the_hebrew_layout_is_judged_whole(self):
+        """"few" on Hebrew is כק plus an apostrophe — the W key is a letter
+        in the English reading and must stay in it."""
+        self._run([0x46, 0x45, 0x57, 0x20])
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
+
+    def test_a_hebrew_word_ending_in_tav_keeps_it(self):
+        """"nfuhb," is מכונית: the comma is its last letter, ת."""
+        self._run(self._keys("nfuhb, "), layout=rule_engine.English_HKL)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.Hebrew_HKL)
+
+    def test_one_reading_shared_by_every_check(self):
+        """The English reading keeps the comma inside ("t,v", not "tv") and
+        the allowed-word form drops dots (b.t.w is btw)."""
+        keys = [(vk, 0) for vk in self._keys("t,v")]
+        english, hebrew = keyboard_hook._readings(keys)
+        self.assertEqual((english, hebrew), ("t,v", "אתה"))
+        self.assertEqual(keyboard_hook._english_word("b.t.w."), "btw")
+        self.assertTrue(keyboard_hook._comma_between_letters(keys))
+        self.assertFalse(keyboard_hook._comma_between_letters([(vk, 0) for vk in self._keys("tv,")]))
+
     def test_keeps_only_the_current_word(self):
         """Privacy: the whole-word keys are cleared at every word end."""
         state = keyboard_hook._PerThreadState()

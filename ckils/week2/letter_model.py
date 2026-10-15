@@ -14,9 +14,9 @@ build_letter_model.py into letter_model.json.
 Measured before going in (read-only, on 4,553 Hebrew / 6,822 English words of
 the user's labeled screen text, which the model never saw): Hebrew typed on
 the English layout caught by word 3 in 93% of sentences (rules alone: 65%),
-English on Hebrew 94% (82%) — through the real hook; correct sentences wrongly switched by word 3
-unchanged in both languages (English 2.2%, Hebrew 3.4% — the rules' own,
-mostly OCR noise in the test text).
+English on Hebrew 95% (82%) — through the real hook, after the /code-review
+fixes; correct English sentences wrongly switched by word 3 fell 2.2% -> 1.6%,
+Hebrew unchanged at 3.4% (the rules' own, mostly OCR noise in the test text).
 
 Only ever scores the current word, in memory; nothing typed is stored.
 """
@@ -36,6 +36,10 @@ LAMBDAS = (0.6, 0.3, 0.1)  # trigram, bigram, unigram
 # catches about the same and adds none.
 SWITCH_THRESHOLD = 1.25
 MARK_THRESHOLD = 0.5
+# A word caught only by the comma-inside rule switches only if its Hebrew
+# reading beats the English pieces either side of the comma by this much —
+# "yes,but" is two English words with the space missing, not one Hebrew word.
+COMMA_WORD_THRESHOLD = 0.0
 MIN_LETTERS = 3   # 2-letter words are too short to judge by letter statistics
 MAX_LETTERS = 20  # longer than any real word — a run of keys, not a word
 
@@ -87,6 +91,19 @@ def models():
         except Exception:
             _models = {}
     return _models or None
+
+
+def pieces_margin(english_pieces, hebrew):
+    """For a comma word: how much more typical the Hebrew reading of the
+    whole word is than the English pieces either side of the comma, each
+    scored as its own word (weighted by length). Positive = Hebrew fits
+    better. None if the model isn't available or there's nothing to score."""
+    m = models()
+    if m is None or not english_pieces or not hebrew:
+        return None
+    weights = [len(p) + 1 for p in english_pieces]
+    english = sum(m["english"].logprob(p) * w for p, w in zip(english_pieces, weights)) / sum(weights)
+    return m["hebrew"].logprob(hebrew) - english
 
 
 def other_reading_margin(english, hebrew, typed_language):
