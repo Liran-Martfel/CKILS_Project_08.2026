@@ -545,9 +545,18 @@ def word_end_check(state, current_hkl):
     last_letter = layout_remap.remap_key_to_other_layout(last_vk, last_scan, HEBREW_HKL_VALUE)
     if not last_letter or not gibberish_detector.hebrew_word_cannot_end_with(last_letter):
         return None
-    english, _ = _readings(_word_keys(state))
+    english, hebrew = _readings(_word_keys(state))
     if gibberish_detector.looks_impossible(english, "english") is not None:
         return None  # not plausible English either — no evidence of a wrong layout
+    if state.letter_count == 2:
+        # Found live twice (2026-10-16, 2026-10-17): a 2-letter piece of a
+        # Hebrew word ("הצ" of הצד, a space typed too early) ends in a regular
+        # letter just like "an" (שמ) does. For 2 letters, the letter model
+        # must also prefer the English reading: "an" +0.96, "of" +2.04 —
+        # "הצ" -1.50, "המ" -1.08. Without the model file, as before.
+        margin = letter_model.other_reading_margin(_letters(english).lower(), _letters(hebrew), "hebrew")
+        if margin is not None and margin <= letter_model.MARK_THRESHOLD:
+            return None
     return {"current_language": "hebrew", "other_language": "english", "length": state.letter_count}
 
 

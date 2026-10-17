@@ -46,6 +46,10 @@ REASON CODES (what each one means, and what it usually tells you)
                       auto-corrected this window's layout from the user's own
                       keystrokes this visit, so Tier 3 left it alone (same idea as
                       override_respected — typing evidence outranks an OCR read).
+    weaker_read       A Tier 3 result disagreed with the language an earlier read
+                      already decided this visit, but was LESS confident than that
+                      read, so it was not applied (claude.ai's "Let's noodle"
+                      greeting at 0.67 overturning Hebrew sentences read at 0.99).
     typed_respected   A Tier 3 result was ready, but it disagreed with the
                       language the user has actually typed most in this window
                       (keyboard_hook.typed_language), so Tier 3 left it alone.
@@ -118,6 +122,7 @@ REASON_GIBBERISH_SUSPECTED = "gibberish_suspected"  # Tier 4 Phase 1 (keyboard_h
 REASON_TIER4_RESPECTED = "tier4_respected"          # Tier 3 held off: Tier 4 already corrected this window from real typing this visit
 REASON_TYPING_RESPECTED = "typing_respected"        # Tier 3 held off: the user was typing in this window just now
 REASON_TYPED_RESPECTED = "typed_respected"          # Tier 3 held off: it disagreed with what the user typed most in this window
+REASON_WEAKER_READ = "weaker_read"                  # Tier 3 held off: less confident than the read that already decided this visit
 
 ENABLED = True
 KILL_SWITCH_FILENAME = "skip_logging.off"

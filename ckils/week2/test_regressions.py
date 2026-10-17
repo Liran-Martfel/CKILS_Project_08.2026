@@ -2689,6 +2689,85 @@ class Tier3WaitsWhileTypingTests(unittest.TestCase):
         self.assertIsInstance(keyboard_hook._last_typed[(1, "t")], float)
 
 
+class WeakerReadTests(unittest.TestCase):
+    """The user's idea, 2026-10-17: within one visit, a later screen read
+    may change the language only if it's at least as confident as the read
+    that decided it. claude.ai's "Let's noodle" greeting (0.67) had
+    overturned Hebrew sentences read at 0.99."""
+
+    HWND, THREAD = 558, 8083
+
+    def setUp(self):
+        """This visit already decided Hebrew from a 0.99 read."""
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.tier4_corrected.discard(self.THREAD)
+        keyboard_hook._last_typed.clear()
+        keyboard_hook._typed_languages.clear()
+        rule_engine.content_decision[self.THREAD] = rule_engine.Hebrew_HKL
+        rule_engine.content_confidence[self.THREAD] = 0.99
+
+    def tearDown(self):
+        """Clears this visit's decision."""
+        rule_engine.content_decision.pop(self.THREAD, None)
+        rule_engine.content_confidence.pop(self.THREAD, None)
+
+    def _apply(self, confidence):
+        """A Tier 3 read saying English at `confidence`."""
+        with patch.object(rule_engine.auto, "InitializeUIAutomationInCurrentThread"), \
+             patch.object(rule_engine, "decide_with_content",
+                          return_value=(rule_engine.English_HKL, {"confidence": confidence})), \
+             patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
+             patch.object(rule_engine.win32gui, "GetWindowText", return_value="Page"), \
+             patch.object(rule_engine.win32api, "PostMessage") as post, \
+             patch.object(rule_engine.decision_logger, "log_auto_change"), \
+             patch.object(rule_engine.skip_logger, "log_skip") as log_skip:
+            changed = rule_engine.apply_content_correction(
+                self.HWND, self.THREAD, "chrome.exe", rule_engine.Hebrew_HKL, "Page")
+        return changed, post, log_skip
+
+    def test_a_weaker_read_cannot_overturn_the_visit(self):
+        """0.67 against 0.99: not applied, logged as weaker_read."""
+        changed, post, log_skip = self._apply(0.67)
+        self.assertFalse(changed)
+        post.assert_not_called()
+        self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_WEAKER_READ)
+
+    def test_an_equally_or_more_confident_read_still_can(self):
+        """A clear read of new content (WhatsApp: same title, new chat)."""
+        changed, post, _ = self._apply(0.99)
+        self.assertTrue(changed)
+        self.assertEqual(rule_engine.content_confidence[self.THREAD], 0.99)
+
+    def test_the_first_read_of_a_visit_has_no_limit(self):
+        """Nothing decided yet this visit: any confident read applies."""
+        rule_engine.content_decision.pop(self.THREAD)
+        rule_engine.content_confidence.pop(self.THREAD)
+        changed, _, _ = self._apply(0.67)
+        self.assertTrue(changed)
+
+
+class TwoLetterWordEndTests(unittest.TestCase):
+    """Found live twice (2026-10-16, 2026-10-17): "הצ" — the start of הצד,
+    with a space typed too early — ends in a regular צ like "an" (שמ) does,
+    and switched to English mid-sentence. For 2 letters the letter model
+    must agree it's English."""
+
+    setUp = Tier4AutocorrectWiringTests.setUp
+    tearDown = Tier4AutocorrectWiringTests.tearDown
+    _run = Tier4AutocorrectWiringTests._run
+
+    def test_a_hebrew_fragment_does_not_switch(self):
+        """"הצ" on the Hebrew layout is the V and M keys."""
+        self._run([0x56, 0x4D, 0x20])
+        self.assertEqual(self.calls, [])
+
+    def test_a_real_two_letter_english_word_still_switches(self):
+        """"an" on the Hebrew layout is שמ."""
+        self._run([0x41, 0x4E, 0x20])
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
+
+
 class TypedLanguageTests(unittest.TestCase):
     """The user's idea, 2026-10-17: remember which language was actually
     typed in each window, and use it when they come back. Kept across focus

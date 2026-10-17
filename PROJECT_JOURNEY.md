@@ -3105,7 +3105,25 @@ The other idea from the same conversation — once a confident read decided a wi
 may not overturn it in the same visit — was checked against the log first: of 560 Tier 3 flips within
 a visit, the 258 weaker-than-before ones were corrected by hand 11% of the time, the 302 stronger ones
 10%. No clear sign the weaker flips are the bad ones, and the typing guard and typed-language rule
-already cover the case that started it. Not built.
+already cover the case that started it. Not built — at first.
+
+**Then built after all, at the user's call — and a 2-letter rule fixed.** Minutes later the user hit
+another mid-sentence switch on claude.ai ("...על הצs vnemugh chu,r?" — הצד המקצועי ביותר). The log
+showed it was NOT Tier 3 this time: the new typing guard had just blocked a screen read (16:16:33,
+`typing_respected`). It was Tier 4's word-end rule at 16:16:57: "הצ" — the start of הצד, with a space
+typed too early — ends in a regular צ exactly like "an" (שמ) does, and switched to English. Second
+live hit of a case flagged for watching the day before. For 2-letter words the rule now also needs
+the letter model to prefer the English reading: real English scores high ("of" +2.04, "an" +0.96, "am"
++0.89), Hebrew fragments low ("הצ" -1.50, "המ" -1.08, "אנ" -0.92). Measured: English typed on Hebrew
+caught by word 3 unchanged (95.7%); correct Hebrew words wrongly flagged 0.59% -> 0.48%, sentences
+wrongly switched by word 3 3.8% -> 3.4%. The one loss: "if" (ןכ, +0.07) no longer switches alone —
+its mid-word ן still flags it for the second-word rule.
+
+The user also asked to build the weaker-read rule after all: within a visit, a later Tier 3 read may
+change the language only if it's at least as confident as the read that set it (`weaker_read`). The
+log had shown no clear harm either way; it is a cheap safeguard on top of the typing guard, and a
+clear read of genuinely new content (a new WhatsApp chat under the same title) still switches. 5 new
+tests. 239 pass.
 
 ---
 

@@ -334,6 +334,12 @@ TYPING_HOLD_SECONDS = 10
 # long as you stay in that window; it resets to the learned default the moment
 # you leave and return.
 content_decision = {}  # thread_id -> the last confident Tier 3 decision, if any
+# The user's idea, 2026-10-17: how confident the read behind content_decision
+# was. Within the same visit, a later read may change the language only if it
+# is at least as confident — claude.ai's "Let's noodle" greeting (0.67) had
+# overturned Hebrew sentences read at 0.99. Absent (no number to compare) =
+# no limit. Same lifetime as content_decision.
+content_confidence = {}  # thread_id -> confidence of that decision
 
 # Real bug found live: Google Docs' body text is a confirmed dead end to read
 # (see _google_docs_title_text below) — the ONLY signal decide_with_content can
@@ -1358,6 +1364,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             overridden.discard(previous_thread)
             last_set.pop(previous_thread, None)
         content_decision.pop(previous_thread, None)  # fresh window = learned default first, again
+        content_confidence.pop(previous_thread, None)
         google_docs_title_already_applied.discard(previous_thread)
         _reset_visit_state(previous_thread)  # matched-state, re-asserts, unconfirmed mismatches: all end with the visit
         # Real bug found live: unlike content_decision (a per-visit "sticky"
@@ -1394,6 +1401,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         if same_thread_as_before and last_title_by_thread.get(thread_id) is not None:
             same_site_hkl = _same_site_hkl(thread_id, last_title_by_thread[thread_id], title)
         content_decision.pop(thread_id, None)
+        content_confidence.pop(thread_id, None)
         google_docs_title_already_applied.discard(thread_id)
         _reset_visit_state(thread_id)
         old_key = (thread_id, last_title_by_thread.get(thread_id))
@@ -1549,6 +1557,17 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
                 print(f"  [content] {exe_name}: Tier 4 corrected this window from your typing, leaving it alone ({elapsed_ms:.0f} ms)")
             skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_TIER4_RESPECTED)
             return False
+        new_confidence = (reason or {}).get("confidence")
+        earlier_confidence = content_confidence.get(thread_id)
+        if (thread_id in content_decision and content_decision[thread_id] != corrected_hkl
+                and new_confidence is not None and earlier_confidence is not None
+                and new_confidence < earlier_confidence):
+            if DEBUG:
+                print(f"  [content] {exe_name}: weaker read ({new_confidence:.2f}) than this visit's "
+                      f"({earlier_confidence:.2f}), leaving it alone ({elapsed_ms:.0f} ms)")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_WEAKER_READ,
+                                 f"{new_confidence:.2f} < {earlier_confidence:.2f}")
+            return False
         typed_hkl = LANGUAGE_NAME_TO_HKL.get(keyboard_hook.typed_language(hwnd, title))
         if typed_hkl is not None and typed_hkl != corrected_hkl:
             # What the user typed here outranks a screen read (2026-10-17).
@@ -1570,6 +1589,10 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         last_set[thread_id] = corrected_hkl
         last_switch_time[thread_id] = time.time()
         content_decision[thread_id] = corrected_hkl  # sticks for the rest of this visit
+        if new_confidence is not None:
+            content_confidence[thread_id] = new_confidence
+        else:
+            content_confidence.pop(thread_id, None)
         language_name = HKL_TO_LANGUAGE_NAME[corrected_hkl]
         decision_logger.log_auto_change(
             exe_name, title, thread_id,
@@ -1628,6 +1651,7 @@ def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hk
     last_set[thread_id] = target_hkl
     last_switch_time[thread_id] = time.time()
     content_decision[thread_id] = target_hkl
+    content_confidence.pop(thread_id, None)  # typing evidence, not a read: no number to compare
     tier4_corrected.add(thread_id)
     decision_logger.log_auto_change(
         exe_name, title, thread_id,
