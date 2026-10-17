@@ -2632,6 +2632,62 @@ class Tier3RespectsTier4Tests(unittest.TestCase):
         self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_TIER4_RESPECTED)
 
 
+class Tier3WaitsWhileTypingTests(unittest.TestCase):
+    """Found live 2026-10-17: a Tier 3 poll read claude.ai's "Let's noodle"
+    greeting and switched Hebrew typing to English mid-sentence. While the
+    user is typing in a window, a screen read never changes its language."""
+
+    HWND, THREAD = 557, 8082
+
+    def setUp(self):
+        """Clean state: no override, no Tier 4 correction, no typing."""
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.tier4_corrected.discard(self.THREAD)
+        keyboard_hook._last_typed.clear()
+
+    tearDown = setUp
+
+    def _apply(self):
+        """A confident Tier 3 read saying English, for a Hebrew window."""
+        with patch.object(rule_engine.auto, "InitializeUIAutomationInCurrentThread"), \
+             patch.object(rule_engine, "decide_with_content", return_value=(rule_engine.English_HKL, {})), \
+             patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
+             patch.object(rule_engine.win32gui, "GetWindowText", return_value="Page"), \
+             patch.object(rule_engine.win32api, "PostMessage") as post, \
+             patch.object(rule_engine.decision_logger, "log_auto_change"), \
+             patch.object(rule_engine.skip_logger, "log_skip") as log_skip:
+            changed = rule_engine.apply_content_correction(
+                self.HWND, self.THREAD, "chrome.exe", rule_engine.Hebrew_HKL, "Page")
+        return changed, post, log_skip
+
+    def test_holds_off_while_the_user_is_typing(self):
+        """A key typed in this window just now: the read is not applied."""
+        keyboard_hook._last_typed[(self.THREAD, "Page")] = time.time()
+        changed, post, log_skip = self._apply()
+        self.assertFalse(changed)
+        post.assert_not_called()
+        self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_TYPING_RESPECTED)
+
+    def test_applies_after_a_real_pause(self):
+        """Last key long enough ago: the read applies as before."""
+        keyboard_hook._last_typed[(self.THREAD, "Page")] = time.time() - rule_engine.TYPING_HOLD_SECONDS - 1
+        changed, post, _ = self._apply()
+        self.assertTrue(changed)
+        post.assert_called_once()
+
+    def test_typing_in_another_tab_does_not_hold_this_one(self):
+        """Browser tabs share a thread: typing is per window title."""
+        keyboard_hook._last_typed[(self.THREAD, "Other tab")] = time.time()
+        changed, _, _ = self._apply()
+        self.assertTrue(changed)
+
+    def test_the_hook_records_a_time_never_the_key(self):
+        """Privacy: what's stored per window is a single float timestamp."""
+        keyboard_hook._last_typed[(1, "t")] = time.time()
+        self.assertTrue(keyboard_hook.typed_recently(1, "t", 10))
+        self.assertIsInstance(keyboard_hook._last_typed[(1, "t")], float)
+
+
 class LetterModelTests(unittest.TestCase):
     """The letter model (2026-10-15): compares how typical the English and
     Hebrew readings of the same keys are. Built from public word lists only.

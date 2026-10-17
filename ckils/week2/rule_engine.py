@@ -322,6 +322,11 @@ SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 # correction in the same visit (bilingual typing) block itself.
 tier4_corrected = set()
 
+# Tier 3 never changes a window's language within this many seconds of the
+# user typing in it (keyboard_hook.typed_recently). Long enough to cover a
+# pause to think mid-sentence; a read after a real break still applies.
+TYPING_HOLD_SECONDS = 10
+
 # Real bug found live: once Tier 3 corrected a window's language, the very next
 # focus/title event for that SAME window re-applied the raw learned default and
 # undid the correction — the fast path had no memory that content already
@@ -1535,6 +1540,15 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
             if DEBUG:
                 print(f"  [content] {exe_name}: Tier 4 corrected this window from your typing, leaving it alone ({elapsed_ms:.0f} ms)")
             skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_TIER4_RESPECTED)
+            return False
+        if keyboard_hook.typed_recently(thread_id, title, TYPING_HOLD_SECONDS):
+            # Found live 2026-10-17: a poll read claude.ai's "Let's noodle"
+            # greeting (0.67) and switched Hebrew typing to English mid-
+            # sentence. While the user is typing, the keystrokes are the
+            # evidence (Tier 4 watches them) — a screen read waits.
+            if DEBUG:
+                print(f"  [content] {exe_name}: you're typing here, leaving the language alone ({elapsed_ms:.0f} ms)")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_TYPING_RESPECTED)
             return False
 
         win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, corrected_hkl)

@@ -3078,6 +3078,18 @@ switches at word 1. Re-measured: English typed on Hebrew caught by word 3 94.6% 
 unchanged; one more Hebrew test word switched wrongly — "ףויש", garbled OCR that starts with a final
 ף, not something anyone types. 2 new tests; 2 older tests now isolate their own rule. 225 pass.
 
+**2026-10-17 — A screen read switched the language mid-sentence.** The user was typing Hebrew on
+claude.ai when the layout flipped to English inside a sentence, with nothing typed wrong. The log
+showed Tier 3, not Tier 4: the regular re-read of the window read claude.ai's own new-chat greeting,
+"Let's noodle", as English content (0.67, just over the 0.65 bar) and switched. The existing guard
+only held Tier 3 off after a Tier 4 correction in the same visit, and a window change had started a
+new visit. Fixed at the root instead of adding one more greeting to a marker list (the greetings
+rotate): Tier 3 never changes a window's language within 10 seconds of the user typing in that
+window. While someone is typing, the keystrokes are the evidence and Tier 4 watches them. The hook
+records only when each window was last typed in — a timestamp per (thread, title), never a key —
+and keyed by title too, since browser tabs share a thread. Logged as `typing_respected`. 4 new tests.
+229 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

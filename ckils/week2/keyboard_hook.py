@@ -656,6 +656,21 @@ def _autocorrect_enabled():
         return False
 
 
+# When the user last typed in each window: (thread_id, title) -> time.time().
+# A timestamp only, never what was typed. rule_engine reads it through
+# typed_recently() so a screen read never changes the language mid-sentence
+# (found live 2026-10-17: claude.ai's "Let's noodle" greeting, read by a
+# Tier 3 poll, flipped Hebrew typing to English inside a sentence).
+_last_typed = {}
+
+
+def typed_recently(thread_id, title, seconds):
+    """True if a key was typed in this exact window within `seconds`. Keyed
+    by title too, since browser tabs share one thread: typing in one tab
+    mustn't hold Tier 3 off a tab you just moved to."""
+    return time.time() - _last_typed.get((thread_id, title), 0) < seconds
+
+
 def _consumer_loop():
     """Pulls queued key events and runs the real analysis — everything the
     hook callback itself deliberately avoids doing. One _PerThreadState per
@@ -685,6 +700,8 @@ def _consumer_loop():
                 continue  # the focused window vanished mid-keystroke — skip this one event
 
             last_thread_id = _reset_on_focus_change(state, thread_id, last_thread_id)
+            if not (ctrl_held or alt_held) and vk_code not in _MODIFIER_ONLY_VKS:
+                _last_typed[(thread_id, title)] = time.time()
 
             caps_lock_on = bool(win32api.GetKeyState(win32con.VK_CAPITAL) & 0x0001)
             # Normalize to this module's signed HKL constants for comparison —
