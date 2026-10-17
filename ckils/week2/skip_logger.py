@@ -46,6 +46,9 @@ REASON CODES (what each one means, and what it usually tells you)
                       auto-corrected this window's layout from the user's own
                       keystrokes this visit, so Tier 3 left it alone (same idea as
                       override_respected — typing evidence outranks an OCR read).
+    typed_respected   A Tier 3 result was ready, but it disagreed with the
+                      language the user has actually typed most in this window
+                      (keyboard_hook.typed_language), so Tier 3 left it alone.
     typing_respected  A Tier 3 result was ready, but the user had typed in this
                       window within the last few seconds, so Tier 3 left the
                       language alone — mid-sentence is never the moment for a
@@ -114,6 +117,7 @@ REASON_CARRYOVER_ACCEPTED = "carryover_accepted"
 REASON_GIBBERISH_SUSPECTED = "gibberish_suspected"  # Tier 4 Phase 1 (keyboard_hook.py) — logged for every detection
 REASON_TIER4_RESPECTED = "tier4_respected"          # Tier 3 held off: Tier 4 already corrected this window from real typing this visit
 REASON_TYPING_RESPECTED = "typing_respected"        # Tier 3 held off: the user was typing in this window just now
+REASON_TYPED_RESPECTED = "typed_respected"          # Tier 3 held off: it disagreed with what the user typed most in this window
 
 ENABLED = True
 KILL_SWITCH_FILENAME = "skip_logging.off"

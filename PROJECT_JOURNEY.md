@@ -3090,6 +3090,23 @@ records only when each window was last typed in — a timestamp per (thread, tit
 and keyed by title too, since browser tabs share a thread. Logged as `typing_respected`. 4 new tests.
 229 pass.
 
+**The language you typed in a window wins when you return to it (the user's idea).** Until now, coming
+back to a window used learned histories (80% agreement needed) and screen reads — never the best
+evidence there is: what the user actually typed there. Now the hook records, per window (hwnd +
+title), the language of each finished word of 2+ letters — a language name per word, never the word,
+memory only, the last 20. A word that switched the layout counts for the language it was meant in; a
+word only marked as suspicious counts for nothing. On arrival, if at least 3 words were typed and one
+language has 60%+, CKILS switches to it at once — ahead of every learned history (fast-path source
+`typed_in_this_window`) — and Tier 3 may not contradict it (`typed_respected`). The user's rule for
+memory: moving focus away keeps the record; only closing the window drops it (checked on every poll
+with IsWindow). 5 new tests. 234 pass.
+
+The other idea from the same conversation — once a confident read decided a window, a later weaker read
+may not overturn it in the same visit — was checked against the log first: of 560 Tier 3 flips within
+a visit, the 258 weaker-than-before ones were corrected by hand 11% of the time, the 302 stronger ones
+10%. No clear sign the weaker flips are the bad ones, and the typing guard and typed-language rule
+already cover the case that started it. Not built.
+
 ---
 
 ## Future ideas (not yet implemented)

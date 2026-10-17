@@ -1410,9 +1410,15 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     # trust, automatically, for any app with that shape.
     page_hkl = LANGUAGE_NAME_TO_HKL.get(_trust(_history_of(page_learned_defaults.get(_page_key(exe_name, title)))))
     app_hkl = LANGUAGE_NAME_TO_HKL.get(_trust(_history_of(learned_defaults.get(exe_name))))
-    # A trusted history for this exact page still wins; only when there's
-    # none does "same site, same tab" beat the app-wide guess.
-    if page_hkl is not None:
+    # The user's idea, 2026-10-17: what you actually typed in this window
+    # (this window's life so far) is the strongest evidence there is — it
+    # beats every learned history. Then a trusted history for this exact
+    # page; only when there's none does "same site, same tab" beat the
+    # app-wide guess.
+    typed_hkl = LANGUAGE_NAME_TO_HKL.get(keyboard_hook.typed_language(hwnd, title))
+    if typed_hkl is not None:
+        default_hkl = typed_hkl
+    elif page_hkl is not None:
         default_hkl = page_hkl
     elif same_site_hkl is not None:
         default_hkl = same_site_hkl
@@ -1437,6 +1443,8 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             if previous_hkl_for_thread != target_hkl:
                 if thread_id in content_decision:
                     fast_source = "sticky_content_decision"
+                elif typed_hkl is not None:
+                    fast_source = "typed_in_this_window"
                 elif page_hkl is not None:
                     fast_source = "page_learned_default"
                 elif same_site_hkl is not None:
@@ -1540,6 +1548,13 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
             if DEBUG:
                 print(f"  [content] {exe_name}: Tier 4 corrected this window from your typing, leaving it alone ({elapsed_ms:.0f} ms)")
             skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_TIER4_RESPECTED)
+            return False
+        typed_hkl = LANGUAGE_NAME_TO_HKL.get(keyboard_hook.typed_language(hwnd, title))
+        if typed_hkl is not None and typed_hkl != corrected_hkl:
+            # What the user typed here outranks a screen read (2026-10-17).
+            if DEBUG:
+                print(f"  [content] {exe_name}: you've mostly typed the other language here, leaving it alone ({elapsed_ms:.0f} ms)")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_TYPED_RESPECTED)
             return False
         if keyboard_hook.typed_recently(thread_id, title, TYPING_HOLD_SECONDS):
             # Found live 2026-10-17: a poll read claude.ai's "Let's noodle"
@@ -1656,6 +1671,7 @@ def _poll_focused_window():
     """
     while True:
         time.sleep(UNTRUSTED_POLL_SECONDS)
+        keyboard_hook.forget_closed_windows(win32gui.IsWindow)
         try:
             hwnd = win32gui.GetForegroundWindow()
             title = win32gui.GetWindowText(hwnd)

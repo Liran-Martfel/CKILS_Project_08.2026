@@ -7,6 +7,7 @@ approximation of it. importing rule_engine is safe for testing because its
 hook-setup / message-loop code is guarded by `if __name__ == "__main__":` —
 see that guard's own comment for why.
 """
+import collections
 import ctypes
 import os
 import queue
@@ -2686,6 +2687,83 @@ class Tier3WaitsWhileTypingTests(unittest.TestCase):
         keyboard_hook._last_typed[(1, "t")] = time.time()
         self.assertTrue(keyboard_hook.typed_recently(1, "t", 10))
         self.assertIsInstance(keyboard_hook._last_typed[(1, "t")], float)
+
+
+class TypedLanguageTests(unittest.TestCase):
+    """The user's idea, 2026-10-17: remember which language was actually
+    typed in each window, and use it when they come back. Kept across focus
+    changes; forgotten only when the window is closed. Language names only,
+    never a word."""
+
+    HWND, TITLE = 777, "Page"
+
+    def setUp(self):
+        """Clean record; real HKL constants for the hook."""
+        keyboard_hook._typed_languages.clear()
+        self._orig = (keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE)
+        keyboard_hook.ENGLISH_HKL_VALUE = rule_engine.English_HKL
+        keyboard_hook.HEBREW_HKL_VALUE = rule_engine.Hebrew_HKL
+
+    def tearDown(self):
+        """Restores module state."""
+        keyboard_hook._typed_languages.clear()
+        keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE = self._orig
+
+    def _record(self, *languages, hwnd=HWND, title=TITLE):
+        keyboard_hook._typed_languages[(hwnd, title)] = collections.deque(
+            languages, maxlen=keyboard_hook.TYPED_WORDS_KEPT)
+
+    def test_needs_enough_words_and_a_clear_leader(self):
+        """Under 3 words: nothing. 2 of 3: a leader. Even split: nothing."""
+        self._record("hebrew", "hebrew")
+        self.assertIsNone(keyboard_hook.typed_language(self.HWND, self.TITLE))
+        self._record("hebrew", "hebrew", "english")
+        self.assertEqual(keyboard_hook.typed_language(self.HWND, self.TITLE), "hebrew")
+        self._record("hebrew", "english", "hebrew", "english")
+        self.assertIsNone(keyboard_hook.typed_language(self.HWND, self.TITLE))
+
+    def test_typing_records_the_language_meant(self):
+        """Through the real consumer loop: Hebrew words on the Hebrew layout
+        count as Hebrew; "hello" on Hebrew (it switched) counts as English;
+        a 1-letter word counts as nothing."""
+        akuo = [0x41, 0x4B, 0x55, 0x4F, 0x20]   # שלום
+        hello = [0x48, 0x45, 0x4C, 0x4C, 0x4F, 0x20]
+        Tier4AutocorrectWiringTests._run(self, akuo + akuo + [0x41, 0x20] + hello)
+        self.assertEqual(list(keyboard_hook._typed_languages[(777, "Page")]),
+                         ["hebrew", "hebrew", "english"])
+
+    def test_focus_moving_away_keeps_it_closing_the_window_drops_it(self):
+        """Only a closed window is forgotten — the user's rule."""
+        self._record("english", "english", "english")
+        self._record("hebrew", "hebrew", "hebrew", hwnd=888)
+        keyboard_hook._reset_on_focus_change(keyboard_hook._PerThreadState(), 2, 1)
+        self.assertEqual(len(keyboard_hook._typed_languages), 2)
+        keyboard_hook.forget_closed_windows(lambda hwnd: hwnd == self.HWND)
+        self.assertEqual(list(keyboard_hook._typed_languages), [(self.HWND, self.TITLE)])
+
+    def test_returning_to_a_window_uses_what_was_typed_there(self):
+        """It beats the app's learned default (English here) on arrival."""
+        harness = SameSiteTitleChangeTests("test_site_is_read_from_the_title")
+        harness.setUp()
+        try:
+            self._record("hebrew", "hebrew", "hebrew", hwnd=harness.HWND, title="Chat - Google Chrome")
+            posted = harness._title_event("Chat - Google Chrome", rule_engine.English_HKL)
+        finally:
+            harness.tearDown()
+        self.assertEqual(posted, [rule_engine.Hebrew_HKL])
+
+    def test_a_screen_read_cannot_contradict_it(self):
+        """Mostly Hebrew typed here; Tier 3 reads English: held off."""
+        self._record("hebrew", "hebrew", "hebrew", hwnd=557)
+        tests = Tier3WaitsWhileTypingTests("test_applies_after_a_real_pause")
+        tests.setUp()
+        try:
+            changed, post, log_skip = tests._apply()
+        finally:
+            tests.tearDown()
+        self.assertFalse(changed)
+        post.assert_not_called()
+        self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_TYPED_RESPECTED)
 
 
 class LetterModelTests(unittest.TestCase):

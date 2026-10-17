@@ -664,6 +664,54 @@ def _autocorrect_enabled():
 _last_typed = {}
 
 
+# Which language the user actually typed in each window (the user's idea,
+# 2026-10-17): (hwnd, title) -> the language names of the last
+# TYPED_WORDS_KEPT finished words — "hebrew"/"english" per word, never the
+# word. Kept across focus changes; dropped only when that window is closed
+# (forget_closed_windows, called from rule_engine's poll). Memory only.
+TYPED_WORDS_KEPT = 20
+TYPED_MIN_WORDS = 3     # fewer words than this is no evidence yet
+TYPED_MIN_SHARE = 0.6   # the leading language must be at least this share
+_typed_languages = {}
+_typed_lock = threading.Lock()
+
+
+def _note_typed_word(state, thread_id, title, current_hkl, fired):
+    """A word just ended: record which language it was meant in. A word that
+    switched the layout was meant in the other language; a word only marked
+    as suspicious is left out (not sure either way); any other word of 2+
+    letters counts for the layout it was typed in."""
+    if state.letter_count < 2 or (state.word_flag is not None and not fired):
+        return
+    meant_hebrew = (current_hkl == HEBREW_HKL_VALUE) != fired
+    hwnd = _foreground_hwnd_for(thread_id)
+    if hwnd is None:
+        return
+    with _typed_lock:
+        words = _typed_languages.setdefault((hwnd, title), collections.deque(maxlen=TYPED_WORDS_KEPT))
+        words.append("hebrew" if meant_hebrew else "english")
+
+
+def typed_language(hwnd, title):
+    """The language the user has mostly typed in this window, or None if
+    there's too little typing or no clear leader."""
+    with _typed_lock:
+        words = list(_typed_languages.get((hwnd, title), ()))
+    if len(words) < TYPED_MIN_WORDS:
+        return None
+    hebrew = words.count("hebrew")
+    leader, count = ("hebrew", hebrew) if hebrew * 2 > len(words) else ("english", len(words) - hebrew)
+    return leader if count / len(words) >= TYPED_MIN_SHARE else None
+
+
+def forget_closed_windows(is_window):
+    """Drops the record of every window that no longer exists. Moving focus
+    away never does this — only the window actually closing."""
+    with _typed_lock:
+        for key in [k for k in _typed_languages if not is_window(k[0])]:
+            del _typed_languages[key]
+
+
 def typed_recently(thread_id, title, seconds):
     """True if a key was typed in this exact window within `seconds`. Keyed
     by title too, since browser tabs share one thread: typing in one tab
@@ -817,8 +865,10 @@ def _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_
             _fire_autocorrect(thread_id, exe_name, title, current_hkl, flag, state.letter_count)
             fired = True
         state.recent_word_flags.append(flag)
+        _note_typed_word(state, thread_id, title, current_hkl, fired)
     elif is_word_end_key(vk_code, shift_pressed):
         state.recent_word_flags.append(None)
+        _note_typed_word(state, thread_id, title, current_hkl, fired)
     elif not (state.pending_correction and continues_word(vk_code, state.pending_correction[0], shift_pressed)):
         state.reset()  # an edit key: the user is changing the text, not ending a word
         return
