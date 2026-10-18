@@ -684,6 +684,19 @@ TYPED_MIN_SHARE = 0.6   # the leading language must be at least this share
 _typed_languages = {}
 _typed_lock = threading.Lock()
 
+# Found live 2026-10-18: WhatsApp's tab title carries an unread counter —
+# "(8) WhatsApp Business" became "(6) ..." while the user stayed in the same
+# chat. Both per-window records ignore that counter and the direction marks
+# Chrome wraps titles in (same rule as rule_engine's _window_title_key; kept
+# separate to avoid a circular import).
+_TITLE_COUNTER = re.compile(r"^\(\d+\)\s*")
+_DIRECTION_MARKS = re.compile("[\u200e\u200f\u202a-\u202e]")
+
+
+def _title_key(title):
+    """The window title without an unread counter or direction marks."""
+    return _TITLE_COUNTER.sub("", _DIRECTION_MARKS.sub("", title or "").strip())
+
 
 def _note_typed_word(state, thread_id, title, current_hkl, fired):
     """A word just ended: record which language it was meant in. A word that
@@ -697,7 +710,8 @@ def _note_typed_word(state, thread_id, title, current_hkl, fired):
     if hwnd is None:
         return
     with _typed_lock:
-        words = _typed_languages.setdefault((hwnd, title), collections.deque(maxlen=TYPED_WORDS_KEPT))
+        words = _typed_languages.setdefault((hwnd, _title_key(title)),
+                                            collections.deque(maxlen=TYPED_WORDS_KEPT))
         words.append("hebrew" if meant_hebrew else "english")
 
 
@@ -705,7 +719,7 @@ def typed_language(hwnd, title):
     """The language the user has mostly typed in this window, or None if
     there's too little typing or no clear leader."""
     with _typed_lock:
-        words = list(_typed_languages.get((hwnd, title), ()))
+        words = list(_typed_languages.get((hwnd, _title_key(title)), ()))
     if len(words) < TYPED_MIN_WORDS:
         return None
     hebrew = words.count("hebrew")
@@ -725,7 +739,7 @@ def typed_recently(thread_id, title, seconds):
     """True if a key was typed in this exact window within `seconds`. Keyed
     by title too, since browser tabs share one thread: typing in one tab
     mustn't hold Tier 3 off a tab you just moved to."""
-    return time.time() - _last_typed.get((thread_id, title), 0) < seconds
+    return time.time() - _last_typed.get((thread_id, _title_key(title)), 0) < seconds
 
 
 def _consumer_loop():
@@ -758,7 +772,7 @@ def _consumer_loop():
 
             last_thread_id = _reset_on_focus_change(state, thread_id, last_thread_id)
             if not (ctrl_held or alt_held) and vk_code not in _MODIFIER_ONLY_VKS:
-                _last_typed[(thread_id, title)] = time.time()
+                _last_typed[(thread_id, _title_key(title))] = time.time()
 
             caps_lock_on = bool(win32api.GetKeyState(win32con.VK_CAPITAL) & 0x0001)
             # Normalize to this module's signed HKL constants for comparison —
@@ -824,8 +838,15 @@ def _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_
             or layout_remap.is_letter_key(vk_code, other_hkl, shift_pressed)):
         return  # still inside a word
 
-    if not fired and vk_code in _WORD_END_RULE_VKS:
-        end_result = word_end_check(state, current_hkl)
+    # The English-layout checks (Hebrew typed on English) also run when the
+    # word ends with punctuation. Found live 2026-10-18: "fcr'" — כבר followed
+    # by the Hebrew comma, which is the ' key on the English layout — was never
+    # checked, since only space/Enter/Tab ran them; "fcr" has no vowel and
+    # would have switched there. The Hebrew-layout rule keeps space/Enter/Tab
+    # only (an apostrophe or quote ends Hebrew abbreviations: מס', מנכ"ל).
+    english_end = current_hkl == ENGLISH_HKL_VALUE and is_word_end_key(vk_code, shift_pressed)
+    if not fired and (vk_code in _WORD_END_RULE_VKS or english_end):
+        end_result = word_end_check(state, current_hkl) if vk_code in _WORD_END_RULE_VKS else None
         if end_result is not None:
             skip_logger.log_skip(
                 exe_name, title, thread_id, skip_logger.REASON_GIBBERISH_SUSPECTED,

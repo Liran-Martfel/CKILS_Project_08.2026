@@ -136,7 +136,7 @@ ENGLISH_WORD_END_OK = {
     "raj", "haj", "hajj", "taj",
     # terminal and chat words the letter model would otherwise take for
     # Hebrew (/code-review, 2026-10-15: "npx" scored 1.96, over the line)
-    "npx", "zsh", "ssh", "nvm", "pnpm", "rpm", "mph", "gps", "url", "urls", "afk", "cnn", "knn", "rgb",
+    "npx", "zsh", "ssh", "nvm", "pnpm", "rpm", "mph", "gps", "url", "urls", "afk", "cnn", "knn", "rgb", "usr",
 }
 COMMA_INSIDE = "comma inside"
 _INTERJECTION_HH = re.compile(r"^[aous]?h+$")  # ahh, ohh, uhh, shh, hhh

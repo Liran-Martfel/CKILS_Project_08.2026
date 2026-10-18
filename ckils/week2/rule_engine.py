@@ -1305,6 +1305,12 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, h
 _TITLE_COUNTER_PREFIX = re.compile(r"^\(\d+\)\s*")
 
 
+def _window_title_key(title):
+    """The title without an unread counter or direction marks: "(8) WhatsApp
+    Business" and "(6) WhatsApp Business" are the same page."""
+    return _TITLE_COUNTER_PREFIX.sub("", DIRECTION_MARKS_PATTERN.sub("", title or "").strip())
+
+
 def _site_of(title):
     """(site, app) from a window title shaped "page - site - app", e.g.
     ("Google Gemini", "Google Chrome") for both "Google Gemini - Google
@@ -1396,6 +1402,16 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     # A real title change on a shared thread (e.g. switching Chrome tabs) means
     # this is genuinely different content, even though thread_id didn't change —
     # see last_title_by_thread above for why this matters.
+    old_title = last_title_by_thread.get(thread_id)
+    if (event == win32con.EVENT_OBJECT_NAMECHANGE and same_thread_as_before and old_title is not None
+            and old_title != title and _window_title_key(old_title) == _window_title_key(title)):
+        # Found live 2026-10-18: WhatsApp's unread counter went (8) -> (6)
+        # while the user stayed in the same chat, typing Hebrew; CKILS took it
+        # for a new page and switched to that title's learned English. Only
+        # the counter changed: same page, same visit — nothing to do.
+        last_title_by_thread[thread_id] = title
+        return
+
     same_site_hkl = None
     if last_title_by_thread.get(thread_id) != title:
         if same_thread_as_before and last_title_by_thread.get(thread_id) is not None:

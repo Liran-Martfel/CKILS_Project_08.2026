@@ -2768,6 +2768,59 @@ class TwoLetterWordEndTests(unittest.TestCase):
         self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
 
 
+class WhatsAppCounterAndPunctuationTests(unittest.TestCase):
+    """Found live 2026-10-18 on WhatsApp: "fi tbh husg fcr' ,usv" (כן אני יודע
+    כבר, תודה) switched only at word 5. The unread counter in the tab title
+    went (8) -> (6) and CKILS took it for a new page (switching to English);
+    and "fcr'" — כבר plus the Hebrew comma, the ' key on English — was never
+    checked, because only space/Enter/Tab ran the English-layout checks."""
+
+    setUp = Tier4AutocorrectWiringTests.setUp
+    tearDown = Tier4AutocorrectWiringTests.tearDown
+    _run = Tier4AutocorrectWiringTests._run
+    _keys = staticmethod(Tier4AutocorrectWiringTests._keys)
+
+    def test_a_word_ending_in_the_hebrew_comma_is_checked(self):
+        """"fcr'" on the English layout: no vowel, switches at the '."""
+        self._run(self._keys("fcr") + [0xDE, 0x20], layout=rule_engine.English_HKL)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.Hebrew_HKL)
+
+    def test_english_contractions_and_paths_stay_english(self):
+        """The part before an apostrophe or slash is judged like a word."""
+        keys = []
+        for word in ("don't", "isn't", "wouldn't", "i'm", "let's", "usr/bin", "and/or"):
+            keys += [0xDE if c == "'" else 0xBF if c == "/" else 0x41 + ord(c) - ord("a") for c in word] + [0x20]
+        self._run(keys, layout=rule_engine.English_HKL)
+        self.assertEqual(self.calls, [])
+
+    def test_a_counter_only_title_change_is_the_same_page(self):
+        """(8) -> (6): nothing posted, even though the "(6)" title has a
+        trusted English history of its own."""
+        harness = SameSiteTitleChangeTests("test_site_is_read_from_the_title")
+        harness.setUp()
+        try:
+            new = "‪(6) WhatsApp Business - Google Chrome‬"
+            rule_engine.page_learned_defaults[rule_engine._page_key("chrome.exe", new)] = {"history": ["english"] * 5}
+            rule_engine.previous_thread = harness.THREAD
+            rule_engine.last_title_by_thread[harness.THREAD] = "‪(8) WhatsApp Business - Google Chrome‬"
+            posted = harness._title_event(new, rule_engine.Hebrew_HKL)
+            self.assertEqual(rule_engine.last_title_by_thread[harness.THREAD], new)
+        finally:
+            harness.tearDown()
+        self.assertEqual(posted, [])
+
+    def test_the_typed_record_ignores_the_counter(self):
+        """Hebrew typed under "(8)" still counts under "(6)"."""
+        keyboard_hook._typed_languages.clear()
+        try:
+            keyboard_hook._typed_languages[(5, keyboard_hook._title_key("(8) WhatsApp Business"))] = \
+                collections.deque(["hebrew"] * 3)
+            self.assertEqual(keyboard_hook.typed_language(5, "(6) WhatsApp Business"), "hebrew")
+        finally:
+            keyboard_hook._typed_languages.clear()
+
+
 class TypedLanguageTests(unittest.TestCase):
     """The user's idea, 2026-10-17: remember which language was actually
     typed in each window, and use it when they come back. Kept across focus

@@ -3125,6 +3125,21 @@ log had shown no clear harm either way; it is a cheap safeguard on top of the ty
 clear read of genuinely new content (a new WhatsApp chat under the same title) still switches. 5 new
 tests. 239 pass.
 
+**2026-10-18 — WhatsApp: an unread counter is not a new page; punctuation ends a word too.** "fi tbh
+husg fcr' ,usv" (כן אני יודע כבר, תודה) typed on English in WhatsApp switched only at word 5. Two
+causes in the log. First, half a minute earlier, the tab title went "(8) WhatsApp Business" -> "(6)
+WhatsApp Business" — only the unread count — and CKILS treated it as a new page, applying that title's
+learned English. A title change that differs only by the counter (and direction marks) is now the same
+page and the same visit: nothing switches; the typed-language record and the typing guard ignore the
+counter too. Second, "fcr'": the Hebrew comma is the ' key on the English layout, and the English-layout
+checks ran only at space/Enter/Tab — so a word ending in punctuation was never checked, though "fcr"
+has no vowel. They now also run at punctuation on the English layout (the Hebrew-layout rule keeps
+space/Enter/Tab, for מס' and מנכ"ל). Replayed: the sentence switches at word 4; English contractions
+and paths (don't, i'm, let's, and/or, usr/bin — "usr" added to the allowed list) stay English. The
+first two words remain: "fi" (כן) is too short to judge, and "tbh" (אני) is on the allowed list by the
+user's choice. Also seen in the log since the last build: the weaker-read rule held once (Google
+Calendar), the typed-language rule once. 4 new tests. 243 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
