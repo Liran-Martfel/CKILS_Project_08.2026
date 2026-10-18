@@ -10,6 +10,7 @@ see that guard's own comment for why.
 import collections
 import ctypes
 import datetime
+import json
 import os
 import queue
 import shutil
@@ -2957,6 +2958,58 @@ class InterfaceTextTests(unittest.TestCase):
                                                title="Chat 7 - Claude - Google Chrome")
         self.assertEqual(result, (rule_engine.English_HKL, None))
         self.assertEqual(reasons, ["rejected_noise"])
+
+
+class RetentionTests(unittest.TestCase):
+    """The user's call, 2026-10-18: text is kept 365 days, screenshots 60.
+    The reads database, which had no retention at all, gets the same 365."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ckils_retention_")
+        self.shots = os.path.join(self.tmp, "screenshots")
+        os.makedirs(self.shots)
+        self.log = os.path.join(self.tmp, "decisions.jsonl")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _entry(self, days_ago, shot):
+        when = (datetime.datetime.now() - datetime.timedelta(days=days_ago)).isoformat()
+        open(os.path.join(self.shots, shot), "wb").close()
+        return json.dumps({"timestamp": when, "event_type": "auto", "text": f"read {days_ago}",
+                           "screenshot": os.path.join(self.shots, shot)}) + "\n"
+
+    def test_text_stays_a_year_screenshots_sixty_days(self):
+        with open(self.log, "w", encoding="utf-8") as f:
+            f.write(self._entry(10, "new.png") + self._entry(100, "mid.png") + self._entry(400, "old.png"))
+        with patch.object(decision_logger, "LOG_FILE", self.log),              patch.object(decision_logger, "SCREENSHOTS_DIR", self.shots):
+            decision_logger.prune_old_logs()
+        entries = [json.loads(l) for l in open(self.log, encoding="utf-8")]
+        self.assertEqual([e["text"] for e in entries], ["read 10", "read 100"])
+        self.assertIsNotNone(entries[0]["screenshot"])
+        self.assertIsNone(entries[1]["screenshot"])
+        self.assertEqual(sorted(os.listdir(self.shots)), ["new.png"])
+
+    def test_the_reads_database_is_pruned_after_a_year(self):
+        db = os.path.join(self.tmp, "ckils_decisions.db")
+        old = (datetime.datetime.now() - datetime.timedelta(days=400)).isoformat()
+        new = datetime.datetime.now().isoformat()
+        with patch.object(rule_engine, "DECISIONS_DB_FILE", db):
+            rule_engine.init_decisions_db()
+            conn = sqlite3.connect(db)
+            for when in (old, new):
+                conn.execute("INSERT INTO decisions (timestamp, exe_name, title, thread_id, source, text, "
+                             "predicted_label, confidence, applied) VALUES (?, 'x', 't', 1, 'ocr', 'hi', "
+                             "'english', 0.9, 1)", (when,))
+                conn.execute("INSERT INTO overrides (timestamp, exe_name, title, thread_id, overridden_to_hkl) "
+                             "VALUES (?, 'x', 't', 1, 1)", (when,))
+            conn.commit()
+            conn.close()
+            rule_engine.prune_decisions_db()
+            conn = sqlite3.connect(db)
+            left = [conn.execute(f"SELECT timestamp FROM {t}").fetchall() for t in ("decisions", "overrides")]
+            conn.close()
+        self.assertEqual(left, [[(new,)], [(new,)]])
 
 
 class TypedLanguageTests(unittest.TestCase):

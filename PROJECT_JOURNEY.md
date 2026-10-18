@@ -3188,6 +3188,20 @@ stored in `interface_text.json` — never readable text, titles or site names (a
 file). Personal data like the learned defaults: git-ignored, never packaged; the teacher's copy starts
 empty and learns. The tests write to a temporary folder. 5 new tests. 255 pass.
 
+**Text kept a year, screenshots 60 days — and the reads database finally gets a limit.** The user's
+call: keep text 365 days, so there is more real data to label and train on later; keep screenshots 60
+(the logs were ~18 MB/day, almost all screenshots — a year of them would be ~6.5 GB). The decision log
+now keeps entries 365 days and drops each entry's screenshot reference at 60 (the files themselves
+are deleted then); the skip log keeps 365 too. Found while doing it: `ckils_decisions.db` — the text
+of every read and every manual override — had no retention at all and had kept everything since Sep 3,
+although the page told the reader "60 days". It is now pruned to 365 days at startup like the rest.
+The teacher's page lists it in the storage table and in how to clear your data. Also checked, at the
+user's request, whether the retrained Tier 3 model is really better on real use: since the swap, 0 of
+174 screen-read switches were undone by hand (old model: 12% of 995, though other fixes landed at the
+same time); on the SAME 3,179 real reads, the old model acted on 107 junk reads the new one refused
+(search URLs, "Editor Group 1 (empty)", garbled OCR), and the new one acted on 358 more, 344 of them a
+single English-site header. Kept. 2 new tests. 257 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

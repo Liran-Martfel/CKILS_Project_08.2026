@@ -77,7 +77,7 @@ DESIGN GUARANTEES (each one exists to prevent a specific bug — see the plan)
     5. Inert until start() is called. Importing this module (as the test suite
        does) opens no file and starts no thread.
     6. Privacy: only the first MAX_DETAIL_CHARS characters of rejected UI text
-       are stored. Local only, same 60-day retention as the decision log.
+       are stored. Local only, same 365-day retention as the decision log's text.
 
 IF SOMETHING GOES WRONG — the failure plan (read this before changing anything
 else in CKILS, so a bug here never becomes a reason to undo other work)
@@ -130,7 +130,7 @@ DEDUPE_WINDOW_SECONDS = 600     # same window + title + reason is logged at most
 MAX_ROWS_PER_HOUR = 120         # hard global cap, protects against volatile titles (e.g. unread counters)
 QUEUE_MAX = 500                 # rows waiting for the writer; more are dropped, never waited on
 MAX_TRACKED_KEYS = 2000         # bound on the de-duplication memory
-RETENTION_DAYS = 60             # matches the decision log's retention
+RETENTION_DAYS = 365            # matches the decision log's text retention (the user's call, 2026-10-18)
 MAX_DETAIL_CHARS = 60           # privacy: how much rejected text is ever stored
 WRITER_FAILURE_LIMIT = 5        # consecutive write failures before the logger disables itself
 

@@ -305,6 +305,27 @@ def log_override(exe_name, title, thread_id, overridden_to_hkl):
 init_decisions_db()
 
 
+def prune_decisions_db():
+    """Deletes reads and overrides older than decision_logger.RETENTION_DAYS.
+    Found 2026-10-18: this database — the text of every read — had no
+    retention at all, though the decision log beside it did. Runs once at
+    startup; a failure only skips the cleanup."""
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=decision_logger.RETENTION_DAYS)).isoformat()
+    try:
+        with decisions_db_lock:
+            conn = sqlite3.connect(DECISIONS_DB_FILE)
+            conn.execute("DELETE FROM decisions WHERE timestamp < ?", (cutoff,))
+            conn.execute("DELETE FROM overrides WHERE timestamp < ?", (cutoff,))
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        if DEBUG:
+            print(f"  [content] decisions db cleanup skipped ({e})")
+
+
+prune_decisions_db()
+
+
 page_learned_defaults = load_page_learned_defaults()
 
 last_set = {}          # hwnd -> HKL we last set (or the user's manual choice) for that window

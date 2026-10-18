@@ -6,7 +6,8 @@ be diagnosed from real evidence later instead of guessed at. rule_engine.py
 calls log_auto_change/log_manual_override on every real decision;
 review_decisions.py later reads this data back to find cases worth a human's
 attention. Old entries and their screenshots are pruned automatically after
-RETENTION_DAYS so this doesn't grow forever.
+RETENTION_DAYS so this doesn't grow forever — and screenshots, the bulk of
+the disk use, already after SCREENSHOT_RETENTION_DAYS.
 """
 import os
 import sys
@@ -37,7 +38,11 @@ DEBUG = True
 LOGS_DIR = os.path.join(_persistent_dir(), "logs")
 SCREENSHOTS_DIR = os.path.join(LOGS_DIR, "screenshots")
 LOG_FILE = os.path.join(LOGS_DIR, "decisions.jsonl")
-RETENTION_DAYS = 60
+# The user's call, 2026-10-18: a year of text, so there is more real data to
+# label and train on later (~18 MB/day of logs is almost all screenshots; a
+# year of them would be ~6.5 GB), while screenshots stay 60 days.
+RETENTION_DAYS = 365
+SCREENSHOT_RETENTION_DAYS = 60
 
 os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
 
@@ -142,12 +147,15 @@ def log_manual_override(exe_name, title, thread_id, new_language):
 
 
 def prune_old_logs():
-    """Drops every log entry older than RETENTION_DAYS and deletes any
-    screenshot no longer referenced by a surviving entry (including
-    screenshots referenced only via another entry's preceding_auto). Keeps
-    the log and screenshots folder from growing forever.
+    """Drops every log entry older than RETENTION_DAYS, removes the
+    screenshot reference from entries older than SCREENSHOT_RETENTION_DAYS
+    (the entry's text stays), and deletes any screenshot no longer
+    referenced by a surviving entry (including screenshots referenced only
+    via another entry's preceding_auto). Keeps the log and screenshots
+    folder from growing forever.
     """
     cutoff = datetime.datetime.now() - datetime.timedelta(days=RETENTION_DAYS)
+    screenshot_cutoff = datetime.datetime.now() - datetime.timedelta(days=SCREENSHOT_RETENTION_DAYS)
     if not os.path.exists(LOG_FILE):
         return
 
@@ -168,6 +176,17 @@ def prune_old_logs():
                 continue  # drop unparseable lines rather than let them accumulate forever
             if ts < cutoff:
                 continue
+            if ts < screenshot_cutoff:
+                changed = False
+                if entry.get("screenshot"):
+                    entry["screenshot"] = None
+                    changed = True
+                preceding = entry.get("preceding_auto")
+                if preceding and preceding.get("screenshot"):
+                    preceding["screenshot"] = None
+                    changed = True
+                if changed:
+                    line = json.dumps(entry, ensure_ascii=False) + "\n"
             kept_lines.append(line)
             shot = entry.get("screenshot")
             if shot:
