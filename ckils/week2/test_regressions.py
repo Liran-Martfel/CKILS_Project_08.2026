@@ -25,6 +25,12 @@ import skip_logger
 import gibberish_detector
 import layout_remap
 import keyboard_hook
+import interface_text
+
+# The tests must never write the real learned file: point it at a temporary
+# folder for the whole run, starting empty.
+interface_text.FILE = os.path.join(tempfile.mkdtemp(prefix="ckils_tests_"), "interface_text.json")
+interface_text._data.clear()
 
 
 class PlaceholderRejectionTests(unittest.TestCase):
@@ -2893,6 +2899,64 @@ class MeasureCorrectionsTests(unittest.TestCase):
         autos = [(self._at(0), 1, "hebrew")]
         tests = [(self._at(-10), self._at(100))]
         self.assertEqual(self._classify(60, 1, "english", autos, tests), "test session")
+
+
+class InterfaceTextTests(unittest.TestCase):
+    """Future idea "learn where the real text is", built 2026-10-18: text read
+    on PAGES_TO_LEARN other pages of the same app is its interface, not the
+    user's content. Replayed on the log, all 26 texts it would block were
+    interface text (address bar, player label, input placeholders...)."""
+
+    def setUp(self):
+        interface_text._data.clear()
+
+    tearDown = setUp
+
+    def _read_on(self, text, *titles, exe="chrome.exe"):
+        for title in titles:
+            interface_text.record(exe, title, text)
+
+    def test_text_on_three_other_pages_is_interface(self):
+        pages = [f"Video {i} - YouTube - Google Chrome" for i in range(3)]
+        self._read_on("נגן הסרטונים של YouTube", *pages)
+        self.assertTrue(interface_text.is_interface_text(
+            "chrome.exe", "Video 9 - YouTube - Google Chrome", "נגן הסרטונים של YouTube"))
+
+    def test_the_same_page_again_does_not_count(self):
+        """Re-reading one page (or a WhatsApp chat under one title) many
+        times is still one page."""
+        self._read_on("Hello there", *["(3) WhatsApp Business - Google Chrome"] * 5)
+        self.assertEqual(interface_text.pages_seen(
+            "chrome.exe", "Other - WhatsApp Business - Google Chrome", "Hello there"), 0)
+
+    def test_other_sites_and_other_text_are_separate(self):
+        """Interface text belongs to one site; real content differs."""
+        pages = [f"Chat {i} - Claude - Google Chrome" for i in range(3)]
+        self._read_on("Let's noodle", *pages)
+        self.assertFalse(interface_text.is_interface_text(
+            "chrome.exe", "Chat 1 - Google Gemini - Google Chrome", "Let's noodle"))
+        self.assertFalse(interface_text.is_interface_text(
+            "chrome.exe", "Chat 9 - Claude - Google Chrome", "something I actually wrote"))
+
+    def test_only_fingerprints_reach_the_disk(self):
+        """No readable text, title or site name is ever saved."""
+        self._read_on("כאן אפשר לשאול מה שרוצים", "Search - Google - Google Chrome")
+        interface_text.save_if_due(force=True)
+        with open(interface_text.FILE, encoding="utf-8") as f:
+            saved = f.read()
+        for secret in ("כאן", "Google", "Search", "chrome"):
+            self.assertNotIn(secret, saved)
+
+    def test_tier3_never_decides_on_interface_text(self):
+        """Through decide_with_content: learned interface text is rejected
+        as noise and the current language is kept."""
+        pages = [f"Chat {i} - Claude - Google Chrome" for i in range(3)]
+        self._read_on("Let's noodle", *pages)
+        control = _FakeControl(rect=_FakeRect(100, 100, 600, 160), name="")
+        result, reasons = SkipWiringTests._run(self, control, read_text="Let's noodle",
+                                               title="Chat 7 - Claude - Google Chrome")
+        self.assertEqual(result, (rule_engine.English_HKL, None))
+        self.assertEqual(reasons, ["rejected_noise"])
 
 
 class TypedLanguageTests(unittest.TestCase):

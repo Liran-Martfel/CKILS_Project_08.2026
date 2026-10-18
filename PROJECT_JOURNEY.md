@@ -3165,6 +3165,29 @@ carried over. Real corrections per 100 automatic switches: 4.1 (Sep 15-19) -> 6.
 days, with lighter use than usual: a promising sign, not proof yet. Re-run after the freeze for the
 submission. 5 new tests. 250 pass.
 
+**Learning which text is an app's own interface — `interface_text.py` (future idea, built).** The
+future idea was "learn where the real text is". Measured first: of 2,966 Tier 3 switches, the ones
+the user undid were mostly the SAME interface strings read again and again — Chrome's address bar,
+YouTube's player label, the Gemini/Google/Claude input placeholders, the translate notice, WhatsApp's
+chat-list header, "Claude Code conversation". Every one of those had been found by hand and added to a
+hand-written list over the past month. The general signal: real content changes from page to page,
+interface text repeats. So CKILS now learns it: per app (per site in a browser), it counts on how many
+different pages (titles, unread counter ignored) each exact text was read; once a text has been read on
+3 other pages, Tier 3 rejects it as interface text and keeps the current language.
+
+Checked before building, on the log: the rule would have blocked 410 switches, and all 26 distinct
+texts behind them were interface text. The undone rate of blocked vs kept switches was the same (8-9%)
+— the honest reason being that on pages where the user only watches (YouTube), a wrong language is
+never undone; a switch decided on interface text is wrong by definition. After building, the learner
+was pre-trained from the local decision database (76,895 reads, 10,889 distinct texts) and 112 texts
+came out as interface — all 112 checked by eye: interface or OCR noise (player labels, toolbars,
+placeholders, price strips, sidebar chat names), none of the user's writing.
+
+Privacy: only fingerprints (16 hex chars of SHA-256) of the app/site, the text and the page title are
+stored in `interface_text.json` — never readable text, titles or site names (a test checks the saved
+file). Personal data like the learned defaults: git-ignored, never packaged; the teacher's copy starts
+empty and learns. The tests write to a temporary folder. 5 new tests. 255 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
@@ -3173,6 +3196,8 @@ Ideas worth keeping for later, written down as they come up so they don't get lo
 not designed in detail yet, just captured.
 
 **2026-09-16 — A second learning system: which control actually has the real content**
+**Status:** built — 2026-10-18, as interface_text.py: learns which text is an app's own interface (see that day's entry).
+
 
 Everything CKILS learns today is about *language* — which app/page tends to be Hebrew or English.
 Nothing learns *where to look* — that's fixed, hand-written logic (the sibling-redirect heuristic,

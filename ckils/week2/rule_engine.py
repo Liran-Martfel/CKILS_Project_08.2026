@@ -43,6 +43,7 @@ from ocr_reader import read_region
 from predict_language import predict_language
 import decision_logger
 import skip_logger
+import interface_text
 import keyboard_hook
 
 # Set to False for a quiet, end-user-facing run — True prints a line for every
@@ -1092,6 +1093,20 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
         skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_REJECTED_NOISE,
                              f"{rejection_reason}: {text}")
         return fallback_hkl, None
+
+    # Learned, not hand-written (2026-10-18): text already read on several
+    # other pages of this app is the app's own interface — an address bar, a
+    # player label, an input placeholder, a greeting — not the user's content.
+    # Google Docs titles are excluded: there the title IS the evidence.
+    if source != "google_docs_title":
+        seen = interface_text.pages_seen(exe_name, title, text)
+        interface_text.record(exe_name, title, text)
+        if seen >= interface_text.PAGES_TO_LEARN:
+            if DEBUG:
+                print(f"  [content] read on {seen} other pages of this app, so it's interface text: {text[:60]!r}")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_REJECTED_NOISE,
+                                 f"interface text (read on {seen} other pages): {text}")
+            return fallback_hkl, None
 
     try:
         label, proba = predict_language(text)

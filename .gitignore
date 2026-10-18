@@ -8,6 +8,7 @@ __pycache__/
 # Per-machine memory the program builds itself (not hand-written, not shared)
 ckils/week2/learned_defaults.json
 ckils/week2/page_learned_defaults.json
+ckils/week2/interface_text.json
 ckils/week2/ckils_decisions.db
 
 # Runtime log the uiautomation library writes automatically on errors
