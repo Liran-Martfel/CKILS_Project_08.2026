@@ -122,6 +122,7 @@ REASON_GIBBERISH_SUSPECTED = "gibberish_suspected"  # Tier 4 Phase 1 (keyboard_h
 REASON_TIER4_RESPECTED = "tier4_respected"          # Tier 3 held off: Tier 4 already corrected this window from real typing this visit
 REASON_TYPING_RESPECTED = "typing_respected"        # Tier 3 held off: the user was typing in this window just now
 REASON_TYPED_RESPECTED = "typed_respected"          # Tier 3 held off: it disagreed with what the user typed most in this window
+REASON_OVERRIDE_OUTVOTED = "override_outvoted"      # Tier 4: 2 strong wrong-layout words after a "manual switch" — typing wins
 REASON_WEAKER_READ = "weaker_read"                  # Tier 3 held off: less confident than the read that already decided this visit
 
 ENABLED = True

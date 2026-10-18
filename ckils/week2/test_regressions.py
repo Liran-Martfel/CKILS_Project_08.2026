@@ -2581,14 +2581,36 @@ class ApplyTier4CorrectionTests(unittest.TestCase):
         while the layout is still the one the user chose (Hebrew here)."""
         rule_engine.overridden.add(self.THREAD)
         rule_engine.override_hkl[self.THREAD] = rule_engine.Hebrew_HKL
+        rule_engine.override_strikes.pop(self.THREAD, None)
         try:
             applied, post, *_ = self._apply()
         finally:
             rule_engine.overridden.discard(self.THREAD)
             rule_engine.override_hkl.pop(self.THREAD, None)
+            rule_engine.override_strikes.pop(self.THREAD, None)
         self.assertFalse(applied)
         post.assert_not_called()
         self.assertNotIn(self.THREAD, rule_engine.tier4_corrected)
+
+    def test_two_wrong_layout_words_outvote_a_manual_switch(self):
+        """Found live 2026-10-18: a "manual switch" the user never made
+        blocked Tier 4 for a whole English message typed on Hebrew. The
+        first strong word still respects it; the second outvotes it."""
+        rule_engine.overridden.add(self.THREAD)
+        rule_engine.override_hkl[self.THREAD] = rule_engine.Hebrew_HKL
+        rule_engine.override_strikes.pop(self.THREAD, None)
+        try:
+            first, post1, *_ = self._apply()
+            second, post2, *_ = self._apply()
+            still_overridden = self.THREAD in rule_engine.overridden
+        finally:
+            rule_engine.overridden.discard(self.THREAD)
+            rule_engine.override_hkl.pop(self.THREAD, None)
+            rule_engine.override_strikes.pop(self.THREAD, None)
+        self.assertFalse(first)
+        post1.assert_not_called()
+        self.assertTrue(second)
+        self.assertFalse(still_overridden)
 
     def test_a_stale_override_does_not_block(self):
         """Found live 2026-10-18: the user chose Hebrew by hand, something

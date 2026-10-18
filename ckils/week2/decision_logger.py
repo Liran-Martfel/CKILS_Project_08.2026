@@ -128,10 +128,12 @@ def log_auto_change(exe_name, title, thread_id, previous_language, new_language,
         _last_auto_decision[thread_id] = entry
 
 
-def log_manual_override(exe_name, title, thread_id, new_language):
+def log_manual_override(exe_name, title, thread_id, new_language, seconds_since_arrival=None):
     """Call whenever a manual override is detected. Per design: no separate
     screenshot or detailed reasoning for the manual act itself — just the
-    automatic decision (if any) that was in effect immediately before it."""
+    automatic decision (if any) that was in effect immediately before it,
+    and how long after arriving in the window it was seen (2026-10-18: to
+    tell real switches from Windows re-syncing the language late)."""
     with _last_auto_lock:
         preceding_auto = _last_auto_decision.get(thread_id)
     entry = {
@@ -143,6 +145,8 @@ def log_manual_override(exe_name, title, thread_id, new_language):
         "new_language": new_language,
         "preceding_auto": preceding_auto,
     }
+    if seconds_since_arrival is not None:
+        entry["seconds_since_arrival"] = round(seconds_since_arrival, 1)
     _append(entry)
 
 

@@ -3202,6 +3202,22 @@ same time); on the SAME 3,179 real reads, the old model acted on 107 junk reads 
 (search URLs, "Editor Group 1 (empty)", garbled OCR), and the new one acted on 358 more, 344 of them a
 single English-site header. Kept. 2 new tests. 257 pass.
 
+**A false "manual switch" blocked a whole message — typing now outvotes an override.** The user typed a
+whole English message on the Hebrew layout in VS Code and nothing switched, though the log shows almost
+every word flagged, including two "letter-model + rule" hits. One row explained it: at 22:32:24 CKILS
+had recorded a manual switch to Hebrew — which the user confirmed they never made (they switched only
+after sending). Most likely cause: arriving from Chrome (Hebrew), CKILS set English, the layout matched
+once, and Windows re-synced the previous window's language a few seconds later — read as the user's
+switch, since only changes BEFORE the first match counted as carry-over. A second, smaller miss in
+Google: "avatar" (שהשאשר) scores -0.07 (looks Hebrew-ish), "the" only marked, and "seven" (1.49) was
+completed by clicking a suggestion — a mouse click is no word end for the keyboard hook.
+
+Fixed at the level that covers any cause: OVERRIDE_OUTVOTE_WORDS = 2 switch-strength wrong-layout words
+after a "manual switch" drop it and switch (`override_outvoted`). After a real manual switch the user
+types in the language chosen, so it never triggers; after a false one it fixes the layout at the
+second word. Manual overrides now also log `seconds_since_arrival`, to confirm or rule out the
+re-sync theory from real data. 1 new test. 258 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

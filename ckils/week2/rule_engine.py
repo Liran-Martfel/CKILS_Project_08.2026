@@ -332,6 +332,16 @@ last_set = {}          # hwnd -> HKL we last set (or the user's manual choice) f
 last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
 overridden = set()     # hwnd the user manually overrode, not yet reset
 override_hkl = {}      # thread_id -> the layout the user chose in that override
+# Found live 2026-10-18: a "manual override" the user never made (most likely
+# Windows re-syncing the previous window's language a few seconds after
+# arrival) blocked Tier 4 for a whole English message typed on Hebrew. An
+# override is now outvoted by OVERRIDE_OUTVOTE_WORDS switch-strength
+# wrong-layout words: after a real manual switch the user types in the
+# language chosen, so this never happens; after a false one it fixes the
+# layout at the second word.
+OVERRIDE_OUTVOTE_WORDS = 2
+override_strikes = {}  # thread_id -> Tier 4 corrections blocked by the current override
+visit_started = {}     # thread_id -> when this visit began (for the override log)
 SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 
 # Tier 4 Phase 2 (2026-10-14): thread_ids whose layout Tier 4 auto-corrected
@@ -1322,6 +1332,7 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, h
     pending_override.pop(thread_id, None)
     overridden.add(thread_id)
     override_hkl[thread_id] = actual_hkl
+    override_strikes.pop(thread_id, None)
     last_set[thread_id] = actual_hkl  # treat the user's manual choice as the new "last known" state
     log_override(exe_name, title, thread_id, actual_hkl)  # real, free evidence a recent decision was wrong
     # A manual override is the user telling CKILS, with certainty, what this
@@ -1335,7 +1346,9 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, h
     if override_language is not None:
         save_learned_default(exe_name, override_language)
         save_page_learned_default(exe_name, title, override_language)
-    decision_logger.log_manual_override(exe_name, title, thread_id, override_language)
+    arrived = visit_started.get(thread_id)
+    decision_logger.log_manual_override(exe_name, title, thread_id, override_language,
+                                        time.time() - arrived if arrived else None)
     print(f"{exe_name}: manual override detected, leaving it alone")
     return True
 
@@ -1403,6 +1416,8 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         if hwnd != win32gui.GetForegroundWindow():
             return
     same_thread_as_before = previous_thread == thread_id
+    if not same_thread_as_before:
+        visit_started[thread_id] = time.time()  # arriving in this window
     if previous_thread is not None and previous_thread != thread_id:
         if previous_thread in overridden:
             overridden.discard(previous_thread)
@@ -1464,6 +1479,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             last_set.pop(thread_id, None)
         content_decision.pop(thread_id, None)
         content_confidence.pop(thread_id, None)
+        visit_started[thread_id] = time.time()  # a new page is a new visit
         google_docs_title_already_applied.discard(thread_id)
         _reset_visit_state(thread_id)
         old_key = (thread_id, last_title_by_thread.get(thread_id))
@@ -1710,8 +1726,15 @@ def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hk
         # If something else changed the layout since, the override no longer
         # describes what the user is typing in (found live 2026-10-18: an
         # override to Hebrew blocked fixing Hebrew typed on English).
-        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_OVERRIDE_RESPECTED, "tier4")
-        return False
+        override_strikes[thread_id] = override_strikes.get(thread_id, 0) + 1
+        if override_strikes[thread_id] < OVERRIDE_OUTVOTE_WORDS:
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_OVERRIDE_RESPECTED, "tier4")
+            return False
+        # Typing outvoted it: the "manual" choice was a mistake or never real.
+        overridden.discard(thread_id)
+        override_strikes.pop(thread_id, None)
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_OVERRIDE_OUTVOTED,
+                             f"{OVERRIDE_OUTVOTE_WORDS} wrong-layout words")
     if win32gui.GetForegroundWindow() != hwnd:
         return False  # focus moved on between the keystroke and this call
     win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
