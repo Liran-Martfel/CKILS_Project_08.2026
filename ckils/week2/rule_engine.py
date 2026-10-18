@@ -309,6 +309,7 @@ page_learned_defaults = load_page_learned_defaults()
 last_set = {}          # hwnd -> HKL we last set (or the user's manual choice) for that window
 last_switch_time = {}  # hwnd -> time.time() of our last switch attempt
 overridden = set()     # hwnd the user manually overrode, not yet reset
+override_hkl = {}      # thread_id -> the layout the user chose in that override
 SWITCH_GRACE = 0.3     # seconds to ignore mismatches right after we switch
 
 # Tier 4 Phase 2 (2026-10-14): thread_ids whose layout Tier 4 auto-corrected
@@ -1284,6 +1285,7 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, h
     # Same mismatch confirmed independently on a second check — trust it now.
     pending_override.pop(thread_id, None)
     overridden.add(thread_id)
+    override_hkl[thread_id] = actual_hkl
     last_set[thread_id] = actual_hkl  # treat the user's manual choice as the new "last known" state
     log_override(exe_name, title, thread_id, actual_hkl)  # real, free evidence a recent decision was wrong
     # A manual override is the user telling CKILS, with certainty, what this
@@ -1416,6 +1418,14 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
     if last_title_by_thread.get(thread_id) != title:
         if same_thread_as_before and last_title_by_thread.get(thread_id) is not None:
             same_site_hkl = _same_site_hkl(thread_id, last_title_by_thread[thread_id], title)
+        if thread_id in overridden:
+            # Found live 2026-10-18: Chrome's tabs share one thread, so a manual
+            # switch in a New Tab page kept "protecting" every tab after it —
+            # two minutes later Tier 4 stood down on a whole Hebrew sentence
+            # typed on English in another page. A manual choice belongs to the
+            # page it was made on: a new page ends it, like leaving the window.
+            overridden.discard(thread_id)
+            last_set.pop(thread_id, None)
         content_decision.pop(thread_id, None)
         content_confidence.pop(thread_id, None)
         google_docs_title_already_applied.discard(thread_id)
@@ -1646,8 +1656,9 @@ def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hk
     wrong thing.
 
     Design decisions made with the user, 2026-10-14:
-      - A real manual override always wins: skipped if thread_id is in
-        `overridden` (same lifecycle — clears when focus leaves and returns).
+      - A real manual override wins: skipped if thread_id is in
+        `overridden` AND the layout is still the one the user chose
+        (override_hkl). It ends when focus leaves, or the page changes.
       - Does NOT feed learned defaults (no save_learned_default /
         save_page_learned_default): Tier 4 is a narrow structural signal,
         not a full content read, and must not contaminate trust history.
@@ -1658,7 +1669,11 @@ def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hk
         characters the user just typed, breaking Tier 4's guarantee that
         typed content is never written to disk.
     """
-    if thread_id in overridden:
+    if thread_id in overridden and override_hkl.get(thread_id) == from_hkl:
+        # Respected only while the user's own choice is still on the keyboard.
+        # If something else changed the layout since, the override no longer
+        # describes what the user is typing in (found live 2026-10-18: an
+        # override to Hebrew blocked fixing Hebrew typed on English).
         skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_OVERRIDE_RESPECTED, "tier4")
         return False
     if win32gui.GetForegroundWindow() != hwnd:

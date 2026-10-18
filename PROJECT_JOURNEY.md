@@ -3140,6 +3140,16 @@ first two words remain: "fi" (כן) is too short to judge, and "tbh" (אני) is
 user's choice. Also seen in the log since the last build: the weaker-read rule held once (Google
 Calendar), the typed-language rule once. 4 new tests. 243 pass.
 
+**A manual switch belongs to its page (same evening).** A whole Hebrew sentence typed on English in
+Google ("nv t,v guav atbh hfuk kgau, ..." — מה אתה עושה שאני יכול לעשות, ...) never switched,
+though the log shows every word detected. One row explained it: `override_respected tier4`. Two
+minutes earlier the user had switched to Hebrew by hand in Chrome's New Tab page; Chrome's tabs share
+one thread, and a manual override lasted until focus left the THREAD — so it kept "protecting" every
+tab, even after another tab had set English and the user's own choice (Hebrew) was no longer on the
+keyboard. Two fixes: a new page (title change) on the same thread now ends the override, like
+leaving the window; and Tier 4 respects an override only while the layout is still the one the user
+chose. 2 new tests, 1 updated. 245 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

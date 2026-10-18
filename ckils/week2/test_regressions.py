@@ -2569,12 +2569,31 @@ class ApplyTier4CorrectionTests(unittest.TestCase):
         self.assertEqual(rule_engine.content_decision[self.THREAD], rule_engine.English_HKL)
 
     def test_manual_override_wins(self):
-        """Design decision 1: the user's own manual override is respected."""
+        """Design decision 1: the user's own manual override is respected —
+        while the layout is still the one the user chose (Hebrew here)."""
         rule_engine.overridden.add(self.THREAD)
-        applied, post, *_ = self._apply()
+        rule_engine.override_hkl[self.THREAD] = rule_engine.Hebrew_HKL
+        try:
+            applied, post, *_ = self._apply()
+        finally:
+            rule_engine.overridden.discard(self.THREAD)
+            rule_engine.override_hkl.pop(self.THREAD, None)
         self.assertFalse(applied)
         post.assert_not_called()
         self.assertNotIn(self.THREAD, rule_engine.tier4_corrected)
+
+    def test_a_stale_override_does_not_block(self):
+        """Found live 2026-10-18: the user chose Hebrew by hand, something
+        later set English, and Hebrew typed on English was never fixed.
+        The override no longer describes the keyboard: Tier 4 proceeds."""
+        rule_engine.overridden.add(self.THREAD)
+        rule_engine.override_hkl[self.THREAD] = rule_engine.English_HKL
+        try:
+            applied, post, *_ = self._apply()
+        finally:
+            rule_engine.overridden.discard(self.THREAD)
+            rule_engine.override_hkl.pop(self.THREAD, None)
+        self.assertTrue(applied)
 
     def test_never_feeds_learned_defaults(self):
         """Design decision 2: kept separate from trust history."""
@@ -2766,6 +2785,25 @@ class TwoLetterWordEndTests(unittest.TestCase):
         self._run([0x41, 0x4E, 0x20])
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
+
+
+class OverrideBelongsToItsPageTests(unittest.TestCase):
+    """Found live 2026-10-18: a manual switch in Chrome's New Tab page kept
+    blocking Tier 4 in another tab two minutes later (tabs share a thread).
+    A new page ends the override, like leaving the window."""
+
+    def test_a_new_page_in_the_same_thread_ends_the_override(self):
+        harness = SameSiteTitleChangeTests("test_site_is_read_from_the_title")
+        harness.setUp()
+        try:
+            rule_engine.previous_thread = harness.THREAD
+            rule_engine.last_title_by_thread[harness.THREAD] = "‫כרטיסייה חדשה - Google Chrome‬"
+            rule_engine.overridden.add(harness.THREAD)
+            harness._title_event("Liran-Martfel/CKILS - GitHub - Google Chrome", rule_engine.Hebrew_HKL)
+            self.assertNotIn(harness.THREAD, rule_engine.overridden)
+        finally:
+            rule_engine.overridden.discard(harness.THREAD)
+            harness.tearDown()
 
 
 class WhatsAppCounterAndPunctuationTests(unittest.TestCase):
