@@ -9,6 +9,7 @@ see that guard's own comment for why.
 """
 import collections
 import ctypes
+import datetime
 import os
 import queue
 import shutil
@@ -2857,6 +2858,41 @@ class WhatsAppCounterAndPunctuationTests(unittest.TestCase):
             self.assertEqual(keyboard_hook.typed_language(5, "(6) WhatsApp Business"), "hebrew")
         finally:
             keyboard_hook._typed_languages.clear()
+
+
+class MeasureCorrectionsTests(unittest.TestCase):
+    """measure_corrections.py sorts each recorded manual override by its
+    most likely cause, so real corrections can be counted cleanly."""
+
+    T0 = datetime.datetime(2026, 10, 16, 12, 0, 0)
+
+    def _at(self, seconds):
+        return self.T0 + datetime.timedelta(seconds=seconds)
+
+    def _classify(self, when, thread, language, autos, tests=()):
+        import measure_corrections
+        return measure_corrections.classify(self._at(when), thread, language, autos, list(tests))
+
+    def test_right_after_ckils_own_switch_is_lag(self):
+        autos = [(self._at(0), 1, "hebrew")]
+        self.assertEqual(self._classify(3, 1, "english", autos), "CKILS lag")
+
+    def test_switching_back_a_recent_ckils_decision_is_undid(self):
+        autos = [(self._at(0), 1, "hebrew")]
+        self.assertEqual(self._classify(60, 1, "english", autos), "real: undid CKILS")
+
+    def test_no_ckils_switch_nearby_is_on_your_own(self):
+        autos = [(self._at(0), 1, "hebrew")]
+        self.assertEqual(self._classify(600, 1, "english", autos), "real: on your own")
+
+    def test_what_ckils_just_set_elsewhere_is_carried_over(self):
+        autos = [(self._at(0), 2, "english")]
+        self.assertEqual(self._classify(6, 1, "english", autos), "carried over")
+
+    def test_inside_a_test_session_is_a_test(self):
+        autos = [(self._at(0), 1, "hebrew")]
+        tests = [(self._at(-10), self._at(100))]
+        self.assertEqual(self._classify(60, 1, "english", autos, tests), "test session")
 
 
 class TypedLanguageTests(unittest.TestCase):

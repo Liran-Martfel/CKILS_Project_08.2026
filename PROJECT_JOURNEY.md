@@ -3150,6 +3150,21 @@ keyboard. Two fixes: a new page (title change) on the same thread now ends the o
 leaving the window; and Tier 4 respects an override only while the layout is still the one the user
 chose. 2 new tests, 1 updated. 245 pass.
 
+**A clean measure of manual corrections — `measure_corrections.py` (future idea, built).** The number
+that says whether CKILS saves corrections was muddy: every layout change CKILS didn't make is recorded
+as a "manual override", and many aren't real corrections. The hand audit of 2026-10-15 became a tool:
+it sorts every recorded override as CKILS's own lag (within 5 s of its own switch in that window),
+carried over (what CKILS had just set in another window, within 10 s), a deliberate test session, or
+real — and splits real ones into "undid CKILS" (CKILS switched that window within 2 minutes and the user
+switched it back: a wrong decision) and "on your own" (no CKILS action just before: CKILS didn't
+anticipate). Since usage varies, it also reports corrections per 100 automatic switches. Read-only.
+
+First result, 467 overrides since Sep 15: 196 undid CKILS, 145 on your own, 73 lag, 27 tests, 26
+carried over. Real corrections per 100 automatic switches: 4.1 (Sep 15-19) -> 6.2 (Sep 20-30) -> 9.0
+(Oct 1-14) -> 4.3 (Oct 15-18); undid-CKILS 4.9 -> 2.0. About half after this week's fixes — but only 4
+days, with lighter use than usual: a promising sign, not proof yet. Re-run after the freeze for the
+submission. 5 new tests. 250 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
@@ -3254,7 +3269,7 @@ Hebrew word typed on the English layout usually comes out as legal-looking Engli
 (`rutv`, `akunl`, `cshev`). Needs more English rules that are true facts about English spelling, each
 checked against real words before it goes in — never a dictionary.
 
-**Status:** started 2026-10-15 — measuring first (see the entry for that day).
+**Status:** built — 2026-10-15/16: English whole-word rules, the comma-inside rule, and the letter model (letter_model.py). Hebrew typed on English caught by word 3: 65% -> 93%.
 
 **2026-10-15 — Retrain the Tier 3 classifier on more data**
 
@@ -3262,7 +3277,7 @@ The content classifier was trained on 228 labeled examples. The decision log now
 real reads, and `review_decisions.py` exists for exactly this. More (reviewed) examples would make the
 confidence scores more trustworthy, especially for short and mixed-language text.
 
-**Status:** written down only.
+**Status:** built — 2026-10-15: retrained on 228 + 700 hand-labeled texts with a third answer, "noise"; in use as language_model_v2.joblib, the old model kept as a live rollback.
 
 **2026-10-15 — A clean measure of manual corrections**
 
@@ -3271,7 +3286,7 @@ but the log still counts some false detections, and deliberate test switches, as
 Needs a way to tell real corrections apart (e.g. an override right after a CKILS switch vs. one with no
 CKILS switch nearby) before the number means anything.
 
-**Status:** written down only.
+**Status:** built — 2026-10-18: measure_corrections.py (see that day's entry).
 
 ---
 
