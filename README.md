@@ -34,13 +34,15 @@ Four layers, each stepping in where the one before isn't enough:
 
 | | Before | After |
 |---|---|---|
-| Hebrew typed on English, caught by the 3rd word | 65% | 93% |
-| English typed on Hebrew, caught by the 3rd word | 82% | 95% |
-| Correct English wrongly switched by the 3rd word | 2.2% | 1.6% |
+| Hebrew typed on English, caught by the 3rd word | 2% | 93% |
+| English typed on Hebrew, caught by the 3rd word | 66% | 96% |
+| Correct English wrongly switched by the 3rd word (the price) | 0% | 1.6% |
 | Wrong screen-read switches on hand-labeled real screen text (old vs new model) | 33 | 23 |
 | Real manual corrections per 100 automatic switches (Oct 1–14 vs Oct 15–19) | 9.0 | 4.1 |
 
-The last row is only 5 days of data so far — a promising sign, not proof. It comes from
+The first three rows replay every version of the typing safety net from its Git history, from Oct 14
+(when it started switching) to today, on the same 266 Hebrew and 371 English sentences. The last row is
+only 5 days of data so far — a promising sign, not proof. It comes from
 `measure_corrections.py`, which separates real corrections from CKILS's own lag, carry-over between
 windows and deliberate tests.
 

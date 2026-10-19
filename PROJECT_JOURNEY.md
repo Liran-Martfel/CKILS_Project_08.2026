@@ -3240,6 +3240,28 @@ real Alt+Shift on the user's machine while running (twice, since I re-ran before
 now replaces the key-press function with a no-op before any test runs; the tests that check the presses
 use their own recorder. 5 new tests. 263 pass.
 
+**The typing safety net's progress, replayed version by version.** For the teacher's page the user asked
+for a graph of the models' progress. Numbers measured on different days had used different test sets, so
+instead every version of the safety net in Git history (12 commits, Oct 14-18) was checked out into a
+temporary worktree and re-run, read-only, through its own real consumer loop on the SAME 266 Hebrew and
+371 English sentences (first 3 words each; ת ץ ף typed on the same physical keys for every version):
+
+| Version | Hebrew on English, by word 3 | English on Hebrew | Correct English switched wrongly |
+|---|---|---|---|
+| Oct 14 start (switch at 5 wrong-layout letters) | 1.9% | 65.8% | 0% |
+| Hebrew word-end rule | 1.9% | 77.9% | 0% |
+| Second-word rule | 1.5% | 82.5% | 0% |
+| English whole-word rules | 57.5% | 81.9% | 2.2% |
+| Comma rule | 65.4% | 81.9% | 2.2% |
+| Letter model | 93.2% | 94.3% | 2.2% |
+| Review fixes, rule + model agreement (today) | 93.2% | 95.7% | 1.6% |
+
+This corrects the "before" quoted until now: 65% was the stage just before the letter model; the real
+start was under 2%. The README and the teacher's page now say 2% -> 93%, and state the price plainly:
+correct English switched wrongly was 0% before the English rules existed, 1.6% now. The page was also
+redesigned (Apple-style, at the user's request) and shortened, with the progress chart, an old-vs-new
+screen-reading model comparison, and the Sep 19 false-override bug as the one bug told in full.
+
 ---
 
 ## Future ideas (not yet implemented)
