@@ -3262,6 +3262,30 @@ correct English switched wrongly was 0% before the English rules existed, 1.6% n
 redesigned (Apple-style, at the user's request) and shortened, with the progress chart, an old-vs-new
 screen-reading model comparison, and the Sep 19 false-override bug as the one bug told in full.
 
+**Standard metrics, at the user's request — and what they show.** Computed 2026-10-19, read-only.
+Screen-reading model on the 700 hand-labeled real texts (258 Hebrew, 336 English, 106 not real text),
+5-fold held out (the new model never trained on the fifth it was tested on), counted the way CKILS acts
+(a decision only at confidence >= 0.65; "not real text" counts as no decision); precision/recall/F1 are
+macro averages over Hebrew and English:
+
+| | Old | New |
+|---|---|---|
+| Accuracy | 76.3% | 73.1% |
+| Precision | 85.4% | 87.6% |
+| Recall | 82.1% | 76.5% |
+| F1 | 83.2% | 81.3% |
+| Switched to the wrong language | 33 | 23 |
+| Acted on text that isn't content | 65 | 53 |
+
+The new model is more precise and makes fewer mistakes, but switches less often, so its recall, F1 and
+accuracy are lower. It stays in use because a wrong switch costs the user (typing in the wrong language)
+while a missed one is covered by the safety net and the learned memory; in real use 0 of its 174 switches
+were undone. This is stated as-is on the teacher's page.
+
+Typing safety net, 1,274 sentences (637 wrong-layout, 637 correct), by the 3rd word, from the replay:
+start (Oct 14) accuracy 69.2%, precision 98.4%, recall 39.1%, F1 56.0%; today 96.2%, 97.6%, 94.7%, 96.1%.
+On a balanced test; real typing is mostly correct, so real precision will be a little lower.
+
 ---
 
 ## Future ideas (not yet implemented)
