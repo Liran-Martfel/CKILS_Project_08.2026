@@ -33,6 +33,11 @@ import interface_text
 interface_text.FILE = os.path.join(tempfile.mkdtemp(prefix="ckils_tests_"), "interface_text.json")
 interface_text._data.clear()
 
+# Found 2026-10-19: Tier 4 can now press the user's language hotkey (in Chrome
+# and Edge). No test may ever press a real key on the machine running it —
+# tests that check the key presses patch this with their own recorder.
+rule_engine.win32api.keybd_event = lambda *args, **kwargs: None
+
 
 class PlaceholderRejectionTests(unittest.TestCase):
     """Real bug: an app's own empty-compose-box placeholder read as if it were
@@ -2559,7 +2564,7 @@ class ApplyTier4CorrectionTests(unittest.TestCase):
              patch.object(rule_engine, "save_page_learned_default") as save_page, \
              patch.object(rule_engine.skip_logger, "log_skip") as log_skip:
             applied = rule_engine.apply_tier4_correction(
-                self.HWND, self.THREAD, "chrome.exe", "Page",
+                self.HWND, self.THREAD, "notepad.exe", "Page",
                 rule_engine.Hebrew_HKL, rule_engine.English_HKL, 5)
         return applied, post, log_auto, save_app, save_page, log_skip
 
@@ -3032,6 +3037,68 @@ class RetentionTests(unittest.TestCase):
             left = [conn.execute(f"SELECT timestamp FROM {t}").fetchall() for t in ("decisions", "overrides")]
             conn.close()
         self.assertEqual(left, [[(new,)], [(new,)]])
+
+
+class BrowserUiHotkeyTests(unittest.TestCase):
+    """Found live 2026-10-19: in Chrome's address bar a posted switch reached
+    Windows at once but the text field caught up late, so a Hebrew search
+    typed fast kept coming out in English. In Chrome and Edge, Tier 4 presses
+    the user's own language hotkey instead — only when that is safe."""
+
+    HWND, THREAD = 559, 8084
+
+    def setUp(self):
+        for d in (rule_engine.last_set, rule_engine.last_switch_time, rule_engine.content_decision):
+            d.pop(self.THREAD, None)
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.tier4_corrected.discard(self.THREAD)
+
+    tearDown = setUp
+
+    def _apply(self, exe="chrome.exe", layouts=2, modifier=rule_engine.win32con.VK_MENU):
+        with patch.object(rule_engine.win32api, "GetKeyboardLayoutList", return_value=list(range(layouts))), \
+             patch.object(rule_engine, "_language_hotkey_modifier", return_value=modifier), \
+             patch.object(rule_engine.win32api, "keybd_event") as keys, \
+             patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
+             patch.object(rule_engine.win32api, "PostMessage") as post, \
+             patch.object(rule_engine.decision_logger, "log_auto_change") as log_auto, \
+             patch.object(rule_engine.skip_logger, "log_skip"):
+            applied = rule_engine.apply_tier4_correction(
+                self.HWND, self.THREAD, exe, "New Tab - Google Chrome",
+                rule_engine.English_HKL, rule_engine.Hebrew_HKL, 6)
+        return applied, keys, post, log_auto
+
+    def test_chrome_switches_by_pressing_the_hotkey(self):
+        applied, keys, post, log_auto = self._apply()
+        self.assertTrue(applied)
+        post.assert_not_called()
+        con = rule_engine.win32con
+        self.assertEqual([c.args[:3] for c in keys.call_args_list],
+                         [(con.VK_MENU, 0, 0), (con.VK_SHIFT, 0, 0),
+                          (con.VK_SHIFT, 0, con.KEYEVENTF_KEYUP), (con.VK_MENU, 0, con.KEYEVENTF_KEYUP)])
+        self.assertEqual(rule_engine.last_set[self.THREAD], rule_engine.Hebrew_HKL)
+        self.assertEqual(log_auto.call_args.args[5]["switched_by"], "hotkey")
+
+    def test_other_apps_still_get_the_message(self):
+        _, keys, post, _ = self._apply(exe="Code.exe")
+        keys.assert_not_called()
+        post.assert_called_once()
+
+    def test_three_layouts_or_no_usable_hotkey_fall_back_to_the_message(self):
+        """The hotkey cycles: with a third layout it could land on it."""
+        for kwargs in ({"layouts": 3}, {"modifier": None}):
+            _, keys, post, _ = self._apply(**kwargs)
+            keys.assert_not_called()
+            post.assert_called_once()
+
+    def test_chrome_and_edge_only(self):
+        self.assertTrue(rule_engine._is_chromium_browser("msedge.exe"))
+        self.assertFalse(rule_engine._is_chromium_browser("WhatsApp.exe"))
+
+    def test_no_saved_setting_means_windows_default_alt_shift(self):
+        import winreg
+        with patch.object(winreg, "OpenKey", side_effect=OSError):
+            self.assertEqual(rule_engine._language_hotkey_modifier(), rule_engine.win32con.VK_MENU)
 
 
 class TypedLanguageTests(unittest.TestCase):

@@ -3218,6 +3218,28 @@ types in the language chosen, so it never triggers; after a false one it fixes t
 second word. Manual overrides now also log `seconds_since_arrival`, to confirm or rule out the
 re-sync theory from real data. 1 new test. 258 pass.
 
+**2026-10-19 — Chrome's address bar: switching by the user's own hotkey.** A Hebrew search typed on the
+English layout in Chrome's address bar ("cshe, nvhru, cze chi ktunh" — בדיקת מהירות בזק בין לאומי)
+came out in English to the end, though Tier 4 switched at the 2nd word — and afterwards CKILS saw nothing
+wrong. Diagnosed live with the user, step by step: in a slow test the switch worked; the language
+indicator showed ENG until the next word; and a read-only recorder of window focus and layouts (no keys)
+showed Windows reporting Hebrew for Chrome 15 ms after CKILS's switch. So the switch reached Windows at
+once, but Chrome's text fields keep a separate typing layer (the one input methods use) that caught up
+only later — words later when typing fast — while CKILS, reading Hebrew from Windows, judged the English
+keys as valid Hebrew. A real press of the language hotkey moves both layers together. In Chrome and
+Edge, Tier 4 now switches by pressing the user's own hotkey (read from Windows' setting; Alt+Shift by
+default) — only with exactly 2 layouts installed (the hotkey toggles; with 3 it could land on a third)
+and an Alt/Ctrl+Shift hotkey; otherwise, and in every other app, the message as before. The hook already
+ignores injected keys. Live test, typed fast: switched at the 2nd word, and every later word Hebrew. The
+plan was address bar only, but the live log showed the hotkey used on claude.ai too: this Chrome reports
+keyboard focus on its main window inside web pages as well, so the check couldn't tell them apart. It
+worked in both, so the code now says what it really does: Chrome and Edge.
+
+A mistake of mine on the way: after that simplification, older tests that name "chrome.exe" pressed a
+real Alt+Shift on the user's machine while running (twice, since I re-ran before fixing). The test file
+now replaces the key-press function with a no-op before any test runs; the tests that check the presses
+use their own recorder. 5 new tests. 263 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

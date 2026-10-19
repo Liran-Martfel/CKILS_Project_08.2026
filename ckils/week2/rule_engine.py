@@ -1693,6 +1693,72 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         content_check_in_progress.discard(check_key)
 
 
+# Found live 2026-10-19, diagnosed with the user: typing a Hebrew search into
+# Chrome's ADDRESS BAR on the English layout, Tier 4 switched at the 2nd word,
+# yet the next words kept coming out in English. A recorder of window focus
+# and layouts showed Windows reporting Hebrew for Chrome 15 ms after the
+# switch — but Chrome's own text fields keep a separate typing layer (the one
+# used for input methods) that only caught up later, sometimes words later
+# when typing fast; meanwhile CKILS, reading Hebrew from Windows, saw nothing
+# wrong. A real press of the user's language hotkey moves both layers
+# together, so in Chromium browsers Tier 4 switches that way. It was meant
+# for the address bar only, but the live test showed this Chrome reports
+# keyboard focus on its main window inside web pages too, so there's no
+# reliable way to tell them apart — and the hotkey worked in both (address
+# bar and claude.ai, 2026-10-19). Only when it's safe: exactly 2 layouts are
+# installed (the hotkey toggles) and the hotkey is Alt+Shift or Ctrl+Shift.
+# Otherwise, and in every other app, the message as before.
+_CHROMIUM_BROWSERS = {"chrome.exe", "msedge.exe"}
+
+
+def _is_chromium_browser(exe_name):
+    """Chrome or Edge, whose text fields keep their own typing layer."""
+    return (exe_name or "").lower() in _CHROMIUM_BROWSERS
+
+
+def _language_hotkey_modifier():
+    """The modifier of the user's input-language hotkey: VK_MENU for
+    Alt+Shift (Windows' default), VK_CONTROL for Ctrl+Shift, or None (none
+    set, or another key) — read from the user's own Windows setting."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Keyboard Layout\Toggle") as key:
+            for name in ("Language Hotkey", "Hotkey"):
+                try:
+                    value = str(winreg.QueryValueEx(key, name)[0])
+                    break
+                except OSError:
+                    continue
+            else:
+                value = "1"
+    except OSError:
+        value = "1"  # no setting saved: Windows' default, Alt+Shift
+    return {"1": win32con.VK_MENU, "2": win32con.VK_CONTROL}.get(value)
+
+
+def _press_language_hotkey(modifier):
+    """Presses modifier+Shift and releases both — the same keys the user
+    presses to switch language. The keyboard hook ignores them (injected)."""
+    for vk, up in ((modifier, False), (win32con.VK_SHIFT, False), (win32con.VK_SHIFT, True), (modifier, True)):
+        win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP if up else 0, 0)
+
+
+def _switch_by_hotkey(exe_name):
+    """Switches by the hotkey if it's safe here; returns True if it did."""
+    if not _is_chromium_browser(exe_name):
+        return False
+    try:
+        if len(win32api.GetKeyboardLayoutList()) != 2:
+            return False  # the hotkey cycles: with 3+ layouts it could land on a third
+    except Exception:
+        return False
+    modifier = _language_hotkey_modifier()
+    if modifier is None:
+        return False
+    _press_language_hotkey(modifier)
+    return True
+
+
 def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hkl, word_length):
     """Tier 4 Phase 2 (2026-10-14): switches the layout because the user's
     own keystrokes came out as wrong-layout gibberish (keyboard_hook.py calls
@@ -1737,7 +1803,9 @@ def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hk
                              f"{OVERRIDE_OUTVOTE_WORDS} wrong-layout words")
     if win32gui.GetForegroundWindow() != hwnd:
         return False  # focus moved on between the keystroke and this call
-    win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
+    by_hotkey = _switch_by_hotkey(exe_name)
+    if not by_hotkey:
+        win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
     last_set[thread_id] = target_hkl
     last_switch_time[thread_id] = time.time()
     content_decision[thread_id] = target_hkl
@@ -1746,7 +1814,8 @@ def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hk
     decision_logger.log_auto_change(
         exe_name, title, thread_id,
         HKL_TO_LANGUAGE_NAME.get(from_hkl), HKL_TO_LANGUAGE_NAME.get(target_hkl),
-        {"mechanism": "tier4_gibberish", "word_length": word_length},
+        {"mechanism": "tier4_gibberish", "word_length": word_length,
+         "switched_by": "hotkey" if by_hotkey else "message"},
     )
     print(f"{exe_name}: Tier 4 auto-correction to {hex(target_hkl)} (wrong-layout word, {word_length} keys)")
     return True
