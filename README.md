@@ -1,171 +1,100 @@
 # CKILS — Contextual Keyboard Input Locale Switcher
 
-A Windows background tool that automatically switches your keyboard's typing language (Hebrew ⇄
-English) based on what you're actually looking at and typing — so you stop manually pressing
-Alt+Shift, and stop typing whole sentences into the wrong layout before noticing.
+A Windows tool that switches your keyboard between Hebrew and English by itself — from what's on your
+screen and from what you type — so you stop pressing Alt+Shift, and stop typing a whole sentence in the
+wrong layout before you notice.
 
-This is a hands-on learning project: a proof of concept built from scratch in Python, one weekly
-milestone at a time, as a way to learn both coding and how a real Windows system-level tool comes
-together in practice — bugs, packaging, and all.
+Built from scratch in Python as a learning project, tested on real daily use, and improved one real bug
+at a time. The full history — every bug, how it was found, what was measured — is in
+[`PROJECT_JOURNEY.md`](PROJECT_JOURNEY.md).
 
-## The problem
+**Before you try it, read [What CKILS Sees](https://claude.ai/artifact/KMiiK4EUXr74emHT2PtYEe)** — a short
+page (English and Hebrew) on what it reads, what it keeps, and how to stop it.
 
-If you type in more than one language, you know the drill: you switch to a different app, forget
-your keyboard is still set to the other language, and type a full sentence of gibberish before
-noticing. Then you delete it, switch layouts by hand, and retype. It happens constantly — in
-chats, documents, search bars, calendars — and it adds up to real lost time and real mistakes.
+## How it decides
 
-## The master goal
+Four layers, each stepping in where the one before isn't enough:
 
-The rule-based layers below are the learning foundation, not the finish line. This project is
-only truly done once CKILS is **AI-driven**: reading the screen and deciding the right language
-from that understanding directly, with no hand-written per-app rule table required at all.
+1. **What it already knows.** When you arrive in a window, it switches to the language you typed most
+   there (remembered per window until you close it), or to what it has learned about that page or app —
+   but only once that history agrees with itself (at least 3 decisions, 80% the same).
+2. **What's on the screen (Tier 3).** It reads the text you're working in (UI Automation, or OCR with
+   Tesseract) and a small model trained on real labeled text decides the language. The model can also
+   answer "not real text", and text that repeats identically across pages of the same app — an address
+   bar, a player label, an input placeholder — is learned as the app's own interface and ignored.
+3. **What you type (Tier 4, the typing safety net).** If a word comes out as gibberish because the
+   keyboard is in the wrong layout, it switches when the word ends. Hard spelling rules (a Hebrew word
+   never has ם/ן/ץ/ף/ך mid-word, never ends in a regular מ/נ/צ/כ; English words have vowels) plus a
+   letter-trigram model that compares both readings of the same keys, trained only on public word lists.
+4. **You're always in charge.** A manual switch is respected on that page — unless the next words show
+   it was a mistake (2 clear wrong-layout words). Screen reads never change the language while you're
+   typing, and a weak read can't undo a stronger one.
 
-## How it works
+## Measured on real use
 
-CKILS layers three decision tiers, from simplest to most advanced, each one only stepping in
-where the one before it isn't enough:
+| | Before | After |
+|---|---|---|
+| Hebrew typed on English, caught by the 3rd word | 65% | 93% |
+| English typed on Hebrew, caught by the 3rd word | 82% | 95% |
+| Correct English wrongly switched by the 3rd word | 2.2% | 1.6% |
+| Wrong screen-read switches on hand-labeled real screen text (old vs new model) | 33 | 23 |
+| Real manual corrections per 100 automatic switches (Oct 1–14 vs Oct 15–19) | 9.0 | 4.1 |
 
-1. **Fast path — learned defaults.** An instant first guess for a window, built entirely from
-   CKILS's own past confident decisions (per app, and per exact app+title) — never a hand-written
-   rule. A key only gets *trusted* once it has enough history and that history actually agrees
-   with itself (≥3 samples, ≥80% agreement) — a browser's whole-app guess or a chat app's one
-   shared generic title naturally never earns trust, automatically, with no app named anywhere in
-   the code.
-2. **Content-aware correction (Tier 3).** Runs in the background after every switch: UI Automation
-   locates the real focused control, reads its text (via accessible text where available, OCR via
-   Tesseract otherwise), and a classifier trained from scratch on real usage decides the language
-   — correcting the fast path's guess if it disagrees and is confident.
-3. **Manual override, always respected.** If you switch the language yourself, CKILS leaves that
-   window alone immediately — no timer, no button — and quietly resumes automatic control the
-   moment you move to a different window. A manual override also teaches the trust system
-   directly, the same way a confident automatic decision does.
+The last row is only 5 days of data so far — a promising sign, not proof. It comes from
+`measure_corrections.py`, which separates real corrections from CKILS's own lag, carry-over between
+windows and deliberate tests.
 
-Every real language change (automatic or manual) is written to a local decision log —
-timestamped, with the exact text read, the reasoning, and a screenshot cropped to just the region
-read — specifically so a wrong guess can be diagnosed from evidence instead of guesswork.
+## Privacy
 
-## Current status
+- Everything stays on your computer. Nothing is uploaded.
+- The typing safety net keeps only the current word, in memory. Typed letters are never written to disk,
+  and password fields are skipped entirely.
+- The decision log keeps what was read and why it decided, for 365 days; screenshots (cropped to the
+  region read) for 60 days. The learned interface text is stored as fingerprints (hashes) only.
+- To clear everything: delete the `logs` folder, `ckils_decisions.db`, `ckils_skips.db` and the `.json`
+  files next to `CKILS.exe`. It simply starts learning again.
 
-The core switching pipeline (all three tiers) is built, wired end to end, and has been running
-against real daily use. That real use has surfaced — and fixed — a steady stream of genuine bugs
-in how various apps expose their on-screen content: Zoom's chat panel reading its own header (and,
-more recently, its main call window landing on a toolbar button) instead of the conversation,
-WhatsApp, Claude.ai, and YouTube's own UI chrome (placeholders, logos, taglines) being misread as
-real typed content, Google Calendar's event tiles diluting a real Hebrew title with English
-scaffolding text, and Google Docs periodically re-asserting a stale title-based guess over live
-typing. An earlier version of this README claimed the override rate fell 22.5x (5.67% to under 0.3%);
-that claim is withdrawn: the denominator (applied decisions per day) grew ~15x because the background
-poll logs a decision on every tick, and most recorded "overrides" turned out to be CKILS misreading its
-own switch. Recorded overrides per active day were 22.8 (Sep 3-8), 14.0 (Sep 9-16) and 17.0 (Sep 17-19);
-a clean figure is being measured from Sep 19. A real live run also surfaced a genuine performance bug: the background safety
-poll was re-running full OCR on an already-settled window every ~1.5 seconds forever, burning
-sustained CPU — fixed with per-window backoff once a read has repeated unchanged a few times in a
-row (confirmed after the fact: sustained CPU dropped from ~9% to under 1%). A separate real bug
-meant a manual language correction could be silently undone by the next background check unless you
-forced a fresh focus event by alt-tabbing away and back — fixed by making the background poll detect
-a manual override on its own, within one poll interval, no "ping-pong" required. That fix itself then
-surfaced a same-day regression — a single mismatched keyboard reading (Windows hadn't yet applied
-CKILS's own pending switch) was being trusted as proof of a manual override on the spot, silently
-freezing correction — fixed by requiring the same mismatch twice, on two independent checks, before
-it's trusted. The whole-window search added for Zoom also turned out to occasionally pick the entire
-browser window itself (tab strip and bookmarks bar included) as "content" on other apps — confirmed
-live with a purpose-built diagnostic tool — fixed by rejecting any candidate that spans essentially
-the whole window, since real content is never that. Each fix is backed by a regression test built
-from the real failure it addresses — 119 tests currently, covering every bug found so far
-(`ckils/week2/test_regressions.py`).
+## Install and run
 
-**Known open limitations:**
-- No proactive language guess yet for a brand-new page with zero learned history (e.g. the first
-  visit to a new YouTube video) — the keyboard simply stays at its last physical state until Tier
-  3 catches up from real content.
-- Nothing in CKILS learns *where* to look on screen — only *what language things tend to be* once
-  it's already looking in a good spot. Every "wrong element focused" fix (Zoom's header, Zoom's
-  toolbar button, ...) has been a targeted, hand-diagnosed structural fix, not something that
-  generalizes on its own to an app not yet encountered. A second, separate learning system for
-  "which control reliably has real content" is a real idea for later, not yet designed.
+1. Install Tesseract OCR once (CKILS uses it to read the screen):
+   ```
+   winget install --id UB-Mannheim.TesseractOCR -e
+   ```
+2. Download `CKILS.exe` from the [latest release](https://github.com/Liran-Martfel/CKILS_Project_08.2026/releases/latest)
+   and run it. No installation; close its window to stop it.
+3. Optional — the typing safety net is off until you turn it on, with empty files next to `CKILS.exe`:
 
-A further real finding: Windows shares the input language across windows, so arriving in a window used to
-keep the language CKILS had just set in the previous one, and CKILS mistook that for you switching by hand
-(38 of 51 recorded "overrides" matched this pattern). It now treats a mismatch present since arrival as
-carry-over — re-asserting its own decision a bounded number of times, never recording a false override.
+| File | Effect |
+|---|---|
+| `enable_gibberish_detection.on` | Turns the typing safety net on (log only) |
+| `enable_gibberish_autocorrect.on` | Lets it switch the keyboard too |
+| `disable_tier4_now.trigger` | Turns the typing safety net off at once |
+| `disable_letter_model.on` | Turns off only the letter model |
+| `use_old_language_model.on` | Uses the previous screen-reading model |
 
-CKILS also keeps a separate, local "why did it do nothing?" log (`ckils_skips.db`, summarised by
-`summarize_skips.py`) that records every check that ended without a decision and why — an empty chat, a
-rejected placeholder, a read that failed — so a failure to switch can be diagnosed from evidence.
+All of them take effect immediately, no restart.
 
-The full, honest development history — every real bug found, how it was diagnosed, what was tried
-and rejected, and why — lives in [`PROJECT_JOURNEY.md`](PROJECT_JOURNEY.md).
+## From source
 
-## The language model
+Windows 10/11, Python 3.10+ (developed on 3.14), with `pywin32`, `psutil`, `uiautomation`, `pytesseract`,
+`Pillow`, `scikit-learn` and `joblib`.
 
-The classifier is a small model trained from scratch (TF-IDF character n-grams + logistic
-regression) on 228 real labeled examples captured from actual usage — not a public dataset, not
-hand-written examples. It measures at **98% held-out accuracy**. The raw labeled dataset is kept
-local-only (real captured text from real usage isn't something that belongs in a public repo);
-the trained model file (`ckils/week2/language_model.joblib`) is what ships and is what CKILS
-actually runs on.
+```
+python ckils/week2/rule_engine.py          # run CKILS
+python ckils/week2/test_regressions.py     # 263 tests, one per real bug found
+python ckils/week2/measure_corrections.py  # real corrections, read from your own logs
+python ckils/week2/summarize_skips.py      # why CKILS did nothing, when it did nothing
+```
 
-## Before you try it
-
-A short, plain-language note (English and Hebrew) on what CKILS reads from your screen, what it saves and
-where, what's still not perfect, and how to stop it or clear its data:
-**[What CKILS Sees](https://claude.ai/artifact/KMiiK4EUXr74emHT2PtYEe)**. Please read it before turning it on.
-
-## Tier 4 (experimental, off by default)
-
-A first phase of a fourth safety-net tier now exists in the code: it watches your typing (never a
-password field, never a Ctrl/Alt shortcut, never more than the current in-progress word, capped at 12
-characters) to catch a real word coming out garbled because the keyboard is in the wrong layout — the
-one case the other three tiers can't catch until after the fact. This phase only LOGS what it would
-have flagged; it never changes your keyboard. It's disabled by default and requires deliberately
-creating `enable_gibberish_detection.on` next to CKILS.exe to turn on — see PROJECT_JOURNEY.md for the
-full design and privacy guarantees.
+The models ship in the repo: `language_model_v2.joblib` (in use), `language_model.joblib` (the previous
+one) and `letter_model.json` (rebuilt with `build_letter_model.py` from the public FrequencyWords lists).
+Training data is real screen text, so it stays local.
 
 ## Repo layout
 
-- `ckils/week1/`, `ckils/week2/` — the working code, one file per lesson; `rule_engine.py` is the
-  live entry point, `decision_logger.py` the diagnostic log, `test_regressions.py` the test suite.
-- [`PROJECT_JOURNEY.md`](PROJECT_JOURNEY.md) — the full development log: every real bug, fix, and
-  design decision, in order, with reasoning.
-- `POC - Proof Of Concept - theory.docx` — the original project charter/spec.
-
-## Running it
-
-Either way, one thing is required first on the machine that runs CKILS —
-[Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki), a separate free program that
-CKILS uses to read on-screen text. It's not bundled; install it once:
-
-```
-winget install --id UB-Mannheim.TesseractOCR -e
-```
-
-**Just want to run it? Download the exe — no Python required.**
-
-**→ [Download CKILS.exe](https://github.com/Liran-Martfel/CKILS_Project_08.2026/releases/latest)**
-
-A standalone build (via PyInstaller, with the trained model and OCR data bundled inside it) —
-double-click it, no setup, no configuration. It decides from real on-screen content and learns
-its own per-app defaults as it goes. It isn't checked into the repo itself (a built binary doesn't
-belong in source control); the link above is a GitHub Release, built fresh from this same source.
-
-**Want to read or change the code? Run the source directly.**
-`rule_engine.py` is the actual source — the same code the exe is built from, just runnable
-straight from Python for development:
-
-Requirements: Windows 10/11, Python 3.10+, with the packages in `ckils/week2/` installed
-(`pywin32`, `psutil`, `uiautomation`, `pytesseract`, `Pillow`, `scikit-learn`, `joblib`) inside a
-virtual environment.
-
-```
-python ckils/week2/rule_engine.py
-```
-
-## Testing
-
-```
-python ckils/week2/test_regressions.py
-```
-
-One test class per real bug fixed, each one reproducing the exact failure that was found — not a
-synthetic approximation of it.
+- `ckils/week2/` — the code. `rule_engine.py` is the entry point; `keyboard_hook.py`,
+  `gibberish_detector.py` and `letter_model.py` are the typing safety net; `predict_language.py` and
+  `interface_text.py` the screen reading; `test_regressions.py` the tests.
+- `ckils/week1/` — the first lessons.
+- [`PROJECT_JOURNEY.md`](PROJECT_JOURNEY.md) — the development log.
+- `POC - Proof Of Concept - theory.docx` — the original project spec.
