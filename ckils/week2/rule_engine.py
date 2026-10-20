@@ -1208,6 +1208,15 @@ pending_override = {}  # thread_id -> (hkl_seen, first_seen_time) — an unconfi
 matched_this_visit = set()   # thread_ids whose real layout has matched last_set at least once this visit
 reassert_attempts = {}       # thread_id -> times CKILS re-posted its own decision against a carry-over mismatch
 MAX_REASSERT_ATTEMPTS = 2    # after this many tries CKILS accepts the layout Windows insists on (never fights forever)
+# Found live, confirmed 2026-10-20 by the seconds_since_arrival field added two
+# days earlier: false "manual switches" are recorded a few seconds after
+# arriving in a window (1.9 s this time, ~3 s on Oct 18) — Windows bringing
+# back the previous window's language after CKILS's first match. A mismatch
+# this soon after arriving is treated as that carry-over: CKILS re-asserts its
+# own decision instead of recording the user's. A real manual switch made
+# later (the user's own at 12:16 the same day came 34 s after arriving) is
+# respected as before.
+ARRIVAL_RESYNC_SECONDS = 5
 
 
 def _reset_visit_state(thread_id):
@@ -1315,8 +1324,10 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, h
     if just_switched:
         pending_override.pop(thread_id, None)  # Windows hasn't caught up to our own post yet — not an override
         return False
-    if thread_id not in matched_this_visit:
-        # Never matched since arrival: carry-over from another window, not a manual switch.
+    arrived = visit_started.get(thread_id)
+    if thread_id not in matched_this_visit or (arrived and time.time() - arrived < ARRIVAL_RESYNC_SECONDS):
+        # Never matched since arrival, or only seconds since arriving: carry-over
+        # from another window (Windows re-syncing late), not a manual switch.
         _handle_carry_over(thread_id, hwnd, exe_name, title, actual_hkl)
         return False
 

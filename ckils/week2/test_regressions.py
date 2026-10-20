@@ -2829,6 +2829,67 @@ class LoneFinalLetterTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
+class LoneFinalLetterAfterEditTests(unittest.TestCase):
+    """Found live 2026-10-20 in Gemini: "שאמ", Backspace, "ם" — after the
+    edit the ם looked like a one-letter word ("i" on Hebrew) and switched
+    mid-Hebrew. The lone-final-letter rule needs a real word start."""
+
+    setUp = Tier4AutocorrectWiringTests.setUp
+    tearDown = Tier4AutocorrectWiringTests.tearDown
+    _run = Tier4AutocorrectWiringTests._run
+
+    def test_a_final_letter_typed_after_backspace_stays_hebrew(self):
+        with patch.object(keyboard_hook, "_letter_model_disabled", return_value=True):
+            self._run([0x41, 0x54, 0x4E, 0x08, 0x4F, 0x20])  # ש א מ ⌫ ם
+        self.assertEqual(self.calls, [])
+
+    def test_i_after_a_space_still_switches(self):
+        self._run([0x41, 0x4B, 0x55, 0x4F, 0x20, 0x49, 0x20])  # שלום ן
+        self.assertEqual(len(self.calls), 1)
+
+
+class ArrivalResyncTests(unittest.TestCase):
+    """Confirmed 2026-10-20 (seconds_since_arrival = 1.9): a "manual switch"
+    seconds after arriving is Windows re-syncing the previous window's
+    language. It's carry-over, not the user — but later it's the user."""
+
+    THREAD = 8090
+
+    def setUp(self):
+        for d in (rule_engine.last_set, rule_engine.last_switch_time, rule_engine.pending_override,
+                  rule_engine.visit_started, rule_engine.reassert_attempts):
+            d.pop(self.THREAD, None)
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.matched_this_visit.discard(self.THREAD)
+
+    tearDown = setUp
+
+    def _mismatch_twice(self, seconds_since_arrival):
+        rule_engine.last_set[self.THREAD] = rule_engine.English_HKL
+        rule_engine.matched_this_visit.add(self.THREAD)  # it matched once already this visit
+        rule_engine.visit_started[self.THREAD] = time.time() - seconds_since_arrival
+        with patch.object(rule_engine, "log_override"), \
+             patch.object(rule_engine, "save_learned_default"), \
+             patch.object(rule_engine, "save_page_learned_default"), \
+             patch.object(rule_engine.decision_logger, "log_manual_override") as logged, \
+             patch.object(rule_engine.skip_logger, "log_skip"), \
+             patch.object(rule_engine.win32api, "PostMessage"):
+            for _ in range(2):
+                rule_engine._detect_and_record_manual_override(
+                    self.THREAD, "Code.exe", "t", rule_engine.Hebrew_HKL, hwnd=55)
+        return logged
+
+    def test_a_switch_two_seconds_after_arriving_is_not_the_user(self):
+        logged = self._mismatch_twice(2)
+        self.assertNotIn(self.THREAD, rule_engine.overridden)
+        logged.assert_not_called()
+
+    def test_a_switch_thirty_seconds_after_arriving_is_the_user(self):
+        logged = self._mismatch_twice(30)
+        self.assertIn(self.THREAD, rule_engine.overridden)
+        logged.assert_called_once()
+
+
 class EnglishMidHebrewTests(unittest.TestCase):
     """The user's habit, 2026-10-20: mid-Hebrew, holding Shift types English
     capitals on the Hebrew layout ("CKILS"). That's English on purpose — no

@@ -3307,6 +3307,19 @@ user's request each such word is logged as `english_mid_hebrew` (exempt from the
 can be counted and studied later — the window and the letter COUNT only, never the letters, keeping the
 promise that typed letters never reach the disk. 3 new tests. 269 pass.
 
+**Two fixes the same afternoon, one of them for a bug of mine from that morning.** (1) In Gemini, typing
+Hebrew, the layout flipped to English and back a second later, twice. The log rows said `len=1 word-end`:
+the new lone-final-letter rule. Most likely "שאמ", Backspace, "ם": an edit key resets the word, so the ם
+looked like a one-letter word ("i" typed on Hebrew). The rule now needs a real word start — the word must
+begin after a space or punctuation, never after Backspace, arrows, Delete or a Ctrl/Alt shortcut
+(`after_edit`). (2) Arriving in VS Code from Gemini (Hebrew), CKILS recorded a "manual switch" to Hebrew —
+which the user never made — and the new `seconds_since_arrival` field said 1.9 s: the late-re-sync theory
+from Oct 18 (~3 s then), now confirmed with data. Typing had already outvoted it at the second strong word
+(`override_outvoted`), but it is now fixed at the source: a mismatch within ARRIVAL_RESYNC_SECONDS = 5 of
+arriving is treated as carry-over (CKILS re-asserts its own decision) instead of the user's switch. The
+user's real manual switch earlier that day came 34 s after arriving, so it would still be respected.
+4 new tests. 273 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

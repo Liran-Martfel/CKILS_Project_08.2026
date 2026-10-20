@@ -207,6 +207,11 @@ class _PerThreadState:
         # Hebrew acronyms put their last letter there (נדל"ן, בע"מ, תנ"ך), so a
         # lone final letter after it is real Hebrew, not "i" typed on Hebrew.
         self.after_quote = False
+        # True while the current word began right after an edit (Backspace,
+        # arrows, Delete, a Ctrl/Alt shortcut), so its first letters are
+        # unknown. Found live 2026-10-20: "שאמ", Backspace, "ם" — the ם alone
+        # looked like "i" typed on Hebrew and switched mid-Hebrew in Gemini.
+        self.after_edit = False
         # English capitals typed on purpose mid-Hebrew (the user's habit,
         # 2026-10-20): on the Hebrew layout, holding Shift types English
         # capitals. Counted per word: letter keys, and how many had Shift.
@@ -241,6 +246,7 @@ class _PerThreadState:
         self.recent_word_flags.clear()
         self.carried_flag = None
         self.after_quote = False
+        self.after_edit = False
 
 
 def _is_password_field_focused():
@@ -266,6 +272,7 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
     """
     if ctrl_held or alt_held:
         state.reset()  # a shortcut, not text — whatever word was in progress is over
+        state.after_edit = True  # Ctrl+Backspace, Ctrl+Z...: the text was edited
         return None
 
     if vk_code in _MODIFIER_ONLY_VKS:
@@ -307,6 +314,7 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         # ask what character it would decode to first.
         state.reset_word()
         state.after_quote = vk_code == layout_remap.VK_OEM_7  # ' and " — gershayim on the Hebrew layout
+        state.after_edit = not is_word_end_key(vk_code, shift_pressed)  # Backspace, arrows, Delete...
         return None
 
     if len(state.word_keys) <= letter_model.MAX_LETTERS:
@@ -578,7 +586,8 @@ def word_end_check(state, current_hkl):
         vk, scan = state.last_letter_key
         hebrew = layout_remap.remap_key_to_other_layout(vk, scan, HEBREW_HKL_VALUE) or ""
         english = layout_remap.remap_key_to_other_layout(vk, scan, ENGLISH_HKL_VALUE) or ""
-        if hebrew in gibberish_detector.HEBREW_FINAL_FORMS and english.isalpha() and not state.after_quote:
+        if (hebrew in gibberish_detector.HEBREW_FINAL_FORMS and english.isalpha()
+                and not state.after_quote and not state.after_edit):
             return {"current_language": "hebrew", "other_language": "english", "length": 1}
         return None
     last_vk, last_scan = state.last_letter_key
