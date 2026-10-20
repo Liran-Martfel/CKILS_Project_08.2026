@@ -53,6 +53,11 @@ REASON CODES (what each one means, and what it usually tells you)
     typed_respected   A Tier 3 result was ready, but it disagreed with the
                       language the user has actually typed most in this window
                       (keyboard_hook.typed_language), so Tier 3 left it alone.
+    english_mid_hebrew  A word typed entirely with Shift on the Hebrew layout —
+                      English capitals the user typed on purpose mid-Hebrew
+                      (Hebrew has no capitals). Tier 4 left the layout alone.
+                      `detail` is the letter COUNT only, never the letters —
+                      kept so these can be counted and studied later.
     typing_respected  A Tier 3 result was ready, but the user had typed in this
                       window within the last few seconds, so Tier 3 left the
                       language alone — mid-sentence is never the moment for a
@@ -122,6 +127,7 @@ REASON_GIBBERISH_SUSPECTED = "gibberish_suspected"  # Tier 4 Phase 1 (keyboard_h
 REASON_TIER4_RESPECTED = "tier4_respected"          # Tier 3 held off: Tier 4 already corrected this window from real typing this visit
 REASON_TYPING_RESPECTED = "typing_respected"        # Tier 3 held off: the user was typing in this window just now
 REASON_TYPED_RESPECTED = "typed_respected"          # Tier 3 held off: it disagreed with what the user typed most in this window
+REASON_ENGLISH_MID_HEBREW = "english_mid_hebrew"    # Tier 4: capitals typed on purpose on the Hebrew layout — no switch
 REASON_OVERRIDE_OUTVOTED = "override_outvoted"      # Tier 4: 2 strong wrong-layout words after a "manual switch" — typing wins
 REASON_WEAKER_READ = "weaker_read"                  # Tier 3 held off: less confident than the read that already decided this visit
 
@@ -180,7 +186,7 @@ def log_skip(exe_name, title, thread_id, reason, detail=None):
         now = time.time()
         key = (thread_id, title, reason)
         with _lock:
-            if reason != REASON_GIBBERISH_SUSPECTED:
+            if reason not in (REASON_GIBBERISH_SUSPECTED, REASON_ENGLISH_MID_HEBREW):
                 last = _last_logged.get(key)
                 if last is not None and now - last < DEDUPE_WINDOW_SECONDS:
                     return

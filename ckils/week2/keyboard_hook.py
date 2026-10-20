@@ -207,6 +207,11 @@ class _PerThreadState:
         # Hebrew acronyms put their last letter there (נדל"ן, בע"מ, תנ"ך), so a
         # lone final letter after it is real Hebrew, not "i" typed on Hebrew.
         self.after_quote = False
+        # English capitals typed on purpose mid-Hebrew (the user's habit,
+        # 2026-10-20): on the Hebrew layout, holding Shift types English
+        # capitals. Counted per word: letter keys, and how many had Shift.
+        self.letter_keys = 0
+        self.shifted_keys = 0
 
     def reset_word(self):
         """The word ended normally: clears everything about THIS word (the
@@ -223,6 +228,8 @@ class _PerThreadState:
         self.en_ending = ""
         self.en_capital_seen = False
         self.word_keys = []
+        self.letter_keys = 0
+        self.shifted_keys = 0
 
     def reset(self):
         """Full reset: the word AND everything spanning words. Every path that
@@ -304,6 +311,9 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
 
     if len(state.word_keys) <= letter_model.MAX_LETTERS:
         state.word_keys.append((vk_code, scan_code))
+    state.letter_keys += 1
+    if shift_pressed != caps_lock_on:
+        state.shifted_keys += 1
 
     english = layout_remap.remap_key_to_other_layout(vk_code, scan_code, ENGLISH_HKL_VALUE)
     if english and english.isalpha():
@@ -364,6 +374,8 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
 
     current_language = "hebrew" if current_hkl == HEBREW_HKL_VALUE else "english"
     other_language = "english" if current_language == "hebrew" else "hebrew"
+    if english_mid_hebrew(state, current_hkl):
+        return None  # capitals on the Hebrew layout: English typed on purpose
     if gibberish_detector.looks_impossible(state.chars.text(), current_language) is None:
         return None  # plausible so far under the current layout — nothing to suspect yet
 
@@ -530,6 +542,17 @@ def _comma_between_letters(keys):
                and layout_remap.is_letter_key(vks[i - 1], ENGLISH_HKL_VALUE)
                and layout_remap.is_letter_key(vks[i + 1], ENGLISH_HKL_VALUE)
                for i, vk in enumerate(vks))
+
+
+def english_mid_hebrew(state, current_hkl):
+    """True if every letter of the current word was typed with Shift (or Caps
+    Lock) on the Hebrew layout. Hebrew has no capitals: those keys type English
+    capitals, so this is English the user typed on purpose mid-Hebrew — the
+    user's own habit ("CKILS" inside a Hebrew sentence), 2026-10-20 — not a
+    wrong layout. A capital only at the start ("Hello" typed on Hebrew by
+    mistake) is not all-capitals, and is still corrected."""
+    return (current_hkl == HEBREW_HKL_VALUE and state.letter_keys > 0
+            and state.shifted_keys == state.letter_keys)
 
 
 def word_end_check(state, current_hkl):
@@ -862,7 +885,11 @@ def _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_
     # would have switched there. The Hebrew-layout rule keeps space/Enter/Tab
     # only (an apostrophe or quote ends Hebrew abbreviations: מס', מנכ"ל).
     english_end = current_hkl == ENGLISH_HKL_VALUE and is_word_end_key(vk_code, shift_pressed)
-    if not fired and (vk_code in _WORD_END_RULE_VKS or english_end):
+    on_purpose = english_mid_hebrew(state, current_hkl)
+    if on_purpose and is_word_end_key(vk_code, shift_pressed):
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_ENGLISH_MID_HEBREW,
+                             f"len={state.letter_keys}")
+    if not fired and not on_purpose and (vk_code in _WORD_END_RULE_VKS or english_end):
         end_result = word_end_check(state, current_hkl) if vk_code in _WORD_END_RULE_VKS else None
         if end_result is not None:
             skip_logger.log_skip(

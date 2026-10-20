@@ -3297,6 +3297,16 @@ Hebrew caught by word 3 95.7% -> 96.8%. The same measurement shows correct Hebre
 person typing Hebrew never types a lone ם, and the acronym case is now guarded (tested). Watch the log
 for real cases. 3 new tests. 266 pass.
 
+**English capitals mid-Hebrew stay Hebrew (the user's habit).** The user writes an English word inside a
+Hebrew sentence by holding Shift on the Hebrew layout, which types English capitals ("CKILS"). Tier 4
+read the same keys as Hebrew letters (בלןךד), saw gibberish, and switched the keyboard to English. Hebrew
+has no capitals, so a word typed ENTIRELY with Shift (or Caps Lock) on the Hebrew layout is English on
+purpose: it raises no flag, runs no word-end check, and never counts for the second-word rule. A capital
+only at the start ("Hello" typed on Hebrew by mistake) is not all-capitals and is still corrected. At the
+user's request each such word is logged as `english_mid_hebrew` (exempt from the log's dedupe), so they
+can be counted and studied later — the window and the letter COUNT only, never the letters, keeping the
+promise that typed letters never reach the disk. 3 new tests. 269 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

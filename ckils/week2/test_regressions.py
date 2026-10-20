@@ -2829,6 +2829,40 @@ class LoneFinalLetterTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
 
+class EnglishMidHebrewTests(unittest.TestCase):
+    """The user's habit, 2026-10-20: mid-Hebrew, holding Shift types English
+    capitals on the Hebrew layout ("CKILS"). That's English on purpose — no
+    switch — logged as english_mid_hebrew (a letter count, never letters)."""
+
+    setUp = Tier4AutocorrectWiringTests.setUp
+    tearDown = Tier4AutocorrectWiringTests.tearDown
+    _run = Tier4AutocorrectWiringTests._run
+
+    CKILS = [{"vk": vk, "shift": True} for vk in (0x43, 0x4B, 0x49, 0x4C, 0x53)]
+
+    def test_capitals_mid_hebrew_never_switch(self):
+        akuo = [0x41, 0x4B, 0x55, 0x4F, 0x20]   # שלום
+        self._run(akuo + self.CKILS + [0x20] + akuo + self.CKILS + [0x20])
+        self.assertEqual(self.calls, [])
+
+    def test_a_capital_only_at_the_start_is_still_corrected(self):
+        """"Hello" typed on the Hebrew layout by mistake."""
+        self._run([{"vk": 0x48, "shift": True}, 0x45, 0x4C, 0x4C, 0x4F, 0x20])
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
+
+    def test_it_is_logged_as_english_mid_hebrew_with_a_count_only(self):
+        state = keyboard_hook._PerThreadState()
+        for vk in (0x43, 0x4B, 0x49, 0x4C, 0x53):
+            keyboard_hook.process_key_event(vk, 0, state, rule_engine.Hebrew_HKL, False, False, shift_pressed=True)
+        with patch.object(keyboard_hook.skip_logger, "log_skip") as log_skip, \
+             patch.object(keyboard_hook, "_fire_autocorrect") as fire:
+            keyboard_hook._handle_word_end(state, 0x20, False, rule_engine.Hebrew_HKL, 1, "x.exe", "t")
+        fire.assert_not_called()
+        self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_ENGLISH_MID_HEBREW)
+        self.assertEqual(log_skip.call_args.args[4], "len=5")
+
+
 class TwoLetterWordEndTests(unittest.TestCase):
     """Found live twice (2026-10-16, 2026-10-17): "הצ" — the start of הצד,
     with a space typed too early — ends in a regular צ like "an" (שמ) does,
