@@ -88,6 +88,12 @@ python ckils/week2/measure_corrections.py  # real corrections, read from your ow
 python ckils/week2/summarize_skips.py      # why CKILS did nothing, when it did nothing
 ```
 
+To build `CKILS.exe` yourself (needs `pyinstaller`), from `ckils/week2/`:
+
+```
+python -m PyInstaller CKILS.spec --noconfirm   # the exe lands in dist/, with all three models inside
+```
+
 The models ship in the repo: `language_model_v2.joblib` (in use), `language_model.joblib` (the previous
 one) and `letter_model.json` (rebuilt with `build_letter_model.py` from the public FrequencyWords lists).
 Training data is real screen text, so it stays local.

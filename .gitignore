@@ -25,6 +25,8 @@ ckils/week2/logs/
 ckils/week2/build/
 ckils/week2/dist/
 ckils/week2/*.spec
+# ...except the real build recipe: it lists what goes inside CKILS.exe (all three models), no personal data
+!ckils/week2/CKILS.spec
 
 # Clean, never-run exe copy prepared for handing off to other users
 ckils/week2/CKILS_release/
