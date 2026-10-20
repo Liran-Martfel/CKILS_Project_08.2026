@@ -203,6 +203,10 @@ class _PerThreadState:
         # A word flag carried across an apostrophe inside an English word
         # ("don't"): the buffer splits the word there, the flag must not.
         self.carried_flag = None
+        # True while the current word began right after a quote-mark key:
+        # Hebrew acronyms put their last letter there (נדל"ן, בע"מ, תנ"ך), so a
+        # lone final letter after it is real Hebrew, not "i" typed on Hebrew.
+        self.after_quote = False
 
     def reset_word(self):
         """The word ended normally: clears everything about THIS word (the
@@ -229,6 +233,7 @@ class _PerThreadState:
         self.pending_correction = None
         self.recent_word_flags.clear()
         self.carried_flag = None
+        self.after_quote = False
 
 
 def _is_password_field_focused():
@@ -294,6 +299,7 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         # it can never be part of a word either way, so there's no reason to
         # ask what character it would decode to first.
         state.reset_word()
+        state.after_quote = vk_code == layout_remap.VK_OEM_7  # ' and " — gershayim on the Hebrew layout
         return None
 
     if len(state.word_keys) <= letter_model.MAX_LETTERS:
@@ -539,7 +545,18 @@ def word_end_check(state, current_hkl):
     מנכ"ל) right after a regular letter, so treating those as word ends
     would flag real Hebrew.
     """
-    if current_hkl != HEBREW_HKL_VALUE or state.letter_count < 2 or state.last_letter_key is None:
+    if current_hkl != HEBREW_HKL_VALUE or state.last_letter_key is None:
+        return None
+    if state.letter_count == 1:
+        # Found live 2026-10-20: "i have put something" typed on Hebrew switched
+        # only at word 4. "i" on the Hebrew layout is ן alone — and a final
+        # form (ן ם ך) is never a whole Hebrew word. "I" starts countless
+        # English sentences, so this switches at the first word.
+        vk, scan = state.last_letter_key
+        hebrew = layout_remap.remap_key_to_other_layout(vk, scan, HEBREW_HKL_VALUE) or ""
+        english = layout_remap.remap_key_to_other_layout(vk, scan, ENGLISH_HKL_VALUE) or ""
+        if hebrew in gibberish_detector.HEBREW_FINAL_FORMS and english.isalpha() and not state.after_quote:
+            return {"current_language": "hebrew", "other_language": "english", "length": 1}
         return None
     last_vk, last_scan = state.last_letter_key
     last_letter = layout_remap.remap_key_to_other_layout(last_vk, last_scan, HEBREW_HKL_VALUE)

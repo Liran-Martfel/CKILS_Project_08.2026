@@ -2800,6 +2800,35 @@ class WeakerReadTests(unittest.TestCase):
         self.assertTrue(changed)
 
 
+class LoneFinalLetterTests(unittest.TestCase):
+    """Found live 2026-10-20: "i have put something" typed on the Hebrew
+    layout switched only at word 4. "i" there is ן alone, and a final form
+    is never a whole Hebrew word — except as the last letter of an acronym
+    after the quote mark (נדל"ן, בע"מ), which must stay Hebrew."""
+
+    setUp = Tier4AutocorrectWiringTests.setUp
+    tearDown = Tier4AutocorrectWiringTests.tearDown
+    _run = Tier4AutocorrectWiringTests._run
+
+    def test_i_alone_switches_at_the_first_word(self):
+        self._run([0x49, 0x20])  # "i" on the Hebrew layout: ן
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
+
+    def test_acronyms_ending_in_a_final_letter_stay_hebrew(self):
+        quote = {"vk": 0xDE, "shift": True}  # " on the Hebrew layout
+        nadlan = [0x42, 0x53, 0x4B, quote, 0x49, 0x20]   # נדל"ן
+        baam = [0x43, 0x47, quote, 0x4F, 0x20]            # בע"מ
+        with patch.object(keyboard_hook, "_letter_model_disabled", return_value=True):
+            self._run(nadlan + baam)
+        self.assertEqual(self.calls, [])
+
+    def test_a_lone_regular_letter_is_not_judged(self):
+        """ו or ה alone are real Hebrew words."""
+        self._run([0x55, 0x20, 0x56, 0x20])
+        self.assertEqual(self.calls, [])
+
+
 class TwoLetterWordEndTests(unittest.TestCase):
     """Found live twice (2026-10-16, 2026-10-17): "הצ" — the start of הצד,
     with a space typed too early — ends in a regular צ like "an" (שמ) does,

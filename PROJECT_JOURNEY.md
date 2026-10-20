@@ -3286,6 +3286,17 @@ Typing safety net, 1,274 sentences (637 wrong-layout, 637 correct), by the 3rd w
 start (Oct 14) accuracy 69.2%, precision 98.4%, recall 39.1%, F1 56.0%; today 96.2%, 97.6%, 94.7%, 96.1%.
 On a balanced test; real typing is mostly correct, so real precision will be a little lower.
 
+**2026-10-20 — "I" typed on Hebrew.** "i have put something in" typed on the Hebrew layout in VS Code
+switched only at word 4: "i" is one letter (never judged), "have" scored 1.01 (a mark, under 1.25),
+"put" 0.46 (under the 0.5 mark), "something" switched. "i" on the Hebrew layout is ן alone, and a final
+form (ן ם ך) is never a whole Hebrew word, so a lone final letter now switches at word 1 — except right
+after a quote-mark key, since Hebrew acronyms end there (נדל"ן, בע"מ, תנ"ך). Measured: English typed on
+Hebrew caught by word 3 95.7% -> 96.8%. The same measurement shows correct Hebrew switched wrongly 3.4% ->
+7.5%, but it is an artifact of the test text: it is OCR'd screen text, where icons read as lone "ם"
+("7 ם א ס ם 4 ם ם"), and the tokenizer splits acronyms at the quote, so נדל"ן arrives as "נדל" + "ן"; a
+person typing Hebrew never types a lone ם, and the acronym case is now guarded (tested). Watch the log
+for real cases. 3 new tests. 266 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
