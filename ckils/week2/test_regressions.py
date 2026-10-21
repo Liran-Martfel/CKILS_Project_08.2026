@@ -3018,6 +3018,55 @@ class WhatsAppCounterAndPunctuationTests(unittest.TestCase):
             keyboard_hook._typed_languages.clear()
 
 
+class UpdaterTests(unittest.TestCase):
+    """The user's call, 2026-10-21: tell the user when a newer CKILS is out.
+    The only connection CKILS makes; nothing is downloaded or run by itself."""
+
+    def setUp(self):
+        import updater
+        self.updater = updater
+        self.tmp = tempfile.mkdtemp(prefix="ckils_update_")
+        self._dir = patch.object(updater.skip_logger, "_persistent_dir", return_value=self.tmp)
+        self._dir.start()
+
+    def tearDown(self):
+        self._dir.stop()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _check(self, tag, notes="**New:** faster", now=1000.0):
+        shown = []
+        with patch.object(self.updater, "fetch_latest", return_value=(tag, notes)):
+            result = self.updater.check_once(now=now, show=lambda t, s: shown.append((t, s)))
+        return result, shown
+
+    def test_only_a_newer_release_is_announced(self):
+        self.assertEqual(self._check("v99.0.0")[0], "v99.0.0")
+        self.assertIsNone(self._check("v1.0.0", now=1000.0 + 2 * 86400)[0])
+
+    def test_at_most_once_a_day(self):
+        self._check("v99.0.0", now=1000.0)
+        self.assertEqual(self._check("v99.0.0", now=1000.0 + 3600)[1], [])
+        self.assertEqual(len(self._check("v99.0.0", now=1000.0 + 86400 + 1)[1]), 1)
+
+    def test_the_off_switch(self):
+        open(os.path.join(self.tmp, self.updater.DISABLE_FILENAME), "w").close()
+        with patch.object(self.updater, "fetch_latest") as fetch:
+            self.assertIsNone(self.updater.check_once(now=1000.0, show=lambda *a: None))
+        fetch.assert_not_called()
+
+    def test_only_a_strict_version_tag_is_accepted(self):
+        for bad in ("latest", "https://evil.example/x", "v2.1", "v2.1.0; rm -rf", ""):
+            self.assertIsNone(self.updater.parse_version(bad), bad)
+        self.assertEqual(self.updater.parse_version("v2.1.0"), (2, 1, 0))
+
+    def test_the_download_link_always_points_at_this_repository(self):
+        self.assertTrue(self.updater.RELEASE_PAGE.startswith(
+            "https://github.com/Liran-Martfel/CKILS_Project_08.2026/releases/tag/"))
+
+    def test_the_summary_is_plain_text(self):
+        self.assertEqual(self.updater.summary_of("**Bold** and `code`"), "Bold and code")
+
+
 class TypingAreaTests(unittest.TestCase):
     """The user's call, 2026-10-21: VS Code's code editor and its chat box are
     one window but two places (UI Automation: class native-edit-context vs

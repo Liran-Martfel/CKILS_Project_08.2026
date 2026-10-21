@@ -48,7 +48,9 @@ windows and deliberate tests.
 
 ## Privacy
 
-- Everything stays on your computer. Nothing is uploaded.
+- Everything about you stays on your computer. Nothing is uploaded. The one connection: once a day the
+  packaged CKILS asks GitHub whether a newer release exists — it sends nothing about you, and never
+  downloads or installs anything by itself (`disable_update_check.on` turns it off).
 - The typing safety net keeps only the current word, in memory. Typed letters are never written to disk,
   and password fields are skipped entirely.
 - The decision log keeps what was read and why it decided, for 365 days; screenshots (cropped to the
@@ -73,6 +75,7 @@ windows and deliberate tests.
 | `disable_tier4_now.trigger` | Turns the typing safety net off at once |
 | `disable_letter_model.on` | Turns off only the letter model |
 | `use_old_language_model.on` | Uses the previous screen-reading model |
+| `disable_update_check.on` | Stops the daily check for a newer version |
 
 All of them take effect immediately, no restart.
 

@@ -45,6 +45,7 @@ import decision_logger
 import skip_logger
 import interface_text
 import keyboard_hook
+import updater
 
 # Set to False for a quiet, end-user-facing run — True prints a line for every
 # focus change and every content-layer check, useful while developing/debugging.
@@ -2038,6 +2039,7 @@ if __name__ == "__main__":
         # runs only when Tier 4 does.
         threading.Thread(target=_area_watch_loop, daemon=True).start()
     skip_logger.start()
+    updater.start()  # packaged CKILS only: at most once a day, asks GitHub for a newer release
 
     callback = WinEventProcType(on_focus_change)
     hook = user32.SetWinEventHook(
