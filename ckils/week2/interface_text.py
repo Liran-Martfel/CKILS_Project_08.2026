@@ -115,19 +115,29 @@ def record(exe_name, title, text):
     save_if_due()
 
 
+_save_lock = threading.Lock()  # one writer at a time
+
+
 def save_if_due(force=False):
+    """Writes the learned fingerprints at most once a minute. The check and
+    the write happen under one lock, through a temporary file swapped in
+    (found by /code-review 2026-10-21: two reads saving at once could leave
+    an interleaved file, which then loaded as empty — all learning lost)."""
     global _last_save, _dirty
-    if not _dirty or (not force and time.time() - _last_save < SAVE_EVERY_SECONDS):
-        return
-    with _lock:
-        snapshot = json.dumps(_data, separators=(",", ":"))
-        _dirty = False
-    _last_save = time.time()
-    try:
-        with open(FILE, "w", encoding="utf-8") as f:
-            f.write(snapshot)
-    except Exception:
-        pass
+    with _save_lock:
+        if not _dirty or (not force and time.time() - _last_save < SAVE_EVERY_SECONDS):
+            return
+        with _lock:
+            snapshot = json.dumps(_data, separators=(",", ":"))
+            _dirty = False
+        _last_save = time.time()
+        try:
+            tmp = FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(snapshot)
+            os.replace(tmp, FILE)
+        except Exception:
+            pass
 
 
 def seed_from_log(dist):

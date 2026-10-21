@@ -209,8 +209,12 @@ def prune_old_logs():
     # Anything not referenced by a still-kept entry (its own entry aged out,
     # or it belongs to an aged-out entry another one was pointing at) gets
     # deleted here rather than left to accumulate forever.
+    # A screenshot from the last hour is never deleted (found by /code-review
+    # 2026-10-21): the PNG is saved a moment BEFORE its log entry is written,
+    # so a prune running in between used to delete a brand-new screenshot.
+    recent = time.time() - 3600
     for path in glob.glob(os.path.join(SCREENSHOTS_DIR, "*.png")):
-        if os.path.basename(path) not in kept_screenshots:
+        if os.path.basename(path) not in kept_screenshots and os.path.getmtime(path) < recent:
             try:
                 os.remove(path)
             except Exception:

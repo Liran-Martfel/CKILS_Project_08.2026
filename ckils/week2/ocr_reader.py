@@ -33,8 +33,12 @@ def read_region(left, top, right, bottom):
 
     # eng+heb = one call, reading both scripts at once — handles a field with mixed
     # Hebrew/English content directly, instead of guessing which single language to try.
-    config = f"--tessdata-dir {TESSDATA_DIR}"
-    text = pytesseract.image_to_string(img, lang="eng+heb", config=config)
+    # The data folder goes in TESSDATA_PREFIX, not --tessdata-dir (found by
+    # /code-review 2026-10-21): pytesseract splits the config on spaces, so a
+    # user folder like "C:/Users/John Smith" broke every OCR read, and quoting
+    # it doesn't help on Windows (the quotes reach Tesseract as part of the path).
+    os.environ["TESSDATA_PREFIX"] = TESSDATA_DIR
+    text = pytesseract.image_to_string(img, lang="eng+heb")
     return text.strip()
 
 

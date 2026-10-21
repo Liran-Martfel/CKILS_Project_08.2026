@@ -131,14 +131,40 @@ LEARNED_DEFAULTS_FILE = os.path.join(_persistent_dir(), "learned_defaults.json")
 learned_defaults_lock = threading.Lock()  # multiple correction threads could write this file at once
 
 
+def _load_json_safely(path):
+    """{} if the file doesn't exist. If it can't be read or isn't a JSON
+    object (found by /code-review 2026-10-21: a write cut short by a forced
+    close left it truncated, and CKILS then crashed on every start), the bad
+    file is kept aside as <name>.corrupt-<time> and CKILS starts empty."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    try:
+        os.replace(path, f"{path}.corrupt-{datetime.datetime.now():%Y%m%d-%H%M%S}")
+    except Exception:
+        pass
+    return {}
+
+
+def _write_json_atomically(path, data):
+    """Writes to a temporary file, then swaps it in — a crash mid-write can
+    never leave a half-written file behind."""
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
 def load_learned_defaults():
     """Loads the app-level learned-defaults dict from disk, or {} if the
-    file doesn't exist yet (a brand-new install with no history at all).
-    """
-    if not os.path.exists(LEARNED_DEFAULTS_FILE):
-        return {}
-    with open(LEARNED_DEFAULTS_FILE, encoding="utf-8") as f:
-        return json.load(f)
+    file doesn't exist yet (a brand-new install with no history at all)."""
+    return _load_json_safely(LEARNED_DEFAULTS_FILE)
 
 
 def save_learned_default(exe_name, language_name):
@@ -149,8 +175,10 @@ def save_learned_default(exe_name, language_name):
         history = _history_of(learned_defaults.get(exe_name))
         history.append(language_name)
         learned_defaults[exe_name] = {"history": history[-TRUST_HISTORY_LENGTH:]}
-        with open(LEARNED_DEFAULTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(learned_defaults, f, ensure_ascii=False, indent=2)
+        try:
+            _write_json_atomically(LEARNED_DEFAULTS_FILE, learned_defaults)
+        except Exception:
+            pass  # a locked file (OneDrive, antivirus) loses one save, never crashes a caller
 
 
 learned_defaults = load_learned_defaults()
@@ -174,14 +202,28 @@ def _page_key(exe_name, title):
     return f"{exe_name}||{title}"
 
 
+# Page titles are kept 365 days after a page was last seen, like the rest of
+# the text CKILS keeps (found by /code-review 2026-10-21: they were kept forever).
+PAGE_DEFAULTS_RETENTION_DAYS = 365
+
+
 def load_page_learned_defaults():
     """Loads the page-level learned-defaults dict from disk, or {} if the
-    file doesn't exist yet.
-    """
-    if not os.path.exists(PAGE_LEARNED_DEFAULTS_FILE):
-        return {}
-    with open(PAGE_LEARNED_DEFAULTS_FILE, encoding="utf-8") as f:
-        return json.load(f)
+    file doesn't exist yet. Drops pages not seen for
+    PAGE_DEFAULTS_RETENTION_DAYS; a page with no date yet starts counting today."""
+    data = _load_json_safely(PAGE_LEARNED_DEFAULTS_FILE)
+    today = datetime.date.today()
+    kept = {}
+    for key, value in data.items():
+        entry = value if isinstance(value, dict) else {"history": _history_of(value)}
+        try:
+            seen = datetime.date.fromisoformat(entry.get("seen", ""))
+        except Exception:
+            seen = today
+            entry["seen"] = today.isoformat()
+        if (today - seen).days <= PAGE_DEFAULTS_RETENTION_DAYS:
+            kept[key] = entry
+    return kept
 
 
 def save_page_learned_default(exe_name, title, language_name):
@@ -192,9 +234,12 @@ def save_page_learned_default(exe_name, title, language_name):
         key = _page_key(exe_name, title)
         history = _history_of(page_learned_defaults.get(key))
         history.append(language_name)
-        page_learned_defaults[key] = {"history": history[-TRUST_HISTORY_LENGTH:]}
-        with open(PAGE_LEARNED_DEFAULTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(page_learned_defaults, f, ensure_ascii=False, indent=2)
+        page_learned_defaults[key] = {"history": history[-TRUST_HISTORY_LENGTH:],
+                                      "seen": datetime.date.today().isoformat()}
+        try:
+            _write_json_atomically(PAGE_LEARNED_DEFAULTS_FILE, page_learned_defaults)
+        except Exception:
+            pass  # a locked file loses one save, never crashes a caller
 
 
 # A real database logging every content decision CKILS makes, for the monthly
@@ -1316,7 +1361,7 @@ def _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, h
     """
     if thread_id not in last_set:
         return False
-    if actual_hkl == last_set[thread_id]:
+    if actual_hkl == last_set.get(thread_id):
         matched_this_visit.add(thread_id)  # from now on, a change in THIS window is a real change
         reassert_attempts.pop(thread_id, None)
         pending_override.pop(thread_id, None)
@@ -1948,42 +1993,53 @@ def _poll_focused_window():
     """
     while True:
         time.sleep(UNTRUSTED_POLL_SECONDS)
-        keyboard_hook.forget_closed_windows(win32gui.IsWindow)
         try:
-            hwnd = win32gui.GetForegroundWindow()
-            title = win32gui.GetWindowText(hwnd)
-            thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
-            exe_name = psutil.Process(pid).name()
+            _poll_tick()
         except Exception:
-            continue  # window vanished or info unavailable between calls — just skip this tick
+            # Found by /code-review 2026-10-21: one exception (a locked file,
+            # a race with the main thread) used to end this thread for the
+            # rest of the session. One bad tick is now just skipped.
+            continue
 
-        # Real bug found live, 2026-09-17: a manual Alt+Shift switch that doesn't
-        # also change focus or title fires no Windows event at all, so this poll
-        # used to have no idea it had just happened — it would go ahead and read
-        # content, and could silently switch the language right back, undoing
-        # the user's own correction. Checking for it here, on every tick, means
-        # the very next poll after a silent manual switch (well within
-        # UNTRUSTED_POLL_SECONDS) notices and records it — not "whenever the
-        # user happens to alt-tab away and back."
-        if thread_id in last_set:
-            try:
-                actual_hkl = win32api.GetKeyboardLayout(thread_id)
-            except Exception:
-                actual_hkl = None
-            if actual_hkl is not None and _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, hwnd):
-                continue  # just recorded a fresh override — don't immediately fight it with a Tier 3 read
 
-        check_key = (thread_id, title)
-        if check_key in content_check_in_progress:
-            continue  # a check for this same title (from an event or a previous tick) is already in flight
-        if time.time() < poll_next_allowed.get(check_key, 0.0):
-            continue  # this exact window+title has already settled — see poll_unchanged_streak below
-        content_check_in_progress.add(check_key)
-        threading.Thread(
-            target=_poll_apply_content_correction,
-            args=(hwnd, thread_id, exe_name, last_set.get(thread_id), title, check_key),
-            daemon=True
-        ).start()
+def _poll_tick():
+    """One poll: see _poll_focused_window."""
+    keyboard_hook.forget_closed_windows(win32gui.IsWindow)
+    try:
+        hwnd = win32gui.GetForegroundWindow()
+        title = win32gui.GetWindowText(hwnd)
+        thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+        exe_name = psutil.Process(pid).name()
+    except Exception:
+        return  # window vanished or info unavailable between calls — just skip this tick
+
+    # Real bug found live, 2026-09-17: a manual Alt+Shift switch that doesn't
+    # also change focus or title fires no Windows event at all, so this poll
+    # used to have no idea it had just happened — it would go ahead and read
+    # content, and could silently switch the language right back, undoing
+    # the user's own correction. Checking for it here, on every tick, means
+    # the very next poll after a silent manual switch (well within
+    # UNTRUSTED_POLL_SECONDS) notices and records it — not "whenever the
+    # user happens to alt-tab away and back."
+    if thread_id in last_set:
+        try:
+            actual_hkl = win32api.GetKeyboardLayout(thread_id)
+        except Exception:
+            actual_hkl = None
+        if actual_hkl is not None and _detect_and_record_manual_override(thread_id, exe_name, title, actual_hkl, hwnd):
+            return  # just recorded a fresh override — don't immediately fight it with a Tier 3 read
+
+    check_key = (thread_id, title)
+    if check_key in content_check_in_progress:
+        return  # a check for this same title (from an event or a previous tick) is already in flight
+    if time.time() < poll_next_allowed.get(check_key, 0.0):
+        return  # this exact window+title has already settled — see poll_unchanged_streak below
+    content_check_in_progress.add(check_key)
+    threading.Thread(
+        target=_poll_apply_content_correction,
+        args=(hwnd, thread_id, exe_name, last_set.get(thread_id), title, check_key),
+        daemon=True
+    ).start()
 
 
 def _poll_apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title, check_key):

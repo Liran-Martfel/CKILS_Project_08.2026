@@ -779,6 +779,7 @@ _TYPED_FILE = None
 _restored = {}           # (hwnd, title fingerprint) -> deque, from the last run, until claimed
 _typed_dirty = False
 _typed_saved_at = 0.0
+_typed_save_lock = threading.Lock()
 TYPED_SAVE_EVERY_SECONDS = 60
 
 
@@ -813,35 +814,49 @@ def _title_fingerprint(title):
 
 
 def _restore_typed_languages(path, is_window):
-    """Loads the saved record; keeps only windows that still exist."""
+    """Loads the saved record; keeps only windows that still exist. Any
+    entry of the wrong shape is skipped (found by /code-review 2026-10-21:
+    a malformed file used to raise inside start() and leave Tier 4 off)."""
     try:
         with open(path, encoding="utf-8") as f:
             saved = json.load(f)
+        windows = saved.get("windows", []) if isinstance(saved, dict) else []
     except Exception:
         return
     with _typed_lock:
-        for hwnd, fingerprint, languages in saved.get("windows", []):
-            if is_window(hwnd):
-                _restored[(hwnd, fingerprint)] = collections.deque(
-                    [x for x in languages if x in ("hebrew", "english")], maxlen=TYPED_WORDS_KEPT)
+        for entry in windows if isinstance(windows, list) else []:
+            try:
+                hwnd, fingerprint, languages = entry
+                if not (isinstance(hwnd, int) and isinstance(fingerprint, str) and isinstance(languages, list)):
+                    continue
+                if is_window(hwnd):
+                    _restored[(hwnd, fingerprint)] = collections.deque(
+                        [x for x in languages if x in ("hebrew", "english")], maxlen=TYPED_WORDS_KEPT)
+            except Exception:
+                continue
 
 
 def _save_typed_languages(force=False):
     """Writes the record at most once a minute; a failure only loses it."""
     global _typed_dirty, _typed_saved_at
-    if _TYPED_FILE is None or not _typed_dirty or (not force and time.time() - _typed_saved_at < TYPED_SAVE_EVERY_SECONDS):
-        return
-    with _typed_lock:
-        windows = {(hwnd, _title_fingerprint(title)): list(words) for (hwnd, title), words in _typed_languages.items()}
-        for key, words in _restored.items():
-            windows.setdefault(key, list(words))
-        _typed_dirty = False
-    _typed_saved_at = time.time()
-    try:
-        with open(_TYPED_FILE, "w", encoding="utf-8") as f:
-            json.dump({"windows": [[h, fp, w] for (h, fp), w in windows.items()]}, f)
-    except Exception:
-        pass
+    with _typed_save_lock:  # the consumer and the poll thread both save: one at a time
+        if _TYPED_FILE is None or not _typed_dirty or (
+                not force and time.time() - _typed_saved_at < TYPED_SAVE_EVERY_SECONDS):
+            return
+        with _typed_lock:
+            windows = {(hwnd, _title_fingerprint(title)): list(words)
+                       for (hwnd, title), words in _typed_languages.items()}
+            for key, words in _restored.items():
+                windows.setdefault(key, list(words))
+            _typed_dirty = False
+        _typed_saved_at = time.time()
+        try:
+            tmp = _TYPED_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"windows": [[h, fp, w] for (h, fp), w in windows.items()]}, f)
+            skip_logger.os.replace(tmp, _TYPED_FILE)
+        except Exception:
+            pass
 
 
 def _note_typed_word(state, thread_id, title, current_hkl, fired):

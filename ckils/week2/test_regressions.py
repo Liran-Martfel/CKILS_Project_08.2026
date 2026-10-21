@@ -3135,6 +3135,61 @@ class UpdaterTests(unittest.TestCase):
             os.remove(script)
 
 
+class RobustnessTests(unittest.TestCase):
+    """/code-review of the whole code, 2026-10-21: nothing may stop CKILS
+    starting or quietly lose what it learned."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ckils_robust_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_a_corrupt_memory_file_is_set_aside_not_fatal(self):
+        path = os.path.join(self.tmp, "learned_defaults.json")
+        open(path, "w", encoding="utf-8").write('{"chrome.exe": {"hist')  # cut short mid-write
+        self.assertEqual(rule_engine._load_json_safely(path), {})
+        self.assertFalse(os.path.exists(path))
+        self.assertTrue(any(n.startswith("learned_defaults.json.corrupt-") for n in os.listdir(self.tmp)))
+
+    def test_writes_are_atomic(self):
+        path = os.path.join(self.tmp, "x.json")
+        rule_engine._write_json_atomically(path, {"a": 1})
+        self.assertEqual(json.load(open(path, encoding="utf-8")), {"a": 1})
+        self.assertFalse(os.path.exists(path + ".tmp"))
+
+    def test_pages_unseen_for_a_year_are_dropped(self):
+        path = os.path.join(self.tmp, "page_learned_defaults.json")
+        old = (datetime.date.today() - datetime.timedelta(days=400)).isoformat()
+        json.dump({"a||old": {"history": ["english"], "seen": old},
+                   "b||recent": {"history": ["hebrew"], "seen": datetime.date.today().isoformat()},
+                   "c||undated": {"history": ["hebrew"]}}, open(path, "w", encoding="utf-8"))
+        with patch.object(rule_engine, "PAGE_LEARNED_DEFAULTS_FILE", path):
+            kept = rule_engine.load_page_learned_defaults()
+        self.assertEqual(sorted(kept), ["b||recent", "c||undated"])
+        self.assertIn("seen", kept["c||undated"])
+
+    def test_a_malformed_typed_record_is_skipped(self):
+        path = os.path.join(self.tmp, "typed_languages.json")
+        for content in ('[1, 2, 3]', '{"windows": [[1, 2], "x", [777, "abc", ["hebrew"]]]}'):
+            open(path, "w", encoding="utf-8").write(content)
+            keyboard_hook._restored.clear()
+            keyboard_hook._restore_typed_languages(path, lambda hwnd: True)  # must not raise
+        self.assertIn((777, "abc"), keyboard_hook._restored)
+        keyboard_hook._restored.clear()
+
+    def test_a_fresh_screenshot_survives_a_prune(self):
+        shots = os.path.join(self.tmp, "screenshots")
+        os.makedirs(shots)
+        log = os.path.join(self.tmp, "decisions.jsonl")
+        open(log, "w").close()
+        open(os.path.join(shots, "just_saved.png"), "wb").close()  # its log entry isn't written yet
+        with patch.object(decision_logger, "LOG_FILE", log), \
+             patch.object(decision_logger, "SCREENSHOTS_DIR", shots):
+            decision_logger.prune_old_logs()
+        self.assertEqual(os.listdir(shots), ["just_saved.png"])
+
+
 class TypingAreaTests(unittest.TestCase):
     """The user's call, 2026-10-21: VS Code's code editor and its chat box are
     one window but two places (UI Automation: class native-edit-context vs
@@ -3364,7 +3419,10 @@ class RetentionTests(unittest.TestCase):
 
     def _entry(self, days_ago, shot):
         when = (datetime.datetime.now() - datetime.timedelta(days=days_ago)).isoformat()
-        open(os.path.join(self.shots, shot), "wb").close()
+        path = os.path.join(self.shots, shot)
+        open(path, "wb").close()
+        stamp = time.time() - days_ago * 86400  # the screenshot is as old as its entry
+        os.utime(path, (stamp, stamp))
         return json.dumps({"timestamp": when, "event_type": "auto", "text": f"read {days_ago}",
                            "screenshot": os.path.join(self.shots, shot)}) + "\n"
 
