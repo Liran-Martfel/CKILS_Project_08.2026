@@ -11,8 +11,14 @@ import csv
 import os
 import sqlite3
 
-DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ckils_decisions.db")
-TRAINING_DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "training_data.csv")
+# The real reads live next to the running exe, in dist/; the data CKILS's
+# current model is trained on is training_data_v2.csv (fixed 2026-10-21,
+# found by /code-review: both pointed at stale files).
+_HERE = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(_HERE, "dist", "ckils_decisions.db")
+if not os.path.exists(DB_FILE):
+    DB_FILE = os.path.join(_HERE, "ckils_decisions.db")
+TRAINING_DATA_FILE = os.path.join(_HERE, "training_data_v2.csv")
 
 # Cases actually worth a human's time: borderline confidence (not clearly right
 # or wrong either way), or an entry followed shortly by a real manual override
@@ -111,7 +117,7 @@ def main():
         print()
 
     conn.close()
-    print(f"Added {added} new row(s) to training_data.csv.")
+    print(f"Added {added} new row(s) to {os.path.basename(TRAINING_DATA_FILE)}.")
     if added:
         print("Run train_model.py to retrain on the updated dataset.")
 

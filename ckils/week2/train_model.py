@@ -10,6 +10,9 @@ captured data first (see review_decisions.py) — blindly retraining on
 whatever was captured would just teach the model to repeat its own mistakes.
 """
 import csv
+import datetime
+import os
+import shutil
 import sys
 
 import joblib
@@ -20,8 +23,12 @@ from sklearn.metrics import classification_report
 
 # Overridable as `python train_model.py <data.csv> <model.joblib>`, so a new
 # model can be trained next to the one CKILS runs without touching it.
-DATA_FILE = sys.argv[1] if len(sys.argv) > 1 else "training_data.csv"
-MODEL_FILE = sys.argv[2] if len(sys.argv) > 2 else "language_model.joblib"
+# Defaults point at what CKILS actually uses (found by /code-review
+# 2026-10-21: they pointed at the old 2-answer data and wrote over
+# language_model.joblib — the kept ROLLBACK model — while CKILS runs on v2).
+DATA_FILE = "training_data_v2.csv"
+MODEL_FILE = "language_model_v2.joblib"
+ROLLBACK_MODEL = "language_model.joblib"  # never overwritten by a retrain
 
 
 def load_data():
@@ -41,6 +48,8 @@ def main():
     vectorizer + classifier, prints a held-out accuracy report, and saves
     the trained bundle to MODEL_FILE.
     """
+    if os.path.basename(MODEL_FILE) == ROLLBACK_MODEL:
+        raise SystemExit(f"{ROLLBACK_MODEL} is the kept rollback model; choose another output file")
     texts, labels = load_data()
     print(f"Loaded {len(texts)} labeled examples.")
 
@@ -59,9 +68,18 @@ def main():
     preds = clf.predict(X_test_vec)
     print(classification_report(y_test, preds, zero_division=0))
 
+    if os.path.exists(MODEL_FILE):
+        # The user's rule: always keep the version being replaced.
+        kept = f"{MODEL_FILE}.before-{datetime.datetime.now():%Y%m%d-%H%M%S}"
+        shutil.copy2(MODEL_FILE, kept)
+        print(f"Kept the model being replaced as {kept}")
     joblib.dump({"vectorizer": vectorizer, "clf": clf}, MODEL_FILE)
     print(f"Saved trained model to {MODEL_FILE}")
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        DATA_FILE = sys.argv[1]
+    if len(sys.argv) > 2:
+        MODEL_FILE = sys.argv[2]
     main()

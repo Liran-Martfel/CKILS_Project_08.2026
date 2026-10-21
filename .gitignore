@@ -41,5 +41,7 @@ ckils/week2/release_out/
 # is the compiled artifact that ships and is meant to be shared; this raw
 # corpus stays local-only.
 ckils/week2/training_data*.csv
+# A retrain keeps the model it replaced next to it; those copies stay local.
+ckils/week2/*.joblib.before-*
 
 ckils/week2/ckils_skips.db

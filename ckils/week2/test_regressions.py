@@ -3136,6 +3136,45 @@ class UpdaterTests(unittest.TestCase):
             os.remove(script)
 
 
+class TrainingToolTests(unittest.TestCase):
+    """/code-review 2026-10-21: a retrain must never overwrite the kept
+    rollback model, and must keep the model it replaces."""
+
+    def setUp(self):
+        import train_model
+        self.tm = train_model
+        self.tmp = tempfile.mkdtemp(prefix="ckils_train_")
+        self.saved = (train_model.DATA_FILE, train_model.MODEL_FILE)
+        rows = ["text,label"] + [f"shalom {i},hebrew" for i in range(10)] + [f"hello {i},english" for i in range(10)]
+        train_model.DATA_FILE = os.path.join(self.tmp, "data.csv")
+        with open(train_model.DATA_FILE, "w", encoding="utf-8") as f:
+            f.write("\n".join(rows))
+
+    def tearDown(self):
+        self.tm.DATA_FILE, self.tm.MODEL_FILE = self.saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_defaults_point_at_the_model_ckils_runs(self):
+        self.assertEqual(self.saved, ("training_data_v2.csv", "language_model_v2.joblib"))
+
+    def test_refuses_to_overwrite_the_rollback_model(self):
+        self.tm.MODEL_FILE = os.path.join(self.tmp, "language_model.joblib")
+        with self.assertRaises(SystemExit), patch("builtins.print"):
+            self.tm.main()
+        self.assertFalse(os.path.exists(self.tm.MODEL_FILE))
+
+    def test_keeps_the_model_it_replaces(self):
+        self.tm.MODEL_FILE = os.path.join(self.tmp, "m.joblib")
+        with open(self.tm.MODEL_FILE, "wb") as f:
+            f.write(b"old model")
+        with patch("builtins.print"):
+            self.tm.main()
+        kept = [n for n in os.listdir(self.tmp) if n.startswith("m.joblib.before-")]
+        self.assertEqual(len(kept), 1)
+        with open(os.path.join(self.tmp, kept[0]), "rb") as f:
+            self.assertEqual(f.read(), b"old model")
+
+
 class RobustnessTests(unittest.TestCase):
     """/code-review of the whole code, 2026-10-21: nothing may stop CKILS
     starting or quietly lose what it learned."""
