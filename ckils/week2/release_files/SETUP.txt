@@ -1,0 +1,40 @@
+CKILS - Contextual Keyboard Input Locale Switcher
+Switches your keyboard between Hebrew and English by itself.
+Windows 10/11.
+
+0. (Optional, recommended) Check the download wasn't tampered with.
+   In a terminal, in the folder with the zip:
+       certutil -hashfile CKILS-vX.Y.Z.zip SHA256
+   The result must equal the fingerprint in CKILS-vX.Y.Z.zip.sha256,
+   published on the same release page.
+
+1. Install Tesseract once (CKILS uses it to read the screen).
+   Open a terminal (cmd or PowerShell) and run:
+       winget install --id UB-Mannheim.TesseractOCR -e
+
+2. Double-click CKILS.exe. No installation.
+   To stop it, close its window.
+
+3. Optional - the typing safety net, which fixes a word that came out
+   in the wrong language. It is OFF until you create an EMPTY file
+   next to CKILS.exe:
+       enable_gibberish_detection.on     turns it on (logging only)
+       enable_gibberish_autocorrect.on   lets it switch the keyboard too
+       disable_tier4_now.trigger         turns it off at once
+   Each file takes effect immediately, no restart.
+
+Updates: once a day CKILS asks GitHub whether a newer version is out. If
+so, a small window offers to update. "Update" downloads it, checks its
+fingerprint, keeps your current version in "previous_versions", and
+restarts CKILS. Nothing happens unless you press Update. To turn the daily
+check off, create an empty file disable_update_check.on next to CKILS.exe.
+
+Privacy: everything about you stays on your computer. The only connection
+is the daily update question to GitHub, which sends nothing about you.
+CKILS keeps what it read and why it decided for 365 days, and screenshots
+of the area it read for 60 days. What you type: only the current word, in
+memory; typed letters are never written to disk, password fields are never
+checked. To delete everything, delete the "logs" folder, ckils_decisions.db,
+ckils_skips.db and the .json files next to CKILS.exe.
+
+More: https://github.com/Liran-Martfel/CKILS_Project_08.2026

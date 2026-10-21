@@ -10,6 +10,9 @@ see that guard's own comment for why.
 import collections
 import ctypes
 import datetime
+import hashlib
+import io
+import zipfile
 import json
 import os
 import queue
@@ -3035,8 +3038,8 @@ class UpdaterTests(unittest.TestCase):
 
     def _check(self, tag, notes="**New:** faster", now=1000.0):
         shown = []
-        with patch.object(self.updater, "fetch_latest", return_value=(tag, notes)):
-            result = self.updater.check_once(now=now, show=lambda t, s: shown.append((t, s)))
+        with patch.object(self.updater, "fetch_latest", return_value=(tag, notes, {})):
+            result = self.updater.check_once(now=now, show=lambda t, s, a: shown.append((t, s)))
         return result, shown
 
     def test_only_a_newer_release_is_announced(self):
@@ -3065,6 +3068,62 @@ class UpdaterTests(unittest.TestCase):
 
     def test_the_summary_is_plain_text(self):
         self.assertEqual(self.updater.summary_of("**Bold** and `code`"), "Bold and code")
+
+    # --- the update itself (2026-10-21): verified download, the old version kept ---
+    BASE = "https://github.com/Liran-Martfel/CKILS_Project_08.2026/releases/download/v9.0.0/"
+
+    def _release(self, exe=b"NEW-CKILS", tamper=False):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("CKILS/CKILS.exe", exe)
+            z.writestr("CKILS/SETUP.txt", "setup")
+        blob = buf.getvalue()
+        digest = hashlib.sha256(blob + (b"x" if tamper else b"")).hexdigest()
+        files = {self.BASE + "CKILS-v9.0.0.zip": blob,
+                 self.BASE + "CKILS-v9.0.0.zip.sha256": f"{digest}  CKILS-v9.0.0.zip\n".encode()}
+        assets = {"CKILS-v9.0.0.zip": self.BASE + "CKILS-v9.0.0.zip",
+                  "CKILS-v9.0.0.zip.sha256": self.BASE + "CKILS-v9.0.0.zip.sha256"}
+        return files, assets
+
+    def test_only_this_repositorys_release_files_are_trusted(self):
+        self.assertTrue(self.updater.trusted_download_url(self.BASE + "CKILS-v9.0.0.zip"))
+        for bad in ("http://github.com/Liran-Martfel/CKILS_Project_08.2026/releases/download/v9/x.zip",
+                    "https://evil.example/Liran-Martfel/CKILS_Project_08.2026/releases/download/x.zip",
+                    "https://github.com/someone-else/CKILS/releases/download/v9/x.zip",
+                    "https://github.com/Liran-Martfel/CKILS_Project_08.2026/releases/download/../../x.zip"):
+            self.assertFalse(self.updater.trusted_download_url(bad), bad)
+
+    def test_a_matching_fingerprint_gives_the_new_exe(self):
+        files, assets = self._release()
+        with patch.object(self.updater, "_get", side_effect=lambda url, t, l: files[url]):
+            self.assertEqual(self.updater.download_verified("v9.0.0", assets), b"NEW-CKILS")
+
+    def test_a_wrong_fingerprint_installs_nothing(self):
+        files, assets = self._release(tamper=True)
+        with patch.object(self.updater, "_get", side_effect=lambda url, t, l: files[url]):
+            with self.assertRaises(ValueError):
+                self.updater.download_verified("v9.0.0", assets)
+
+    def test_a_file_from_elsewhere_is_refused(self):
+        files, assets = self._release()
+        assets["CKILS-v9.0.0.zip"] = "https://evil.example/CKILS-v9.0.0.zip"
+        with patch.object(self.updater, "_get") as get:
+            with self.assertRaises(ValueError):
+                self.updater.download_verified("v9.0.0", assets)
+        get.assert_not_called()
+
+    def test_the_current_version_is_kept_before_it_is_replaced(self):
+        exe = os.path.join(self.tmp, "CKILS.exe")
+        open(exe, "wb").write(b"OLD")
+        script = self.updater.install_and_restart(b"NEW", exe_path=exe, launch=False)
+        try:
+            text = open(script, encoding="utf-8").read()
+            self.assertEqual(open(os.path.join(self.tmp, "CKILS.update.exe"), "rb").read(), b"NEW")
+            keep = os.path.join(self.tmp, "previous_versions", f"CKILS-v{self.updater.VERSION}.exe")
+            self.assertIn(f'move /Y "{exe}" "{keep}"', text)
+            self.assertIn(f'start "" "{exe}"', text)
+        finally:
+            os.remove(script)
 
 
 class TypingAreaTests(unittest.TestCase):

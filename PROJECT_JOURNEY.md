@@ -3357,6 +3357,22 @@ where the user has mostly typed one language (3+ words, 60%) switches to it, lik
 Never mid-typing (1 s), never over a manual switch; learned from typing, never named per app; memory only.
 Mechanism `typing_area` in the decision log. 5 new tests. 281 pass. To be tried live in VS Code.
 
+**Update check, then a real in-place update; versions kept; two security steps (the user's calls).** The
+packaged CKILS asks GitHub at most once a day for the latest release; if newer, a small corner window (navy
+on beige) offers Update or Close, with an arrow for a summary. The user then asked that Update install
+directly instead of opening the release page (the sample had pointed at a not-yet-published tag, so its
+page was a 404). Now Update downloads only this repository's release files, accepts the zip only if its
+SHA-256 matches the `.sha256` published with it, keeps the current exe in `previous_versions/`, and hands
+over to a small script that swaps the files once CKILS exits and restarts it; the user's data is never
+touched; any failure installs nothing and offers the release page instead. The swap was tested live on
+two harmless Windows programs in a temp folder. Security, steps 1 and 2 of five offered: every release now
+carries its fingerprint (`make_release.py` prepares zip + `.sha256` locally; `SETUP.txt` shows how to check
+it by hand), and `pip-audit` found 8 known vulnerabilities in Pillow 12.3.0 (image-file parsing; low risk
+here, since CKILS only grabs its own screen) — upgraded to 13.0.0, tests, screenshots and OCR re-checked,
+audit clean; exact versions recorded in `requirements.txt`. Process, at the user's rule: nothing reaches
+GitHub until the user has tested it and says so; every build is kept in `versions/` by
+`build_version.py`, together with the exe it replaced. 11 new tests. 292 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
