@@ -21,12 +21,14 @@ Windows 10/11.
        enable_gibberish_detection.on     turns it on (logging only)
        enable_gibberish_autocorrect.on   lets it switch the keyboard too
        disable_tier4_now.trigger         turns it off at once
-   Each file takes effect immediately, no restart.
+   Each file takes effect immediately, except turning it ON: after
+   creating enable_gibberish_detection.on, restart CKILS once.
+   Deleting it stops the safety net at once.
 
 Updates: once a day CKILS asks GitHub whether a newer version is out. If
 so, a small window offers to update. "Update" downloads it, checks its
-fingerprint, keeps your current version in "previous_versions", and
-restarts CKILS. Nothing happens unless you press Update. To turn the daily
+fingerprint and the developer's signature (anything else is refused),
+keeps your current version in "previous_versions", and restarts CKILS. Nothing happens unless you press Update. To turn the daily
 check off, create an empty file disable_update_check.on next to CKILS.exe.
 
 Privacy: everything about you stays on your computer. The only connection

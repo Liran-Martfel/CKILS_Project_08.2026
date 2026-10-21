@@ -3373,6 +3373,36 @@ audit clean; exact versions recorded in `requirements.txt`. Process, at the user
 GitHub until the user has tested it and says so; every build is kept in `versions/` by
 `build_version.py`, together with the exe it replaced. 11 new tests. 292 pass.
 
+**/code-review of the day's work, then of the whole code — 20 findings, all fixed.** Kept in local commits,
+not pushed, until the user has tested them.
+- *Privacy.* A fast-path switch took a screenshot of the whole window, which put typed text on disk for 60
+  days; it now reads nothing, so it saves no screenshot. The password-field check now fails closed: when it
+  can't tell, it treats the field as a password and analyses nothing.
+- *Robustness.* One bad tick used to end the poll thread for good; now it survives any exception. A
+  corrupt memory file is set aside instead of stopping CKILS from starting, and every memory file is
+  written atomically. A space in the user's folder name ("John Smith") broke every OCR read; it now passes
+  the folder through `TESSDATA_PREFIX`.
+- *Tier 4.* In Chrome the switch is an Alt+Shift toggle, so two quick words could press it twice and flip
+  back; a switch to where the keyboard already is, or just went, is now skipped. Deleting
+  `enable_gibberish_detection.on` now stops the analysis at once; it used to wait for a restart. The
+  typing-area watcher now obeys the off switches and remembers areas per app, so opening another file in
+  VS Code keeps what it learned.
+- *Retrain tools.* `train_model.py` used to write over `language_model.joblib`, the kept rollback model.
+  It now trains the v2 model CKILS uses and keeps the model it replaces.
+- *Updater.* The file swap was a `.cmd` script, which can't read a Hebrew folder name, so the update
+  silently did nothing there. It is now a PowerShell script saved as UTF-8; a test runs it in a folder
+  named `תוכנות [שלי] it's`. If a move fails, the old exe goes back and starts, so CKILS is never left
+  missing, and a kept version is never overwritten. An install error now shows the fallback instead of
+  hanging on "Installing". A failed check is retried within the hour; it used to wait a day. Releases are
+  now **signed** (Ed25519). The fingerprint alone only proves the download arrived whole: anyone able to
+  change the release could change both files. The signature needs the private key, which stays in
+  `%USERPROFILE%\.ckils_release_key\` and is never in the repo; the updater holds the public key and
+  refuses anything unsigned or signed by another key. `make_release.py` signs the zip. It also refuses to
+  pack an exe unless `build_version.py` recorded it for this exact version, from the current commit, with
+  nothing uncommitted. `cryptography` 50.0.2 added; `pip-audit` clean.
+
+21 new tests. 313 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

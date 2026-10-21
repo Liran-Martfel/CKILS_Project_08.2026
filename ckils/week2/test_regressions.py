@@ -7,6 +7,7 @@ approximation of it. importing rule_engine is safe for testing because its
 hook-setup / message-loop code is guarded by `if __name__ == "__main__":` —
 see that guard's own comment for why.
 """
+import base64
 import collections
 import ctypes
 import datetime
@@ -3082,18 +3083,61 @@ class UpdaterTests(unittest.TestCase):
     # --- the update itself (2026-10-21): verified download, the old version kept ---
     BASE = "https://github.com/Liran-Martfel/CKILS_Project_08.2026/releases/download/v9.0.0/"
 
-    def _release(self, exe=b"NEW-CKILS", tamper=False):
+    @staticmethod
+    def _keypair():
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        from cryptography.hazmat.primitives import serialization as s
+        key = Ed25519PrivateKey.generate()
+        public = key.public_key().public_bytes(s.Encoding.Raw, s.PublicFormat.Raw)
+        return key, base64.b64encode(public).decode()
+
+    def _release(self, exe=b"NEW-CKILS", tamper=False, signer=None):
+        """A fake release signed by a test key that the updater trusts for
+        the test (signer: a different key, to forge one)."""
+        key, public = self._keypair()
+        self._trust = patch.object(self.updater, "PUBLIC_KEY", public)
+        self._trust.start()
+        self.addCleanup(self._trust.stop)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as z:
             z.writestr("CKILS/CKILS.exe", exe)
             z.writestr("CKILS/SETUP.txt", "setup")
         blob = buf.getvalue()
         digest = hashlib.sha256(blob + (b"x" if tamper else b"")).hexdigest()
+        signature = base64.b64encode((signer or key).sign(blob))
         files = {self.BASE + "CKILS-v9.0.0.zip": blob,
-                 self.BASE + "CKILS-v9.0.0.zip.sha256": f"{digest}  CKILS-v9.0.0.zip\n".encode()}
-        assets = {"CKILS-v9.0.0.zip": self.BASE + "CKILS-v9.0.0.zip",
-                  "CKILS-v9.0.0.zip.sha256": self.BASE + "CKILS-v9.0.0.zip.sha256"}
+                 self.BASE + "CKILS-v9.0.0.zip.sha256": f"{digest}  CKILS-v9.0.0.zip\n".encode(),
+                 self.BASE + "CKILS-v9.0.0.zip.sig": signature + b"\n"}
+        assets = {n: self.BASE + n for n in ("CKILS-v9.0.0.zip", "CKILS-v9.0.0.zip.sha256",
+                                             "CKILS-v9.0.0.zip.sig")}
         return files, assets
+
+    def test_a_release_signed_by_someone_else_installs_nothing(self):
+        # Someone able to change the release could fix up the fingerprint
+        # too — but not sign without the developer's private key.
+        forger, _ = self._keypair()
+        files, assets = self._release(signer=forger)
+        with patch.object(self.updater, "_get", side_effect=lambda url, t, l: files[url]):
+            with self.assertRaisesRegex(ValueError, "signed"):
+                self.updater.download_verified("v9.0.0", assets)
+
+    def test_a_release_without_a_signature_installs_nothing(self):
+        files, assets = self._release()
+        del assets["CKILS-v9.0.0.zip.sig"]
+        with patch.object(self.updater, "_get") as get:
+            with self.assertRaises(ValueError):
+                self.updater.download_verified("v9.0.0", assets)
+        get.assert_not_called()
+
+    def test_the_real_public_key_is_a_valid_ed25519_key(self):
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(self.updater.PUBLIC_KEY))
+        self.assertFalse(self.updater.signature_ok(b"x", "not base64!"))
+
+    def test_a_failed_check_is_tried_again_soon_not_tomorrow(self):
+        with patch.object(self.updater, "fetch_latest", side_effect=OSError("offline")):
+            self.assertIsNone(self.updater.check_once(now=1000.0, show=lambda *a: None))
+        self.assertEqual(self._check("v99.0.0", now=1000.0 + 3600)[0], "v99.0.0")
 
     def test_only_this_repositorys_release_files_are_trusted(self):
         self.assertTrue(self.updater.trusted_download_url(self.BASE + "CKILS-v9.0.0.zip"))
@@ -3122,18 +3166,99 @@ class UpdaterTests(unittest.TestCase):
                 self.updater.download_verified("v9.0.0", assets)
         get.assert_not_called()
 
-    def test_the_current_version_is_kept_before_it_is_replaced(self):
-        exe = os.path.join(self.tmp, "CKILS.exe")
-        open(exe, "wb").write(b"OLD")
-        script = self.updater.install_and_restart(b"NEW", exe_path=exe, launch=False)
+    def _swap(self, folder, pids=(999999,)):
+        """Writes the swap script for an exe in folder and RUNS it (waiting
+        on a process id that doesn't exist), with starting the exe replaced
+        by writing a marker, so nothing is really launched."""
+        os.makedirs(folder, exist_ok=True)
+        exe = os.path.join(folder, "CKILS.exe")
+        with open(exe, "wb") as f:
+            f.write(b"OLD")
+        with patch.object(self.updater, "_processes_holding", return_value=list(pids)):
+            script = self.updater.install_and_restart(b"NEW", exe_path=exe, launch=False)
+        with open(script, encoding="utf-8-sig") as f:
+            text = f.read()
+        started = os.path.join(folder, "started.txt")
+        text = text.replace("[void][System.Diagnostics.Process]::Start($start)",
+                            f"Set-Content -LiteralPath {self.updater._ps_literal(started)} -Value $start.FileName -Encoding UTF8")
+        with open(script, "w", encoding="utf-8-sig") as f:
+            f.write(text)
+        import subprocess
+        subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                        "-File", script], capture_output=True, timeout=60)
+        return exe, script, started
+
+    def test_the_swap_keeps_the_old_version_and_starts_the_new_one(self):
+        exe, script, started = self._swap(os.path.join(self.tmp, "app"))
+        with open(exe, "rb") as f:
+            self.assertEqual(f.read(), b"NEW")
+        keep = os.path.join(self.tmp, "app", "previous_versions", f"CKILS-v{self.updater.VERSION}.exe")
+        with open(keep, "rb") as f:
+            self.assertEqual(f.read(), b"OLD")
+        with open(started, encoding="utf-8-sig") as f:
+            self.assertEqual(f.read().strip(), exe)
+        self.assertFalse(os.path.exists(script), "the script removes itself")
+
+    def test_the_swap_works_in_a_hebrew_folder_with_quotes_and_brackets(self):
+        # /code-review 2026-10-21: the old .cmd swap broke on a Hebrew path.
+        exe, _, started = self._swap(os.path.join(self.tmp, "תוכנות [שלי] it's"))
+        with open(exe, "rb") as f:
+            self.assertEqual(f.read(), b"NEW")
+        with open(started, encoding="utf-8-sig") as f:
+            self.assertEqual(f.read().strip(), exe)
+
+    def test_a_kept_version_is_never_overwritten(self):
+        folder = os.path.join(self.tmp, "app")
+        previous = os.path.join(folder, "previous_versions")
+        os.makedirs(previous)
+        first = os.path.join(previous, f"CKILS-v{self.updater.VERSION}.exe")
+        with open(first, "wb") as f:
+            f.write(b"KEPT-EARLIER")
+        self._swap(folder)
+        with open(first, "rb") as f:
+            self.assertEqual(f.read(), b"KEPT-EARLIER")
+        self.assertEqual(len(os.listdir(previous)), 2)
+
+    def test_if_the_new_exe_cant_be_moved_in_the_old_one_comes_back(self):
+        # The new file can't be moved while it's held open (Python opens
+        # without delete-sharing): the swap must put the old exe back.
+        folder = os.path.join(self.tmp, "app")
+        os.makedirs(folder, exist_ok=True)
+        exe = os.path.join(folder, "CKILS.exe")
+        with open(exe, "wb") as f:
+            f.write(b"OLD")
+        with patch.object(self.updater, "_processes_holding", return_value=[999999]):
+            script = self.updater.install_and_restart(b"NEW", exe_path=exe, launch=False)
+        with open(script, encoding="utf-8-sig") as f:
+            text = f.read().replace("[void][System.Diagnostics.Process]::Start($start)", "")
+        with open(script, "w", encoding="utf-8-sig") as f:
+            f.write(text)
+        held = open(os.path.join(folder, "CKILS.update.exe"), "rb")
         try:
-            text = open(script, encoding="utf-8").read()
-            self.assertEqual(open(os.path.join(self.tmp, "CKILS.update.exe"), "rb").read(), b"NEW")
-            keep = os.path.join(self.tmp, "previous_versions", f"CKILS-v{self.updater.VERSION}.exe")
-            self.assertIn(f'move /Y "{exe}" "{keep}"', text)
-            self.assertIn(f'start "" "{exe}"', text)
+            import subprocess
+            subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                            "-File", script], capture_output=True, timeout=60)
         finally:
-            os.remove(script)
+            held.close()
+        with open(exe, "rb") as f:
+            self.assertEqual(f.read(), b"OLD")
+        # It really was moved aside first, then brought back.
+        self.assertEqual(os.listdir(os.path.join(folder, "previous_versions")), [])
+
+    def test_make_release_only_packs_a_recorded_committed_build_of_this_version(self):
+        import make_release
+        exe = os.path.join(self.tmp, "CKILS.exe")
+        with open(exe, "wb") as f:
+            f.write(b"BUILD")
+        digest = hashlib.sha256(b"BUILD").hexdigest()
+        good = [{"sha256": digest, "version": "2.1.0", "commit": "abc1234"}]
+        self.assertIsNone(make_release.check_build(exe, good, "2.1.0", "abc1234", ""))
+        self.assertIn("uncommitted", make_release.check_build(exe, good, "2.1.0", "abc1234", " M x.py"))
+        self.assertIn("built as", make_release.check_build(exe, good, "2.2.0", "abc1234", ""))
+        self.assertIn("current commit", make_release.check_build(exe, good, "2.1.0", "def5678", ""))
+        self.assertIn("isn't in", make_release.check_build(exe, [], "2.1.0", "abc1234", ""))
+        dirty_build = [{"sha256": digest, "version": "2.1.0", "commit": "abc1234+uncommitted"}]
+        self.assertIn("current commit", make_release.check_build(exe, dirty_build, "2.1.0", "abc1234", ""))
 
 
 class TrainingToolTests(unittest.TestCase):

@@ -12,7 +12,12 @@ Security and privacy, by design:
     asked for. Nothing about the user is sent.
   - A download is accepted only from this repository's own release files,
     and only if its SHA-256 fingerprint matches the one published with the
-    release (CKILS-vX.Y.Z.zip.sha256). A mismatch installs nothing.
+    release (CKILS-vX.Y.Z.zip.sha256) AND its signature (CKILS-vX.Y.Z.zip.sig)
+    checks out against PUBLIC_KEY below. The fingerprint alone only proves
+    the download arrived whole: anyone who could change the release could
+    change both files. The signature needs the private key, which never
+    leaves the developer's computer (added after /code-review 2026-10-21).
+    A mismatch in either installs nothing.
   - Nothing is ever downloaded or installed without the user pressing Update.
   - The version being replaced is kept in previous_versions/ next to
     CKILS.exe; the user's data files are never touched.
@@ -20,6 +25,8 @@ Security and privacy, by design:
   - Never runs from source (only the packaged exe), never raises, never
     delays CKILS starting.
 """
+import base64
+import datetime
 import hashlib
 import io
 import json
@@ -47,6 +54,9 @@ MAX_DOWNLOAD_BYTES = 300 * 1024 * 1024
 DISABLE_FILENAME = "disable_update_check.on"
 STATE_FILENAME = "update_check.json"  # only the time of the last check
 PREVIOUS_DIR = "previous_versions"
+# Ed25519 public key of the release signer (make_release.py signs with the
+# private half, kept in %USERPROFILE%\.ckils_release_key\ — never in the repo).
+PUBLIC_KEY = "budGn/LKg0QAUmHeY7TB2zYFgeRu3oYTLhmwL2r2OFA="
 _TAG = re.compile(r"^v?(\d{1,4})\.(\d{1,4})\.(\d{1,4})$")
 _HEX64 = re.compile(r"\b([0-9a-fA-F]{64})\b")
 
@@ -72,6 +82,24 @@ def asset_names(tag):
     """The two files every release carries: the zip, and its fingerprint."""
     zip_name = f"CKILS-{tag if tag.startswith('v') else 'v' + tag}.zip"
     return zip_name, zip_name + ".sha256"
+
+
+def signature_name(tag):
+    """The third file: the zip's Ed25519 signature, base64."""
+    return asset_names(tag)[0] + ".sig"
+
+
+def signature_ok(blob, signature_text, public_key=None):
+    """True only if signature_text is a valid signature of blob by the
+    holder of public_key's private half."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    try:
+        signature = base64.b64decode((signature_text or "").strip(), validate=True)
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key or PUBLIC_KEY)).verify(signature, blob)
+        return True
+    except (InvalidSignature, ValueError):
+        return False
 
 
 def trusted_download_url(url):
@@ -132,11 +160,13 @@ def check_once(now=None, show=None):
     now = time.time() if now is None else now
     if not _due(now):
         return None
-    _remember_check(now)
     try:
         latest = fetch_latest()
     except Exception:
-        return None
+        return None  # offline or GitHub didn't answer: try again next hour, not tomorrow
+    # Remembered only after GitHub answered (found by /code-review 2026-10-21:
+    # saved before asking, one failed check hid a new release for a whole day).
+    _remember_check(now)
     if not latest or not is_newer(latest[0]):
         return None
     tag, notes, assets = latest
@@ -145,20 +175,24 @@ def check_once(now=None, show=None):
 
 
 def download_verified(tag, assets, timeout=60):
-    """The new CKILS.exe as bytes, after checking the zip's fingerprint.
-    Raises with a short, user-readable reason on any problem."""
+    """The new CKILS.exe as bytes, after checking the zip's fingerprint and
+    signature. Raises with a short, user-readable reason on any problem."""
     zip_name, sum_name = asset_names(tag)
-    zip_url, sum_url = assets.get(zip_name), assets.get(sum_name)
-    if not zip_url or not sum_url:
-        raise ValueError("this release has no update file with a fingerprint")
-    if not (trusted_download_url(zip_url) and trusted_download_url(sum_url)):
+    sig_name = signature_name(tag)
+    zip_url, sum_url, sig_url = assets.get(zip_name), assets.get(sum_name), assets.get(sig_name)
+    if not zip_url or not sum_url or not sig_url:
+        raise ValueError("this release has no signed update file")
+    if not all(trusted_download_url(u) for u in (zip_url, sum_url, sig_url)):
         raise ValueError("the update file is not from CKILS's own releases")
     expected = _HEX64.search(_get(sum_url, timeout, 10_000).decode("utf-8", "replace"))
     if not expected:
         raise ValueError("the published fingerprint is unreadable")
+    signature = _get(sig_url, timeout, 10_000).decode("ascii", "replace")
     blob = _get(zip_url, timeout, MAX_DOWNLOAD_BYTES)
     if hashlib.sha256(blob).hexdigest().lower() != expected.group(1).lower():
         raise ValueError("the download doesn't match its published fingerprint")
+    if not signature_ok(blob, signature):
+        raise ValueError("the download isn't signed by CKILS's developer")
     with zipfile.ZipFile(io.BytesIO(blob)) as z:
         names = [n for n in z.namelist() if n.replace("\\", "/").split("/")[-1] == "CKILS.exe"]
         if len(names) != 1:
@@ -166,39 +200,80 @@ def download_verified(tag, assets, timeout=60):
         return z.read(names[0])
 
 
+def _ps_literal(text):
+    """A PowerShell single-quoted string: nothing inside is expanded."""
+    return "'" + str(text).replace("'", "''") + "'"
+
+
+def _processes_holding(exe_path):
+    """This process, and PyInstaller's launcher above it (which keeps the
+    exe open too) — the swap waits for both to exit."""
+    pids = [os.getpid()]
+    try:
+        import psutil
+        parent = psutil.Process(os.getpid()).parent()
+        if parent and os.path.normcase(parent.exe()) == os.path.normcase(exe_path):
+            pids.append(parent.pid)
+    except Exception:
+        pass
+    return pids
+
+
 def install_and_restart(new_exe_bytes, exe_path=None, launch=True):
-    """Writes the new exe next to the current one, keeps the current one in
-    previous_versions/, and hands over to a small script that swaps them
-    once this CKILS has exited, then starts the new one. Returns the script
-    path (for tests); with launch=True this process then exits."""
-    exe_path = exe_path or sys.executable
+    """Writes the new exe next to the current one and hands over to a small
+    script that, once this CKILS has exited, moves the current exe into
+    previous_versions/, moves the new one into its place and starts it.
+    If either move fails it puts the old exe back and starts that instead,
+    so CKILS is never left missing. Returns the script path (for tests);
+    with launch=True this process then exits.
+
+    Found by /code-review 2026-10-21: the swap was a .cmd file, which cmd
+    reads in the system code page — a folder with a Hebrew name became
+    gibberish and the swap silently did nothing. PowerShell reads a UTF-8
+    file with a BOM correctly, and -LiteralPath takes [ ] and ' as written."""
+    exe_path = os.path.abspath(exe_path or sys.executable)
     folder = os.path.dirname(exe_path)
     new_path = os.path.join(folder, "CKILS.update.exe")
-    with open(new_path, "wb") as f:
-        f.write(new_exe_bytes)
     previous = os.path.join(folder, PREVIOUS_DIR)
     os.makedirs(previous, exist_ok=True)
     keep = os.path.join(previous, f"CKILS-v{VERSION}.exe")
-    script = os.path.join(tempfile.gettempdir(), f"ckils_update_{os.getpid()}.cmd")
-    with open(script, "w", encoding="utf-8") as f:
-        f.write(f'''@echo off
-rem Swaps in the new CKILS once the running one has exited (made by updater.py).
-set n=0
-:retry
-move /Y "{exe_path}" "{keep}" >nul 2>&1 && goto moved
-set /a n+=1
-if %n% geq 60 goto end
-timeout /t 1 /nobreak >nul
-goto retry
-:moved
-move /Y "{new_path}" "{exe_path}" >nul
-start "" "{exe_path}"
-:end
-(goto) 2>nul & del "%~f0"
+    if os.path.exists(keep):  # never overwrite a kept version
+        keep = os.path.join(previous, f"CKILS-v{VERSION}-{datetime.datetime.now():%Y%m%d-%H%M%S}.exe")
+    with open(new_path, "wb") as f:
+        f.write(new_exe_bytes)
+    script = os.path.join(tempfile.gettempdir(), f"ckils_update_{os.getpid()}.ps1")
+    waits = "\n".join(f"try {{ Wait-Process -Id {pid} -Timeout 30 -ErrorAction Stop }} catch {{}}"
+                      for pid in _processes_holding(exe_path))
+    with open(script, "w", encoding="utf-8-sig") as f:
+        f.write(f'''# Swaps in the new CKILS once the running one has exited (written by updater.py).
+$exe = {_ps_literal(exe_path)}
+$new = {_ps_literal(new_path)}
+$keep = {_ps_literal(keep)}
+$folder = {_ps_literal(folder)}
+try {{
+{waits}
+$kept = $false
+for ($i = 0; $i -lt 60 -and -not $kept; $i++) {{
+    try {{ Move-Item -LiteralPath $exe -Destination $keep -Force -ErrorAction Stop; $kept = $true }}
+    catch {{ Start-Sleep -Seconds 1 }}
+}}
+if ($kept) {{
+    try {{ Move-Item -LiteralPath $new -Destination $exe -Force -ErrorAction Stop }}
+    catch {{ Move-Item -LiteralPath $keep -Destination $exe -Force }}  # new one failed: old one back
+}}
+$start = New-Object System.Diagnostics.ProcessStartInfo
+$start.FileName = $exe
+$start.WorkingDirectory = $folder
+$start.UseShellExecute = $true
+[void][System.Diagnostics.Process]::Start($start)
+}} finally {{
+Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+}}
 ''')
     if launch:
-        subprocess.Popen(["cmd", "/c", script], cwd=folder,
-                         creationflags=0x00000008 | 0x00000200)  # DETACHED_PROCESS | NEW_PROCESS_GROUP
+        subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                          "-WindowStyle", "Hidden", "-File", script], cwd=folder,
+                         creationflags=0x08000000 | 0x00000200)  # CREATE_NO_WINDOW | NEW_PROCESS_GROUP
         os._exit(0)
     return script
 
@@ -247,11 +322,20 @@ def _show_window(tag, summary, assets=None):
         except Exception as e:
             result["error"] = str(e) or type(e).__name__
 
+    def install():
+        try:
+            install_and_restart(result.pop("exe"))
+        except Exception as e:
+            # Found by /code-review 2026-10-21: a failure here (folder not
+            # writable, disk full) left the window stuck on "Installing".
+            result["error"] = f"couldn't install ({e.__class__.__name__})"
+            poll()
+
     def poll():
         if "exe" in result:
             status.set("Installing — CKILS will restart in a moment.")
             root.update_idletasks()
-            root.after(400, lambda: install_and_restart(result["exe"]))
+            root.after(400, install)
         elif "error" in result:
             status.set(f"Couldn't update automatically: {result['error']}.")
             update_button.configure(text="Open download page", state="normal",
