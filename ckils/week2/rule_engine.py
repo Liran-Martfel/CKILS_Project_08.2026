@@ -1624,7 +1624,8 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         if win32gui.GetForegroundWindow() != hwnd:
             if DEBUG:
                 print(f"  [content] {exe_name}: decision arrived too late, focus moved on ({elapsed_ms:.0f} ms)")
-            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_FOCUS_MOVED, "result ready too late")
+            skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_FOCUS_MOVED,
+                                 f"result ready too late ({elapsed_ms:.0f} ms)")
             return False
         # Real bug found live: Chrome's hwnd doesn't change between tabs, so the
         # check above alone can't tell "still the same window" apart from "same
@@ -1683,10 +1684,12 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         else:
             content_confidence.pop(thread_id, None)
         language_name = HKL_TO_LANGUAGE_NAME[corrected_hkl]
+        # How long the read took (2026-10-21): on a busy laptop OCR slows down
+        # and reads arrive too late; this is the data to see when and by how much.
         decision_logger.log_auto_change(
             exe_name, title, thread_id,
             HKL_TO_LANGUAGE_NAME.get(fallback_hkl), language_name,
-            reason or {},
+            {**(reason or {}), "read_ms": round(elapsed_ms)},
         )
         # Always record this confident decision into both histories — even for
         # a key whose history is currently inconsistent (a browser's whole-app

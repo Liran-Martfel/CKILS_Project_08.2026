@@ -3320,6 +3320,32 @@ arriving is treated as carry-over (CKILS re-asserts its own decision) instead of
 user's real manual switch earlier that day came 34 s after arriving, so it would still be respected.
 4 new tests. 273 pass.
 
+**2026-10-21 — Submitted; then the first items from the after-submission list.** The user sent the
+project to the class early, after confirming GitHub was fully in sync and publishing Release v2.0.0 (a zip
+with only `CKILS.exe` and `SETUP.txt`; no logs, databases, learned memory or training data). The daily
+reminder routine was turned off. Then, from the future list, what could be done without more time or
+more data:
+- *Cleanup:* old diagnostic dumps deleted from `dist` (Sep 2-16; some held screen text); an outdated
+  comment corrected (the word buffer holds 5 letters, not 12, and its boundary branch is unreachable since
+  Oct 15 — kept as a safety net).
+- *A busy laptop:* that afternoon reads were discarded as "too late" while a Zoom lesson ran, with the CPU
+  at 77% and memory at 94% (a dev server had been running in `--reload` mode for three days). Every screen
+  read now logs how long it took (`read_ms`), and so does a read discarded as too late, to see when and
+  how much load matters.
+- *Letter model on punctuation, Hebrew layout:* "what?" typed on Hebrew is now judged (marked); the quote
+  key is excluded, since it ends Hebrew acronyms.
+- *The typed-language record survives a restart:* saved next to CKILS as (window, title FINGERPRINT,
+  language names); a window claims its old record by fingerprint; closed windows are dropped. Only the
+  running CKILS touches the file; git-ignored.
+- *A new labeling page* (176 texts read since the new model, mostly unsure or "not real text", plus 60
+  sure ones as a check), for the next retrain, whenever the user has time.
+- *VS Code, code vs chat:* `diagnose_vscode_focus.py` records only what kind of element has focus. First
+  reading: the Claude chat box is an EditControl with class `messageInput_...`, so telling it from the
+  code editor looks possible — to be confirmed with a reading from the editor.
+- *Future plans:* the WhatsApp-identity and YouTube-guess ideas dropped at the user's call; Linux and
+  macOS versions added as the next big step.
+3 new tests. 276 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
@@ -3342,6 +3368,7 @@ control-shape), remember *which specific control reliably had real content last 
 Not designed in any real detail — just the germ of the idea, written down before it's lost.
 
 **2026-09-13 — Page-language guess for a brand-new YouTube page**
+**Status:** dropped — 2026-10-21, the user's call (small gain: YouTube is mostly watched, not typed in). Kept here for the record.
 
 User's idea: on YouTube specifically, a fresh page/video with no learned history yet leaves the
 keyboard at whatever it last physically was (see 2026-09-13 entry above) instead of making any
@@ -3415,7 +3442,7 @@ would itself be reliable across the apps' own updates; whether this is worth the
 depending on another app's internal UI structure versus just accepting the "always decide fresh"
 cost for this specific category of app.
 
-**Status:** written down only. Not designed, not started.
+**Status:** dropped — 2026-10-21, the user's call, in favour of Linux and Mac versions (below). Kept here for the record.
 
 **2026-10-15 — Stronger detection for Hebrew typed on the English layout**
 
@@ -3444,6 +3471,31 @@ Needs a way to tell real corrections apart (e.g. an override right after a CKILS
 CKILS switch nearby) before the number means anything.
 
 **Status:** built — 2026-10-18: measure_corrections.py (see that day's entry).
+
+**2026-10-21 — CKILS for Linux and macOS**
+
+The user's choice for the next big step, replacing the WhatsApp and YouTube ideas above. Everything
+platform-specific lives in a few places, so the port is mostly about replacing those, not rewriting
+the logic:
+- *Keyboard hook* (Tier 4, `keyboard_hook.py`, `WH_KEYBOARD_LL`): macOS — a Quartz `CGEventTap`
+  (needs the Accessibility / Input Monitoring permission); Linux — X11 `XRecord`, or `evdev` reading
+  `/dev/input` (Wayland deliberately blocks global key capture, so Wayland needs `evdev` + the input
+  group, or an input-method framework such as IBus/Fcitx).
+- *Switching the layout* (`WM_INPUTLANGCHANGEREQUEST`, `GetKeyboardLayout`): macOS — Text Input
+  Sources (`TISSelectInputSource`, `TISCopyCurrentKeyboardInputSource`); Linux — the desktop's own
+  mechanism (`gsettings` / D-Bus for GNOME's input sources, `setxkbmap`/`xkb-switch` on X11, the
+  IBus/Fcitx API).
+- *Which window is in front* (`win32gui`, `psutil`): macOS — `NSWorkspace` frontmost application +
+  Accessibility for the window title; Linux — `_NET_ACTIVE_WINDOW` on X11, compositor-specific on Wayland.
+- *Reading the screen* (UI Automation + Tesseract): macOS — the Accessibility API (`AXUIElement`,
+  focused element's value) and a screen capture for OCR; Linux — AT-SPI (`pyatspi`) and a screenshot.
+- Unchanged everywhere: the models, the letter model, the rules, the learning, the logs.
+
+A sensible order: first pull the four platform pieces behind one small interface (so Windows keeps
+working exactly as now and the tests still pass), then macOS (one coherent API, one permission
+model), then Linux X11, then Wayland. Not designed in detail yet.
+
+**Status:** planned — the user's next big step, after the submission.
 
 ---
 

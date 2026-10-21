@@ -3018,6 +3018,47 @@ class WhatsAppCounterAndPunctuationTests(unittest.TestCase):
             keyboard_hook._typed_languages.clear()
 
 
+class TypedLanguagePersistsTests(unittest.TestCase):
+    """2026-10-21: the typed-language record survives a CKILS restart, saved
+    as fingerprints only (no readable title, never a word)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ckils_typed_")
+        self._orig = (keyboard_hook._TYPED_FILE, dict(keyboard_hook._typed_languages), dict(keyboard_hook._restored))
+        keyboard_hook._TYPED_FILE = os.path.join(self.tmp, "typed_languages.json")
+        keyboard_hook._typed_languages.clear()
+        keyboard_hook._restored.clear()
+
+    def tearDown(self):
+        keyboard_hook._TYPED_FILE = self._orig[0]
+        keyboard_hook._typed_languages.clear(); keyboard_hook._typed_languages.update(self._orig[1])
+        keyboard_hook._restored.clear(); keyboard_hook._restored.update(self._orig[2])
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _save_one(self, hwnd, title, languages):
+        keyboard_hook._typed_languages[(hwnd, keyboard_hook._title_key(title))] = collections.deque(languages)
+        keyboard_hook._typed_dirty = True
+        keyboard_hook._save_typed_languages(force=True)
+        keyboard_hook._typed_languages.clear()  # "CKILS restarts"
+
+    def test_a_restart_keeps_what_was_typed_in_a_window(self):
+        self._save_one(777, "רשימת קניות - Google Docs", ["hebrew"] * 4)
+        keyboard_hook._restore_typed_languages(keyboard_hook._TYPED_FILE, lambda hwnd: True)
+        self.assertEqual(keyboard_hook.typed_language(777, "רשימת קניות - Google Docs"), "hebrew")
+
+    def test_only_fingerprints_reach_the_disk(self):
+        self._save_one(777, "רשימת קניות - Google Docs", ["hebrew"] * 4)
+        with open(keyboard_hook._TYPED_FILE, encoding="utf-8") as f:
+            saved = f.read()
+        for secret in ("רשימת", "Google", "Docs"):
+            self.assertNotIn(secret, saved)
+
+    def test_a_window_closed_meanwhile_is_not_restored(self):
+        self._save_one(777, "Page", ["english"] * 4)
+        keyboard_hook._restore_typed_languages(keyboard_hook._TYPED_FILE, lambda hwnd: False)
+        self.assertIsNone(keyboard_hook.typed_language(777, "Page"))
+
+
 class MeasureCorrectionsTests(unittest.TestCase):
     """measure_corrections.py sorts each recorded manual override by its
     most likely cause, so real corrections can be counted cleanly."""

@@ -39,6 +39,8 @@ immediately; a separate consumer thread does everything else.
 """
 import collections
 import ctypes
+import hashlib
+import json
 import ctypes.wintypes
 import queue
 import re
@@ -307,7 +309,7 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         # it. Confirmed live: typing a 4+ letter word in one window, then
         # switching entirely to another app and typing real wrong-layout
         # gibberish there, produced nothing — the buffer was still capped
-        # from the first window. Lowering MAX_LENGTH from 12 to 4 earlier the
+        # from the first window. Lowering MAX_LENGTH from 12 to 4 (now 5) earlier the
         # same day made this fire on almost any real word, not just long ones.
         # Fixed by treating ANY non-letter key as an unconditional boundary —
         # it can never be part of a word either way, so there's no reason to
@@ -362,9 +364,13 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
         # reached the disk either way — log_skip only ever received a language
         # direction and a count, confirmed unaffected). An empty chars buffer
         # right after a failed push is the reliable signal this was a boundary
-        # reset (a cap-triggered failure leaves 12 real characters in place),
-        # so that's used here to keep raw_keys in lockstep without needing to
-        # change IncrementalWordBuffer's own interface.
+        # reset (a cap-triggered failure leaves MAX_LENGTH real characters in
+        # place), so that's used here to keep raw_keys in lockstep without
+        # needing to change IncrementalWordBuffer's own interface.
+        # Since 2026-10-15 only letters reach push() — every non-letter ends
+        # the word in the branch above — so the boundary path below can no
+        # longer be reached (the cap is now MAX_LENGTH = 5, not 12). It stays
+        # as a safety net, at no cost.
         if not state.chars.text():
             state.raw_keys = []
             state.word_keys = []
@@ -747,6 +753,54 @@ def _title_key(title):
     return _TITLE_COUNTER.sub("", _DIRECTION_MARKS.sub("", title or "").strip())
 
 
+# The record survives a CKILS restart (2026-10-21): saved next to CKILS as
+# (hwnd, title FINGERPRINT, language names) — never a readable title or a
+# word. Only the running CKILS reads or writes it: start() sets the path, so
+# the tests never touch the file. After a restart a window claims its old
+# record by fingerprint; windows that no longer exist are dropped on load.
+_TYPED_FILE = None
+_restored = {}           # (hwnd, title fingerprint) -> deque, from the last run, until claimed
+_typed_dirty = False
+_typed_saved_at = 0.0
+TYPED_SAVE_EVERY_SECONDS = 60
+
+
+def _title_fingerprint(title):
+    return hashlib.sha256(_title_key(title).encode("utf-8")).hexdigest()[:16]
+
+
+def _restore_typed_languages(path, is_window):
+    """Loads the saved record; keeps only windows that still exist."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            saved = json.load(f)
+    except Exception:
+        return
+    with _typed_lock:
+        for hwnd, fingerprint, languages in saved.get("windows", []):
+            if is_window(hwnd):
+                _restored[(hwnd, fingerprint)] = collections.deque(
+                    [x for x in languages if x in ("hebrew", "english")], maxlen=TYPED_WORDS_KEPT)
+
+
+def _save_typed_languages(force=False):
+    """Writes the record at most once a minute; a failure only loses it."""
+    global _typed_dirty, _typed_saved_at
+    if _TYPED_FILE is None or not _typed_dirty or (not force and time.time() - _typed_saved_at < TYPED_SAVE_EVERY_SECONDS):
+        return
+    with _typed_lock:
+        windows = {(hwnd, _title_fingerprint(title)): list(words) for (hwnd, title), words in _typed_languages.items()}
+        for key, words in _restored.items():
+            windows.setdefault(key, list(words))
+        _typed_dirty = False
+    _typed_saved_at = time.time()
+    try:
+        with open(_TYPED_FILE, "w", encoding="utf-8") as f:
+            json.dump({"windows": [[h, fp, w] for (h, fp), w in windows.items()]}, f)
+    except Exception:
+        pass
+
+
 def _note_typed_word(state, thread_id, title, current_hkl, fired):
     """A word just ended: record which language it was meant in. A word that
     switched the layout was meant in the other language; a word only marked
@@ -758,10 +812,17 @@ def _note_typed_word(state, thread_id, title, current_hkl, fired):
     hwnd = _foreground_hwnd_for(thread_id)
     if hwnd is None:
         return
+    global _typed_dirty
     with _typed_lock:
-        words = _typed_languages.setdefault((hwnd, _title_key(title)),
-                                            collections.deque(maxlen=TYPED_WORDS_KEPT))
+        key = (hwnd, _title_key(title))
+        if key not in _typed_languages and _restored:
+            claimed = _restored.pop((hwnd, _title_fingerprint(title)), None)
+            if claimed is not None:
+                _typed_languages[key] = claimed
+        words = _typed_languages.setdefault(key, collections.deque(maxlen=TYPED_WORDS_KEPT))
         words.append("hebrew" if meant_hebrew else "english")
+        _typed_dirty = True
+    _save_typed_languages()
 
 
 def typed_language(hwnd, title):
@@ -769,6 +830,8 @@ def typed_language(hwnd, title):
     there's too little typing or no clear leader."""
     with _typed_lock:
         words = list(_typed_languages.get((hwnd, _title_key(title)), ()))
+        if not words and _restored:
+            words = list(_restored.get((hwnd, _title_fingerprint(title)), ()))
     if len(words) < TYPED_MIN_WORDS:
         return None
     hebrew = words.count("hebrew")
@@ -779,9 +842,13 @@ def typed_language(hwnd, title):
 def forget_closed_windows(is_window):
     """Drops the record of every window that no longer exists. Moving focus
     away never does this — only the window actually closing."""
+    global _typed_dirty
     with _typed_lock:
-        for key in [k for k in _typed_languages if not is_window(k[0])]:
-            del _typed_languages[key]
+        for record in (_typed_languages, _restored):
+            for key in [k for k in record if not is_window(k[0])]:
+                del record[key]
+                _typed_dirty = True
+    _save_typed_languages()
 
 
 def typed_recently(thread_id, title, seconds):
@@ -898,7 +965,13 @@ def _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_
     if on_purpose and is_word_end_key(vk_code, shift_pressed):
         skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_ENGLISH_MID_HEBREW,
                              f"len={state.letter_keys}")
-    if not fired and not on_purpose and (vk_code in _WORD_END_RULE_VKS or english_end):
+    # 2026-10-21: on the Hebrew layout the letter model also judges a word that
+    # ends in punctuation ("what?" typed on Hebrew) — except the quote key,
+    # which ends Hebrew acronyms (נדל"ן); the word-end rule itself stays
+    # space/Enter/Tab only (word_end_check is called for those alone).
+    hebrew_punct_end = (current_hkl == HEBREW_HKL_VALUE and is_word_end_key(vk_code, shift_pressed)
+                        and vk_code != layout_remap.VK_OEM_7)
+    if not fired and not on_purpose and (vk_code in _WORD_END_RULE_VKS or english_end or hebrew_punct_end):
         end_result = word_end_check(state, current_hkl) if vk_code in _WORD_END_RULE_VKS else None
         if end_result is not None:
             skip_logger.log_skip(
@@ -1060,7 +1133,7 @@ def start(english_hkl, hebrew_hkl, on_autocorrect=None):
     rule_engine.apply_tier4_correction — only ever called while
     _AUTOCORRECT_FLAG_FILENAME also exists (checked live).
     """
-    global _started, ENGLISH_HKL_VALUE, HEBREW_HKL_VALUE, _autocorrect_callback
+    global _started, ENGLISH_HKL_VALUE, HEBREW_HKL_VALUE, _autocorrect_callback, _TYPED_FILE
     try:
         if _started:
             return
@@ -1074,6 +1147,9 @@ def start(english_hkl, hebrew_hkl, on_autocorrect=None):
         # Load the letter model now, not at the first word end of the
         # session — parsing it there would hold up typing (/code-review).
         letter_model.models()
+        import win32gui
+        _TYPED_FILE = skip_logger.os.path.join(skip_logger._persistent_dir(), "typed_languages.json")
+        _restore_typed_languages(_TYPED_FILE, win32gui.IsWindow)
         threading.Thread(target=_consumer_loop, daemon=True).start()
 
         def _run_hook():
