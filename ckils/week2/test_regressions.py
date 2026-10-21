@@ -3018,6 +3018,86 @@ class WhatsAppCounterAndPunctuationTests(unittest.TestCase):
             keyboard_hook._typed_languages.clear()
 
 
+class TypingAreaTests(unittest.TestCase):
+    """The user's call, 2026-10-21: VS Code's code editor and its chat box are
+    one window but two places (UI Automation: class native-edit-context vs
+    messageInput_*). Each typing area learns its own language from typing."""
+
+    HWND, THREAD = 760, 8095
+    CODE, CHAT = "EditControl:native-edit-context", "EditControl:messageInput_cKsPxg"
+
+    class _Control:
+        def __init__(self, control_type, class_name):
+            self.ControlTypeName, self.ClassName = control_type, class_name
+
+    def setUp(self):
+        keyboard_hook._typed_by_area.clear()
+        keyboard_hook.focus_area.clear()
+        keyboard_hook._last_typed.clear()
+        rule_engine.last_area.clear()
+        rule_engine.overridden.discard(self.THREAD)
+        for d in (rule_engine.last_set, rule_engine.last_switch_time, rule_engine.content_decision):
+            d.pop(self.THREAD, None)
+
+    tearDown = setUp
+
+    def _learn(self, area, language, n=4):
+        keyboard_hook._typed_by_area[(self.HWND, keyboard_hook._title_key("proj - Visual Studio Code"), area)] = \
+            collections.deque([language] * n)
+
+    def _tick(self, class_name, layout):
+        with patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=layout), \
+             patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
+             patch.object(rule_engine.win32api, "PostMessage") as post, \
+             patch.object(rule_engine.decision_logger, "log_auto_change"):
+            result = rule_engine.check_typing_area(self.HWND, self.THREAD, "Code.exe", "proj - Visual Studio Code",
+                                                   self._Control("EditControl", class_name))
+        return result, post
+
+    def test_only_text_fields_are_typing_areas(self):
+        self.assertEqual(rule_engine.typing_area(self._Control("EditControl", "native-edit-context")), self.CODE)
+        self.assertIsNone(rule_engine.typing_area(self._Control("TreeControl", "monaco-list")))
+
+    def test_clicking_into_the_code_switches_to_what_was_typed_there(self):
+        self._learn(self.CODE, "english")
+        self._learn(self.CHAT, "hebrew")
+        result, post = self._tick("native-edit-context", rule_engine.Hebrew_HKL)
+        self.assertEqual(result, "english")
+        post.assert_called_once()
+        self.assertEqual(keyboard_hook.focus_area[self.HWND], self.CODE)
+        result, post = self._tick("messageInput_cKsPxg", rule_engine.English_HKL)
+        self.assertEqual(result, "hebrew")
+
+    def test_staying_in_the_same_area_does_not_switch_again(self):
+        self._learn(self.CODE, "english")
+        self._tick("native-edit-context", rule_engine.Hebrew_HKL)
+        result, post = self._tick("native-edit-context", rule_engine.Hebrew_HKL)
+        self.assertIsNone(result)
+        post.assert_not_called()
+
+    def test_never_over_a_manual_switch_or_mid_typing(self):
+        self._learn(self.CODE, "english")
+        rule_engine.overridden.add(self.THREAD)
+        self.assertIsNone(self._tick("native-edit-context", rule_engine.Hebrew_HKL)[0])
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.last_area.clear()
+        keyboard_hook._last_typed[(self.THREAD, keyboard_hook._title_key("proj - Visual Studio Code"))] = time.time()
+        self.assertIsNone(self._tick("native-edit-context", rule_engine.Hebrew_HKL)[0])
+
+    def test_words_are_counted_for_the_area_they_were_typed_in(self):
+        """Through the real consumer loop: with focus in the code area, English
+        words typed on English count for that area."""
+        keyboard_hook.focus_area[777] = self.CODE
+        wiring = Tier4AutocorrectWiringTests("test_switches_at_the_space_not_at_the_fifth_key")
+        wiring.setUp()
+        try:
+            keys = Tier4AutocorrectWiringTests._keys("the code runs ")
+            wiring._run(keys, layout=rule_engine.English_HKL)
+        finally:
+            wiring.tearDown()
+        self.assertEqual(keyboard_hook.typed_language_in_area(777, "Page", self.CODE), "english")
+
+
 class TypedLanguagePersistsTests(unittest.TestCase):
     """2026-10-21: the typed-language record survives a CKILS restart, saved
     as fingerprints only (no readable title, never a word)."""

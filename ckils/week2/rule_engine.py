@@ -1773,6 +1773,84 @@ def _switch_by_hotkey(exe_name):
     return True
 
 
+# Typing areas (2026-10-21, the user's call): a light watcher notices which
+# typing area has keyboard focus inside the front window — VS Code's code
+# editor and its chat box are one window to Windows but two places to the
+# user, typed in different languages. Clicking into an area where the user
+# has mostly typed one language switches to it, the same way arriving in a
+# window does. Learned from the user's own typing (keyboard_hook), never
+# named per app. Not while typing, not over a manual switch.
+AREA_WATCH_SECONDS = 0.5
+AREA_TYPING_HOLD_SECONDS = 1.0
+last_area = {}  # hwnd -> the typing area seen last time
+
+
+def typing_area(control):
+    """A stable name for the focused typing area, or None if focus isn't in
+    a text field (a list, a button, a page body)."""
+    try:
+        if control.ControlTypeName != "EditControl":
+            return None
+        return f"EditControl:{control.ClassName}"
+    except Exception:
+        return None
+
+
+def check_typing_area(hwnd, thread_id, exe_name, title, control):
+    """One watcher tick: notes the focused area for keyboard_hook, and
+    switches when focus moved into an area with a learned language. Returns
+    the language switched to, or None."""
+    area = typing_area(control)
+    keyboard_hook.focus_area[hwnd] = area
+    previous = last_area.get(hwnd, "unseen")
+    last_area[hwnd] = area
+    if area is None or area == previous:
+        return None
+    language = keyboard_hook.typed_language_in_area(hwnd, title, area)
+    target_hkl = LANGUAGE_NAME_TO_HKL.get(language)
+    if target_hkl is None or thread_id in overridden:
+        return None
+    if keyboard_hook.typed_recently(thread_id, title, AREA_TYPING_HOLD_SECONDS):
+        return None  # mid-typing: the typing safety net handles it
+    actual_hkl = win32api.GetKeyboardLayout(thread_id)
+    if actual_hkl == target_hkl:
+        last_set[thread_id] = target_hkl
+        return None
+    if win32gui.GetForegroundWindow() != hwnd:
+        return None
+    by_hotkey = _switch_by_hotkey(exe_name)
+    if not by_hotkey:
+        win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
+    last_set[thread_id] = target_hkl
+    last_switch_time[thread_id] = time.time()
+    content_decision[thread_id] = target_hkl
+    content_confidence.pop(thread_id, None)
+    decision_logger.log_auto_change(
+        exe_name, title, thread_id, HKL_TO_LANGUAGE_NAME.get(actual_hkl), language,
+        {"mechanism": "typing_area", "area": area, "switched_by": "hotkey" if by_hotkey else "message"},
+    )
+    print(f"{exe_name}: typing area {area} -> {language}")
+    return language
+
+
+def _area_watch_loop():
+    """Background loop, started with Tier 4: every AREA_WATCH_SECONDS, which
+    typing area of the front window has focus. Never raises."""
+    auto.InitializeUIAutomationInCurrentThread()
+    exe_of = {}
+    while True:
+        time.sleep(AREA_WATCH_SECONDS)
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            title = win32gui.GetWindowText(hwnd)
+            thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+            if pid not in exe_of:
+                exe_of[pid] = psutil.Process(pid).name()
+            check_typing_area(hwnd, thread_id, exe_of[pid], title, auto.GetFocusedControl())
+        except Exception:
+            continue
+
+
 def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hkl, word_length):
     """Tier 4 Phase 2 (2026-10-14): switches the layout because the user's
     own keystrokes came out as wrong-layout gibberish (keyboard_hook.py calls
@@ -1955,6 +2033,10 @@ if __name__ == "__main__":
     # inside keyboard_hook would load a SECOND copy with its own empty
     # `overridden`/`last_set` — silently breaking override respect.
     keyboard_hook.start(English_HKL, Hebrew_HKL, on_autocorrect=apply_tier4_correction)
+    if keyboard_hook._started:
+        # The typing-area watcher learns from Tier 4's typing record, so it
+        # runs only when Tier 4 does.
+        threading.Thread(target=_area_watch_loop, daemon=True).start()
     skip_logger.start()
 
     callback = WinEventProcType(on_focus_change)

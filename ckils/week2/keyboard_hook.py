@@ -765,6 +765,32 @@ _typed_saved_at = 0.0
 TYPED_SAVE_EVERY_SECONDS = 60
 
 
+# Typing areas (2026-10-21, the user's call): one window can hold places
+# typed in different languages — VS Code's code editor (English) and its chat
+# box (often Hebrew) are one window to Windows, but UI Automation tells them
+# apart (diagnose_vscode_focus.py: class native-edit-context vs
+# messageInput_*). rule_engine's area watcher keeps focus_area current; each
+# finished word is also counted for the area it was typed in. Memory only.
+focus_area = {}       # hwnd -> the focused typing area ("EditControl:<class>"), or None
+_typed_by_area = {}   # (hwnd, title key, area) -> deque of language names
+
+
+def _leader(words):
+    """The language with at least TYPED_MIN_SHARE of at least TYPED_MIN_WORDS words, or None."""
+    if len(words) < TYPED_MIN_WORDS:
+        return None
+    hebrew = words.count("hebrew")
+    leader, count = ("hebrew", hebrew) if hebrew * 2 > len(words) else ("english", len(words) - hebrew)
+    return leader if count / len(words) >= TYPED_MIN_SHARE else None
+
+
+def typed_language_in_area(hwnd, title, area):
+    """The language the user has mostly typed in this area of this window."""
+    with _typed_lock:
+        words = list(_typed_by_area.get((hwnd, _title_key(title), area), ()))
+    return _leader(words)
+
+
 def _title_fingerprint(title):
     return hashlib.sha256(_title_key(title).encode("utf-8")).hexdigest()[:16]
 
@@ -821,6 +847,10 @@ def _note_typed_word(state, thread_id, title, current_hkl, fired):
                 _typed_languages[key] = claimed
         words = _typed_languages.setdefault(key, collections.deque(maxlen=TYPED_WORDS_KEPT))
         words.append("hebrew" if meant_hebrew else "english")
+        area = focus_area.get(hwnd)
+        if area:
+            _typed_by_area.setdefault(key + (area,), collections.deque(maxlen=TYPED_WORDS_KEPT)).append(
+                "hebrew" if meant_hebrew else "english")
         _typed_dirty = True
     _save_typed_languages()
 
@@ -832,11 +862,7 @@ def typed_language(hwnd, title):
         words = list(_typed_languages.get((hwnd, _title_key(title)), ()))
         if not words and _restored:
             words = list(_restored.get((hwnd, _title_fingerprint(title)), ()))
-    if len(words) < TYPED_MIN_WORDS:
-        return None
-    hebrew = words.count("hebrew")
-    leader, count = ("hebrew", hebrew) if hebrew * 2 > len(words) else ("english", len(words) - hebrew)
-    return leader if count / len(words) >= TYPED_MIN_SHARE else None
+    return _leader(words)
 
 
 def forget_closed_windows(is_window):
@@ -844,7 +870,7 @@ def forget_closed_windows(is_window):
     away never does this — only the window actually closing."""
     global _typed_dirty
     with _typed_lock:
-        for record in (_typed_languages, _restored):
+        for record in (_typed_languages, _restored, _typed_by_area):
             for key in [k for k in record if not is_window(k[0])]:
                 del record[key]
                 _typed_dirty = True

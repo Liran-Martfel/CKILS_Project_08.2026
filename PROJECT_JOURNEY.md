@@ -3346,6 +3346,17 @@ more data:
   macOS versions added as the next big step.
 3 new tests. 276 pass.
 
+**Typing areas: each place inside a window learns its own language (the user's call).** In VS Code the
+user codes in English and writes to Claude in Hebrew — one window to Windows, so its learned history was
+mixed and CKILS left whatever language it arrived with. The diagnostic (`diagnose_vscode_focus.py`, no text
+recorded) showed UI Automation tells the places apart: the code editor is an EditControl of class
+`native-edit-context`, the chat box `messageInput_...`, the file list a TreeControl. Now a light watcher
+(every 0.5 s, started only with Tier 4) notes the focused typing area — an EditControl, named by its class —
+and keyboard_hook counts each finished word for that area as well as for the window. Clicking into an area
+where the user has mostly typed one language (3+ words, 60%) switches to it, like arriving in a window.
+Never mid-typing (1 s), never over a manual switch; learned from typing, never named per app; memory only.
+Mechanism `typing_area` in the decision log. 5 new tests. 281 pass. To be tried live in VS Code.
+
 ---
 
 ## Future ideas (not yet implemented)
