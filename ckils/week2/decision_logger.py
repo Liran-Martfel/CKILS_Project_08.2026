@@ -72,8 +72,8 @@ def _capture_screenshot(rect, exe_name, event_type):
     saved file's path relative to LOGS_DIR (for embedding in a log entry),
     or None if rect is missing/invalid or the capture fails.
     """
-    # Cropped to the actual read region (or window rect for a fast-path
-    # switch), not the full screen — smaller files and avoids capturing
+    # Cropped to the actual read region (fast-path switches take none since
+    # 2026-10-21 — they read nothing), not the full screen — smaller files and avoids capturing
     # unrelated on-screen content (e.g. another app, or other people's video
     # during a call) that has nothing to do with the decision being logged.
     if rect is None:

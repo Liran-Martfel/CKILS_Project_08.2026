@@ -251,16 +251,33 @@ class _PerThreadState:
         self.after_edit = False
 
 
+_PASSWORD_CHECK_SECONDS = 0.2
+_password_cache = {"hwnd": None, "at": 0.0, "value": True}
+
+
 def _is_password_field_focused():
-    """True if the currently focused control is a password field — checked
-    lazily, only when actually about to record a suspected-gibberish event
-    (not on every keystroke), since a UI Automation call is real work this
-    module's own design guarantees say must never run on the hot path.
+    """True if the focused control is a password field — then the key is not
+    analysed at all. Two fixes from /code-review, 2026-10-21:
+      - Fails CLOSED: if UI Automation can't answer (not initialised yet, an
+        app not responding, access denied), the key is treated as a password
+        key. It used to fail open, letting password letters into the word
+        buffer (memory only, but still against the promise).
+      - Cached for _PASSWORD_CHECK_SECONDS per window, so a burst of typing
+        doesn't make a cross-process call on every key (which could stall
+        the consumer and drop keys). Runs on the consumer thread, never in
+        the hook callback.
     """
+    hwnd = None
     try:
-        return bool(auto.GetFocusedControl().IsPassword)
+        hwnd = user32.GetForegroundWindow()
+        now = time.time()
+        if _password_cache["hwnd"] == hwnd and now - _password_cache["at"] < _PASSWORD_CHECK_SECONDS:
+            return _password_cache["value"]
+        value = bool(auto.GetFocusedControl().IsPassword)
     except Exception:
-        return False
+        value, now = True, time.time()
+    _password_cache.update(hwnd=hwnd, at=now, value=value)
+    return value
 
 
 def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_held,
@@ -891,6 +908,12 @@ def _consumer_loop():
     """
     state = _PerThreadState()
     last_thread_id = None
+    try:
+        # UI Automation (the password check) needs COM set up on THIS thread —
+        # found by /code-review 2026-10-21: it never was, so the check failed.
+        auto.InitializeUIAutomationInCurrentThread()
+    except Exception:
+        pass
     while True:
         vk_code, scan_code, shift_pressed, ctrl_held, alt_held = _event_queue.get()
         try:
@@ -1144,7 +1167,14 @@ def _current_window_identity():
     hwnd = win32gui.GetForegroundWindow()
     title = win32gui.GetWindowText(hwnd)
     thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
-    return psutil.Process(pid).name(), title, thread_id
+    if pid not in _exe_by_pid:  # one process lookup per program, not per key
+        if len(_exe_by_pid) > 500:
+            _exe_by_pid.clear()
+        _exe_by_pid[pid] = psutil.Process(pid).name()
+    return _exe_by_pid[pid], title, thread_id
+
+
+_exe_by_pid = {}
 
 
 _ENABLE_FLAG_FILENAME = "enable_gibberish_detection.on"

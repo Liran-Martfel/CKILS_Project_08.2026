@@ -1551,10 +1551,11 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
                     fast_source = "app_learned_default"
                 else:
                     fast_source = "unknown"
-                try:
-                    screenshot_rect = win32gui.GetWindowRect(hwnd)
-                except Exception:
-                    screenshot_rect = None
+                # No screenshot for a fast-path switch (found by /code-review,
+                # 2026-10-21): it reads nothing, and the rect used to be the
+                # WHOLE window — an email or chat being typed was saved to disk
+                # for 60 days, against the promise that typed text never is.
+                screenshot_rect = None
                 decision_logger.log_auto_change(
                     exe_name, title, thread_id,
                     HKL_TO_LANGUAGE_NAME.get(previous_hkl_for_thread),

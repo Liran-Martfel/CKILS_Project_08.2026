@@ -1955,11 +1955,20 @@ class KeyboardHookDecisionTests(unittest.TestCase):
         with patch.object(keyboard_hook.auto, "GetFocusedControl", return_value=fake_control):
             self.assertTrue(keyboard_hook._is_password_field_focused())
 
-    def test_password_check_failure_defaults_to_not_a_password_field(self):
+    def test_password_check_failure_fails_closed(self):
         """If UI Automation itself fails, this must not crash the consumer
-        loop — defaulting to False just means normal analysis proceeds."""
+        loop — and since /code-review 2026-10-21 it fails CLOSED: the key is
+        treated as a password key and not analysed (it used to fail open)."""
+        keyboard_hook._password_cache.update(hwnd=None, at=0.0)
         with patch.object(keyboard_hook.auto, "GetFocusedControl", side_effect=Exception("boom")):
-            self.assertFalse(keyboard_hook._is_password_field_focused())
+            self.assertTrue(keyboard_hook._is_password_field_focused())
+
+    def test_fast_path_switch_takes_no_screenshot(self):
+        """/code-review 2026-10-21: the fast path used to screenshot the WHOLE
+        window (typed text on disk for 60 days). It reads nothing: no shot."""
+        import inspect
+        source = inspect.getsource(rule_engine.on_focus_change)
+        self.assertNotIn("GetWindowRect(hwnd)", source)
 
 
 class Tier4AutocorrectDecisionTests(unittest.TestCase):
