@@ -83,7 +83,7 @@ Windows 10/11, Python 3.10+ (developed on 3.14), with `pywin32`, `psutil`, `uiau
 
 ```
 python ckils/week2/rule_engine.py          # run CKILS
-python ckils/week2/test_regressions.py     # 263 tests, one per real bug found
+python ckils/week2/test_regressions.py     # 273 tests, one per real bug found
 python ckils/week2/measure_corrections.py  # real corrections, read from your own logs
 python ckils/week2/summarize_skips.py      # why CKILS did nothing, when it did nothing
 ```
