@@ -3261,6 +3261,52 @@ class UpdaterTests(unittest.TestCase):
         self.assertIn("current commit", make_release.check_build(exe, dirty_build, "2.1.0", "abc1234", ""))
 
 
+class StartupOrderTests(unittest.TestCase):
+    """2026-10-21: CKILS crashed at start (NameError: _history_of) because
+    code run while rule_engine loads called a function defined further
+    down. Tests import the module only once it has fully loaded, and their
+    memory files had no legacy entries, so they never hit that line; this
+    reads the code itself instead."""
+
+    def test_code_run_at_import_only_calls_functions_already_defined(self):
+        import ast
+        for module in (rule_engine, keyboard_hook, decision_logger, skip_logger, interface_text):
+            with open(module.__file__, encoding="utf-8") as f:
+                tree = ast.parse(f.read())
+            functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+
+            def called(node):
+                return {c.func.id for c in ast.walk(node)
+                        if isinstance(c, ast.Call) and isinstance(c.func, ast.Name) and c.func.id in functions}
+
+            defined = set()
+            for statement in tree.body:
+                if isinstance(statement, ast.FunctionDef):
+                    defined.add(statement.name)
+                    continue
+                if isinstance(statement, (ast.ClassDef, ast.If)):
+                    continue  # class bodies run later; `if __name__ == "__main__"` runs after loading
+                pending, seen = list(called(statement)), set()
+                while pending:
+                    name = pending.pop()
+                    if name in seen:
+                        continue
+                    seen.add(name)
+                    self.assertIn(name, defined, f"{os.path.basename(module.__file__)} line "
+                                  f"{statement.lineno} runs {name}() before it is defined")
+                    pending.extend(called(functions[name]))
+
+    def test_a_legacy_page_entry_loads(self):
+        tmp = tempfile.mkdtemp(prefix="ckils_legacy_")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "page_learned_defaults.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"chrome.exe||Old page": "hebrew"}, f)
+        with patch.object(rule_engine, "PAGE_LEARNED_DEFAULTS_FILE", path):
+            loaded = rule_engine.load_page_learned_defaults()
+        self.assertEqual(loaded["chrome.exe||Old page"]["history"], ["hebrew"])
+
+
 class TrainingToolTests(unittest.TestCase):
     """/code-review 2026-10-21: a retrain must never overwrite the kept
     rollback model, and must keep the model it replaces."""

@@ -191,6 +191,29 @@ learned_defaults = load_learned_defaults()
 # Real, honest limitation: apps with volatile titles (an unread-count badge that
 # changes every message, e.g. Telegram) build up many near-duplicate entries
 # instead of one reusable one — harmless, just less effective for those apps.
+# Defined here, before the loaders below run at import (found 2026-10-21:
+# placed further down, loading a legacy entry crashed CKILS at start).
+def _history_of(value):
+    """Normalizes a learned_defaults/page_learned_defaults entry into a
+    plain list of past language observations, oldest first — handles both
+    the current {"history": [...]} shape and a bare legacy string value
+    (see the back-compat note below) uniformly for _trust() to consume.
+    """
+    # Back-compat: every key in the user's real, already-accumulated JSON
+    # files today is a bare string ("chrome.exe": "hebrew") — the single most
+    # recent decision, no history. Treating that as a 1-length history means
+    # it starts below TRUST_MIN_SAMPLES (not yet trusted) rather than being
+    # instantly re-trusted from a possibly-already-wrong single old value —
+    # deliberate: the point of this change is to stop trusting exactly the
+    # kind of contaminated single guesses this session found (WhatsApp,
+    # Zoom, chrome.exe's coarse default), not to preserve them.
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        return list(value.get("history", []))
+    return [value]
+
+
 PAGE_LEARNED_DEFAULTS_FILE = os.path.join(_persistent_dir(), "page_learned_defaults.json")
 page_learned_defaults_lock = threading.Lock()
 
@@ -538,26 +561,6 @@ TRUST_HISTORY_LENGTH = 8
 TRUST_MIN_SAMPLES = 3
 TRUST_AGREEMENT_THRESHOLD = 0.8
 
-
-def _history_of(value):
-    """Normalizes a learned_defaults/page_learned_defaults entry into a
-    plain list of past language observations, oldest first — handles both
-    the current {"history": [...]} shape and a bare legacy string value
-    (see the back-compat note below) uniformly for _trust() to consume.
-    """
-    # Back-compat: every key in the user's real, already-accumulated JSON
-    # files today is a bare string ("chrome.exe": "hebrew") — the single most
-    # recent decision, no history. Treating that as a 1-length history means
-    # it starts below TRUST_MIN_SAMPLES (not yet trusted) rather than being
-    # instantly re-trusted from a possibly-already-wrong single old value —
-    # deliberate: the point of this change is to stop trusting exactly the
-    # kind of contaminated single guesses this session found (WhatsApp,
-    # Zoom, chrome.exe's coarse default), not to preserve them.
-    if value is None:
-        return []
-    if isinstance(value, dict):
-        return list(value.get("history", []))
-    return [value]
 
 
 def _trust(history):
