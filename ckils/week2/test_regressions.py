@@ -2126,6 +2126,7 @@ class Tier4AutocorrectWiringTests(unittest.TestCase):
              patch.object(keyboard_hook.win32api, "GetAsyncKeyState", side_effect=async_state), \
              patch.object(keyboard_hook.win32api, "GetKeyState", return_value=0), \
              patch.object(keyboard_hook, "_is_password_field_focused", return_value=False), \
+             patch.object(keyboard_hook, "_detection_enabled", return_value=True), \
              patch.object(keyboard_hook.skip_logger, "log_skip"), \
              patch.object(keyboard_hook, "_autocorrect_enabled", return_value=enabled), \
              patch.object(keyboard_hook, "_foreground_hwnd_for", return_value=foreground_hwnd), \
@@ -3196,7 +3197,7 @@ class TypingAreaTests(unittest.TestCase):
     messageInput_*). Each typing area learns its own language from typing."""
 
     HWND, THREAD = 760, 8095
-    CODE, CHAT = "EditControl:native-edit-context", "EditControl:messageInput_cKsPxg"
+    CODE, CHAT = "EditControl:native-edit-context", "EditControl:messageInput"  # generated suffix dropped
 
     class _Control:
         def __init__(self, control_type, class_name):
@@ -3214,17 +3215,33 @@ class TypingAreaTests(unittest.TestCase):
     tearDown = setUp
 
     def _learn(self, area, language, n=4):
-        keyboard_hook._typed_by_area[(self.HWND, keyboard_hook._title_key("proj - Visual Studio Code"), area)] = \
+        keyboard_hook._typed_by_area[(self.HWND, keyboard_hook._area_title_key("proj - Visual Studio Code"), area)] = \
             collections.deque([language] * n)
 
     def _tick(self, class_name, layout):
         with patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=layout), \
              patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
              patch.object(rule_engine.win32api, "PostMessage") as post, \
-             patch.object(rule_engine.decision_logger, "log_auto_change"):
+             patch.object(rule_engine.decision_logger, "log_auto_change"), \
+             patch.object(rule_engine.keyboard_hook, "active", return_value=self.tier4_on), \
+             patch.object(rule_engine.keyboard_hook, "_autocorrect_enabled", return_value=True):
             result = rule_engine.check_typing_area(self.HWND, self.THREAD, "Code.exe", "proj - Visual Studio Code",
                                                    self._Control("EditControl", class_name))
         return result, post
+
+    tier4_on = True
+
+    def test_the_panic_switch_stops_area_switching_too(self):
+        self._learn(self.CODE, "english")
+        self.tier4_on = False
+        self.assertIsNone(self._tick("native-edit-context", rule_engine.Hebrew_HKL)[0])
+
+    def test_learning_survives_switching_files(self):
+        """VS Code's title changes with the open file; the area keeps its learning."""
+        keyboard_hook._typed_by_area[(self.HWND, keyboard_hook._area_title_key("a.py - proj - Visual Studio Code"),
+                                      self.CODE)] = collections.deque(["english"] * 4)
+        self.assertEqual(keyboard_hook.typed_language_in_area(
+            self.HWND, "b.py - proj - Visual Studio Code", self.CODE), "english")
 
     def test_only_text_fields_are_typing_areas(self):
         self.assertEqual(rule_engine.typing_area(self._Control("EditControl", "native-edit-context")), self.CODE)
@@ -3507,9 +3524,40 @@ class BrowserUiHotkeyTests(unittest.TestCase):
     def test_three_layouts_or_no_usable_hotkey_fall_back_to_the_message(self):
         """The hotkey cycles: with a third layout it could land on it."""
         for kwargs in ({"layouts": 3}, {"modifier": None}):
+            self.setUp()  # a fresh window each time (the double-switch guard)
             _, keys, post, _ = self._apply(**kwargs)
             keys.assert_not_called()
             post.assert_called_once()
+
+    def test_never_toggles_twice(self):
+        """/code-review 2026-10-21: Alt+Shift is a TOGGLE. Two fast words
+        firing before the layout showed the first switch flipped it back.
+        Already there, or just switched there: no second press."""
+        applied, keys, post, _ = self._apply()
+        self.assertTrue(applied)
+        again, keys2, post2, _ = self._apply()
+        self.assertFalse(again)
+        keys2.assert_not_called()
+        self.setUp()
+        with patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=rule_engine.Hebrew_HKL):
+            already, keys3, _, _ = self._apply()
+        self.assertFalse(already)
+        keys3.assert_not_called()
+
+    def test_deleting_the_opt_in_file_stops_tier4_at_once(self):
+        tmp = tempfile.mkdtemp(prefix="ckils_optin_")
+        try:
+            flag = os.path.join(tmp, keyboard_hook._ENABLE_FLAG_FILENAME)
+            open(flag, "w").close()
+            with patch.object(keyboard_hook.skip_logger, "_persistent_dir", return_value=tmp):
+                keyboard_hook._detection_checked["at"] = 0.0
+                self.assertTrue(keyboard_hook._detection_enabled())
+                os.remove(flag)
+                keyboard_hook._detection_checked["at"] = 0.0
+                self.assertFalse(keyboard_hook._detection_enabled())
+        finally:
+            keyboard_hook._detection_checked.update(at=0.0, on=True)
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def test_chrome_and_edge_only(self):
         self.assertTrue(rule_engine._is_chromium_browser("msedge.exe"))

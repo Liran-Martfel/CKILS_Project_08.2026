@@ -1832,13 +1832,18 @@ AREA_TYPING_HOLD_SECONDS = 1.0
 last_area = {}  # hwnd -> the typing area seen last time
 
 
+_GENERATED_SUFFIX = re.compile(r"_[A-Za-z0-9]{5,8}$")
+
+
 def typing_area(control):
     """A stable name for the focused typing area, or None if focus isn't in
-    a text field (a list, a button, a page body)."""
+    a text field (a list, a button, a page body). A generated suffix on the
+    class ("messageInput_cKsPxg") is dropped, so the name survives an app
+    update that regenerates it."""
     try:
         if control.ControlTypeName != "EditControl":
             return None
-        return f"EditControl:{control.ClassName}"
+        return f"EditControl:{_GENERATED_SUFFIX.sub('', control.ClassName or '')}"
     except Exception:
         return None
 
@@ -1852,6 +1857,10 @@ def check_typing_area(hwnd, thread_id, exe_name, title, control):
     previous = last_area.get(hwnd, "unseen")
     last_area[hwnd] = area
     if area is None or area == previous:
+        return None
+    # Only while Tier 4 is really on and allowed to switch (found by
+    # /code-review 2026-10-21: the panic trigger and "logging only" didn't stop it).
+    if not keyboard_hook.active() or not keyboard_hook._autocorrect_enabled():
         return None
     language = keyboard_hook.typed_language_in_area(hwnd, title, area)
     target_hkl = LANGUAGE_NAME_TO_HKL.get(language)
@@ -1885,10 +1894,17 @@ def _area_watch_loop():
     typing area of the front window has focus. Never raises."""
     auto.InitializeUIAutomationInCurrentThread()
     exe_of = {}
+    previous_hwnd = None
     while True:
         time.sleep(AREA_WATCH_SECONDS)
         try:
             hwnd = win32gui.GetForegroundWindow()
+            if hwnd != previous_hwnd:
+                # Back in a window: its area counts as newly entered, so the
+                # area's own language applies over the window-wide one that
+                # arriving set (found by /code-review 2026-10-21).
+                last_area.pop(hwnd, None)
+                previous_hwnd = hwnd
             title = win32gui.GetWindowText(hwnd)
             thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
             if pid not in exe_of:
@@ -1942,6 +1958,18 @@ def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hk
                              f"{OVERRIDE_OUTVOTE_WORDS} wrong-layout words")
     if win32gui.GetForegroundWindow() != hwnd:
         return False  # focus moved on between the keystroke and this call
+    # Found by /code-review 2026-10-21: in Chrome the switch is an Alt+Shift
+    # TOGGLE. Two words typed fast could fire twice before the layout showed
+    # the first switch, and the second press flipped it back to the wrong
+    # language. Don't switch to where we already are, or just went.
+    try:
+        if win32api.GetKeyboardLayout(thread_id) == target_hkl:
+            last_set[thread_id] = target_hkl
+            return False
+    except Exception:
+        pass
+    if last_set.get(thread_id) == target_hkl and time.time() - last_switch_time.get(thread_id, 0) < 1.0:
+        return False
     by_hotkey = _switch_by_hotkey(exe_name)
     if not by_hotkey:
         win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)

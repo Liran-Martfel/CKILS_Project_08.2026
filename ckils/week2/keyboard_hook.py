@@ -802,10 +802,19 @@ def _leader(words):
     return leader if count / len(words) >= TYPED_MIN_SHARE else None
 
 
+def _area_title_key(title):
+    """The app/site part of a title ("b.py - proj - Visual Studio Code" ->
+    "proj - Visual Studio Code"). Found by /code-review 2026-10-21: keyed by
+    the full title, an area's learning was lost every time VS Code's title
+    changed with the open file."""
+    parts = [p.strip() for p in _title_key(title).split(" - ") if p.strip()]
+    return " - ".join(parts[-2:]) if len(parts) >= 2 else _title_key(title)
+
+
 def typed_language_in_area(hwnd, title, area):
     """The language the user has mostly typed in this area of this window."""
     with _typed_lock:
-        words = list(_typed_by_area.get((hwnd, _title_key(title), area), ()))
+        words = list(_typed_by_area.get((hwnd, _area_title_key(title), area), ()))
     return _leader(words)
 
 
@@ -881,7 +890,8 @@ def _note_typed_word(state, thread_id, title, current_hkl, fired):
         words.append("hebrew" if meant_hebrew else "english")
         area = focus_area.get(hwnd)
         if area:
-            _typed_by_area.setdefault(key + (area,), collections.deque(maxlen=TYPED_WORDS_KEPT)).append(
+            _typed_by_area.setdefault((hwnd, _area_title_key(title), area),
+                                      collections.deque(maxlen=TYPED_WORDS_KEPT)).append(
                 "hebrew" if meant_hebrew else "english")
         _typed_dirty = True
     _save_typed_languages()
@@ -914,6 +924,30 @@ def typed_recently(thread_id, title, seconds):
     by title too, since browser tabs share one thread: typing in one tab
     mustn't hold Tier 3 off a tab you just moved to."""
     return time.time() - _last_typed.get((thread_id, _title_key(title)), 0) < seconds
+
+
+_detection_checked = {"at": 0.0, "on": True}
+
+
+def _detection_enabled():
+    """True while enable_gibberish_detection.on still exists — checked at
+    most every 2 s. Found by /code-review 2026-10-21: the file was read only
+    at start, so deleting it (as the guide says) didn't stop the watching."""
+    now = time.time()
+    if now - _detection_checked["at"] >= 2.0:
+        try:
+            _detection_checked["on"] = skip_logger.os.path.exists(
+                skip_logger.os.path.join(skip_logger._persistent_dir(), _ENABLE_FLAG_FILENAME))
+        except Exception:
+            _detection_checked["on"] = False
+        _detection_checked["at"] = now
+    return _detection_checked["on"]
+
+
+def active():
+    """Tier 4 is really on: started, its hook still installed (not removed
+    by the panic trigger), and its opt-in file still there."""
+    return _started and _hook_handle is not None and _detection_enabled()
 
 
 def _consumer_loop():
@@ -964,6 +998,9 @@ def _consumer_loop():
             else:
                 continue  # neither layout we know about (e.g. a third installed layout) — nothing to judge
 
+            if not _detection_enabled():
+                state.reset()  # opt-in file deleted: stop analysing at once, keep nothing
+                continue
             if _is_password_field_focused():
                 state.reset()
                 continue
