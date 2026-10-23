@@ -219,6 +219,9 @@ class _PerThreadState:
         # capitals. Counted per word: letter keys, and how many had Shift.
         self.letter_keys = 0
         self.shifted_keys = 0
+        # Hebrew prefix letters typed (without Shift) straight before the
+        # capitals: ל in לTRAIN, ב in בSHIFT (found live 2026-10-22/23).
+        self.prefix_keys = 0
 
     def reset_word(self):
         """The word ended normally: clears everything about THIS word (the
@@ -237,6 +240,7 @@ class _PerThreadState:
         self.word_keys = []
         self.letter_keys = 0
         self.shifted_keys = 0
+        self.prefix_keys = 0
 
     def reset(self):
         """Full reset: the word AND everything spanning words. Every path that
@@ -341,6 +345,8 @@ def process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_hel
     state.letter_keys += 1
     if shift_pressed != caps_lock_on:
         state.shifted_keys += 1
+    elif state.shifted_keys == 0 and state.prefix_keys == state.letter_keys - 1 and             layout_remap.remap_key_to_other_layout(vk_code, scan_code, HEBREW_HKL_VALUE) in HEBREW_PREFIX_LETTERS:
+        state.prefix_keys += 1  # still a run of prefix letters before any capital
 
     english = layout_remap.remap_key_to_other_layout(vk_code, scan_code, ENGLISH_HKL_VALUE)
     if english and english.isalpha():
@@ -575,15 +581,26 @@ def _comma_between_letters(keys):
                for i, vk in enumerate(vks))
 
 
+# Hebrew attaches these one-letter words to the next word (ו ה ב כ ל מ ש):
+# "לTRAIN", "בSHIFT", "וכשCNN". Up to three in a row, like וכש.
+HEBREW_PREFIX_LETTERS = set("והבכלמש")
+MAX_PREFIX_LETTERS = 3
+
+
 def english_mid_hebrew(state, current_hkl):
     """True if every letter of the current word was typed with Shift (or Caps
     Lock) on the Hebrew layout. Hebrew has no capitals: those keys type English
     capitals, so this is English the user typed on purpose mid-Hebrew — the
     user's own habit ("CKILS" inside a Hebrew sentence), 2026-10-20 — not a
     wrong layout. A capital only at the start ("Hello" typed on Hebrew by
-    mistake) is not all-capitals, and is still corrected."""
-    return (current_hkl == HEBREW_HKL_VALUE and state.letter_keys > 0
-            and state.shifted_keys == state.letter_keys)
+    mistake) is not all-capitals, and is still corrected.
+
+    Up to three Hebrew prefix letters may come first, without Shift: found
+    live 2026-10-22/23 — בSHIFT, לIMAGES, לTRAIN switched to English mid-Hebrew
+    because the ל or ב made the word not all capitals."""
+    return (current_hkl == HEBREW_HKL_VALUE and state.shifted_keys > 0
+            and state.prefix_keys <= MAX_PREFIX_LETTERS
+            and state.shifted_keys + state.prefix_keys == state.letter_keys)
 
 
 def word_end_check(state, current_hkl):

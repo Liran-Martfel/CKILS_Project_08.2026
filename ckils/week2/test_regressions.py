@@ -2937,6 +2937,51 @@ class EnglishMidHebrewTests(unittest.TestCase):
         self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_ENGLISH_MID_HEBREW)
         self.assertEqual(log_skip.call_args.args[4], "len=5")
 
+    # Found live 2026-10-22/23 (20:02, 10:53, 14:42): a Hebrew prefix letter
+    # typed straight onto the capitals — בSHIFT, לIMAGES, לTRAIN — made the
+    # word not "all capitals", so it switched to English mid-Hebrew.
+    @staticmethod
+    def _word(prefix_keys, capitals):
+        return [{"vk": vk, "shift": False} for vk in prefix_keys] + \
+               [{"vk": ord(c), "shift": True} for c in capitals]
+
+    def test_a_hebrew_prefix_before_capitals_never_switches(self):
+        akuo = [0x41, 0x4B, 0x55, 0x4F, 0x20]   # שלום
+        for prefix, word in (([0x43], "SHIFT"), ([0x4B], "IMAGES"), ([0x4B], "TRAIN"),
+                             ([0x55, 0x4B], "PROJECT"), ([0x55, 0x46, 0x41], "CNN")):  # ב ל ל ול וכש
+            self.calls.clear()
+            self._run(akuo + self._word(prefix, word) + [0x20] + akuo)
+            self.assertEqual(self.calls, [], (prefix, word))
+
+    def test_it_is_logged_with_the_prefix_counted(self):
+        state = keyboard_hook._PerThreadState()
+        keyboard_hook.process_key_event(0x4B, 0, state, rule_engine.Hebrew_HKL, False, False, shift_pressed=False)
+        for c in "TRAIN":
+            keyboard_hook.process_key_event(ord(c), 0, state, rule_engine.Hebrew_HKL, False, False, shift_pressed=True)
+        self.assertTrue(keyboard_hook.english_mid_hebrew(state, rule_engine.Hebrew_HKL))
+
+    def test_only_prefix_letters_and_at_most_three(self):
+        def on_purpose(prefix_keys, capitals="TEST"):
+            state = keyboard_hook._PerThreadState()
+            for vk in prefix_keys:
+                keyboard_hook.process_key_event(vk, 0, state, rule_engine.Hebrew_HKL, False, False, shift_pressed=False)
+            for c in capitals:
+                keyboard_hook.process_key_event(ord(c), 0, state, rule_engine.Hebrew_HKL, False, False, shift_pressed=True)
+            return keyboard_hook.english_mid_hebrew(state, rule_engine.Hebrew_HKL)
+        self.assertTrue(on_purpose([0x55, 0x46, 0x41]))          # וכש — three prefixes
+        self.assertFalse(on_purpose([0x55, 0x46, 0x41, 0x56]))   # four letters: not a prefix
+        self.assertFalse(on_purpose([0x52]))                     # ר is no prefix
+        self.assertFalse(on_purpose([0x4B], ""))                 # ל alone: no capitals at all
+
+    def test_plain_letters_after_the_capitals_are_still_corrected(self):
+        """"lHello"-style: once a capital came, every later letter must be one."""
+        state = keyboard_hook._PerThreadState()
+        keyboard_hook.process_key_event(0x4B, 0, state, rule_engine.Hebrew_HKL, False, False, shift_pressed=False)
+        keyboard_hook.process_key_event(0x48, 0, state, rule_engine.Hebrew_HKL, False, False, shift_pressed=True)
+        for vk in (0x45, 0x4C, 0x4C, 0x4F):
+            keyboard_hook.process_key_event(vk, 0, state, rule_engine.Hebrew_HKL, False, False, shift_pressed=False)
+        self.assertFalse(keyboard_hook.english_mid_hebrew(state, rule_engine.Hebrew_HKL))
+
 
 class TwoLetterWordEndTests(unittest.TestCase):
     """Found live twice (2026-10-16, 2026-10-17): "הצ" — the start of הצד,
