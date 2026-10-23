@@ -3905,6 +3905,80 @@ class TypedLanguageTests(unittest.TestCase):
         self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_TYPED_RESPECTED)
 
 
+class StoreAppTests(unittest.TestCase):
+    """Found live 2026-10-22/23 in Sticky Notes: a Store app's typing thread
+    isn't the frame window's thread. CKILS must read and switch the app's
+    own thread, and switch by the language hotkey there (a request posted to
+    the frame never reaches the app). Fake windows only — nothing is pressed."""
+
+    FRAME, CHILD_OWN, CHILD_APP = 100, 101, 102
+    THREADS = {100: (10, 1000), 101: (10, 1000), 102: (77, 2000)}  # hwnd -> (thread, pid)
+
+    def _patched(self, frame_class="ApplicationFrameWindow"):
+        import input_window
+        return (patch.object(input_window.win32gui, "GetClassName",
+                             side_effect=lambda h: frame_class if h == self.FRAME else "Child"),
+                patch.object(input_window.win32gui, "EnumChildWindows",
+                             side_effect=lambda h, cb, extra: [cb(c, extra) for c in (self.CHILD_OWN, self.CHILD_APP)]),
+                patch.object(input_window.win32process, "GetWindowThreadProcessId",
+                             side_effect=lambda h: self.THREADS[h]))
+
+    def test_a_store_frame_gives_the_hosted_apps_thread_and_the_frames_pid(self):
+        import input_window
+        a, b, c = self._patched()
+        with a, b, c:
+            self.assertEqual(input_window.thread_and_pid(self.FRAME), (77, 1000))
+
+    def test_an_ordinary_window_is_unchanged(self):
+        import input_window
+        a, b, c = self._patched(frame_class="Chrome_WidgetWin_1")
+        with a, b, c:
+            self.assertEqual(input_window.thread_and_pid(self.FRAME), (10, 1000))
+
+    def test_the_hook_judges_keys_against_the_apps_own_thread(self):
+        import input_window
+        with patch("win32gui.GetForegroundWindow", return_value=self.FRAME), \
+             patch("win32gui.GetWindowText", return_value="פתקים נדבקים"), \
+             patch.object(input_window, "thread_and_pid", return_value=(77, 1000)), \
+             patch("psutil.Process") as proc:
+            proc.return_value.name.return_value = "ApplicationFrameHost.exe"
+            keyboard_hook._exe_by_pid.pop(1000, None)
+            self.assertEqual(keyboard_hook._current_window_identity()[2], 77)
+            self.assertEqual(keyboard_hook._foreground_hwnd_for(77), self.FRAME)
+
+    def test_a_store_app_is_switched_by_the_hotkey_only_when_needed(self):
+        with patch.object(rule_engine.input_window, "is_store_frame", return_value=True), \
+             patch.object(rule_engine, "_language_hotkey_modifier", return_value=0x12), \
+             patch.object(rule_engine.win32api, "GetKeyboardLayoutList", return_value=[1, 2]), \
+             patch.object(rule_engine, "_press_language_hotkey") as press, \
+             patch.object(rule_engine.win32api, "PostMessage") as post:
+            rule_engine._hotkey_pressed.clear()
+            with patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=rule_engine.English_HKL):
+                self.assertEqual(rule_engine._post_switch(self.FRAME, 77, rule_engine.Hebrew_HKL), "hotkey")
+                # the layout hasn't shown the switch yet: never press twice for it
+                self.assertEqual(rule_engine._post_switch(self.FRAME, 77, rule_engine.Hebrew_HKL), "none")
+            with patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=rule_engine.Hebrew_HKL):
+                self.assertEqual(rule_engine._post_switch(self.FRAME, 77, rule_engine.Hebrew_HKL), "none")
+            self.assertEqual(press.call_count, 1)
+            post.assert_not_called()
+
+    def test_an_ordinary_window_still_gets_the_message(self):
+        with patch.object(rule_engine.input_window, "is_store_frame", return_value=False), \
+             patch.object(rule_engine, "_press_language_hotkey") as press, \
+             patch.object(rule_engine.win32api, "PostMessage") as post:
+            self.assertEqual(rule_engine._post_switch(5, 6, rule_engine.Hebrew_HKL), "message")
+        press.assert_not_called()
+        post.assert_called_once()
+
+    def test_tier4_and_areas_use_the_hotkey_in_a_store_app(self):
+        with patch.object(rule_engine.input_window, "is_store_frame", return_value=True), \
+             patch.object(rule_engine, "_language_hotkey_modifier", return_value=0x12), \
+             patch.object(rule_engine.win32api, "GetKeyboardLayoutList", return_value=[1, 2]), \
+             patch.object(rule_engine, "_press_language_hotkey"):
+            self.assertTrue(rule_engine._switch_by_hotkey("ApplicationFrameHost.exe", self.FRAME))
+        self.assertFalse(rule_engine._switch_by_hotkey("notepad.exe", None))
+
+
 class RecentTypingTests(unittest.TestCase):
     """Found live 2026-10-23 08:24 on YouTube: Tier 4 switched to English,
     the user looked at another window for 4 s, and coming back CKILS switched

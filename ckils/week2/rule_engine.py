@@ -45,6 +45,7 @@ import decision_logger
 import skip_logger
 import interface_text
 import keyboard_hook
+import input_window
 import updater
 
 # Set to False for a quiet, end-user-facing run — True prints a line for every
@@ -1316,7 +1317,7 @@ def _handle_carry_over(thread_id, hwnd, exe_name, title, actual_hkl):
     if decided_this_visit and attempts < MAX_REASSERT_ATTEMPTS:
         reassert_attempts[thread_id] = attempts + 1
         try:
-            win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, last_set[thread_id])
+            _post_switch(hwnd, thread_id, last_set[thread_id])
         except Exception:
             pass
         last_switch_time[thread_id] = time.time()  # give Windows the usual grace before judging again
@@ -1475,6 +1476,11 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             return
         if hwnd != win32gui.GetForegroundWindow():
             return
+    if input_window.is_store_frame(hwnd):
+        try:
+            thread_id = input_window.thread_and_pid(hwnd)[0]  # the app's own typing thread
+        except Exception:
+            pass
     same_thread_as_before = previous_thread == thread_id
     if not same_thread_as_before:
         visit_started[thread_id] = time.time()  # arriving in this window
@@ -1583,7 +1589,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             # Tier 3 (below) never blocks this; it only corrects it afterward if needed.
             previous_hkl_for_thread = last_set.get(thread_id)
             start = time.perf_counter()
-            win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
+            _post_switch(hwnd, thread_id, target_hkl)
             elapsed_ms = (time.perf_counter() - start) * 1000
             print(f'{exe_name}: switched to {hex(target_hkl)} in {elapsed_ms:.1f} ms')
             if previous_hkl_for_thread != target_hkl:
@@ -1725,7 +1731,7 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
             skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_TYPING_RESPECTED)
             return False
 
-        win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, corrected_hkl)
+        _post_switch(hwnd, thread_id, corrected_hkl)
         last_set[thread_id] = corrected_hkl
         last_switch_time[thread_id] = time.time()
         content_decision[thread_id] = corrected_hkl  # sticks for the rest of this visit
@@ -1807,9 +1813,39 @@ def _press_language_hotkey(modifier):
         win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP if up else 0, 0)
 
 
-def _switch_by_hotkey(exe_name):
-    """Switches by the hotkey if it's safe here; returns True if it did."""
-    if not _is_chromium_browser(exe_name):
+_hotkey_pressed = {}  # thread -> (target, time) of the last hotkey press made by _post_switch
+
+
+def _post_switch(hwnd, thread_id, target_hkl):
+    """Asks hwnd's window to switch to target_hkl; returns how: "message",
+    "hotkey", or "none" (nothing needed). A Store app's frame never passes
+    the posted request on to the app's own typing thread (found live
+    2026-10-22/23 in Sticky Notes: three corrections bounced straight back),
+    so there the language hotkey is pressed — a toggle, so only if the
+    layout isn't target_hkl already, and never twice for the same target
+    within a second (the layout takes a moment to show the first press)."""
+    if input_window.is_store_frame(hwnd):
+        try:
+            if win32api.GetKeyboardLayout(thread_id) == target_hkl:
+                return "none"
+        except Exception:
+            pass
+        pressed = _hotkey_pressed.get(thread_id)
+        if pressed is not None and pressed[0] == target_hkl and time.time() - pressed[1] < 1.0:
+            return "none"
+        if _switch_by_hotkey("", hwnd):
+            _hotkey_pressed[thread_id] = (target_hkl, time.time())
+            return "hotkey"
+    win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
+    return "message"
+
+
+def _switch_by_hotkey(exe_name, hwnd=None):
+    """Switches by the hotkey if it's safe here; returns True if it did.
+    Chrome/Edge (their text fields keep their own typing layer), and Store
+    apps, whose frame never passes a posted request on to the app (found
+    live 2026-10-22/23 in Sticky Notes)."""
+    if not (_is_chromium_browser(exe_name) or input_window.is_store_frame(hwnd)):
         return False
     try:
         if len(win32api.GetKeyboardLayoutList()) != 2:
@@ -1877,7 +1913,7 @@ def check_typing_area(hwnd, thread_id, exe_name, title, control):
         return None
     if win32gui.GetForegroundWindow() != hwnd:
         return None
-    by_hotkey = _switch_by_hotkey(exe_name)
+    by_hotkey = _switch_by_hotkey(exe_name, hwnd)
     if not by_hotkey:
         win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
     last_set[thread_id] = target_hkl
@@ -1909,7 +1945,7 @@ def _area_watch_loop():
                 last_area.pop(hwnd, None)
                 previous_hwnd = hwnd
             title = win32gui.GetWindowText(hwnd)
-            thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+            thread_id, pid = input_window.thread_and_pid(hwnd)
             if pid not in exe_of:
                 exe_of[pid] = psutil.Process(pid).name()
             check_typing_area(hwnd, thread_id, exe_of[pid], title, auto.GetFocusedControl())
@@ -1973,7 +2009,7 @@ def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hk
         pass
     if last_set.get(thread_id) == target_hkl and time.time() - last_switch_time.get(thread_id, 0) < 1.0:
         return False
-    by_hotkey = _switch_by_hotkey(exe_name)
+    by_hotkey = _switch_by_hotkey(exe_name, hwnd)
     if not by_hotkey:
         win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
     last_set[thread_id] = target_hkl
@@ -2039,7 +2075,7 @@ def _poll_tick():
     try:
         hwnd = win32gui.GetForegroundWindow()
         title = win32gui.GetWindowText(hwnd)
-        thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+        thread_id, pid = input_window.thread_and_pid(hwnd)
         exe_name = psutil.Process(pid).name()
     except Exception:
         return  # window vanished or info unavailable between calls — just skip this tick

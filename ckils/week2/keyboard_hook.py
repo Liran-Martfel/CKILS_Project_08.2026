@@ -1246,10 +1246,10 @@ def _foreground_hwnd_for(thread_id):
     window. Returns None in that case.
     """
     import win32gui
-    import win32process
+    import input_window
     try:
         hwnd = win32gui.GetForegroundWindow()
-        fg_thread, _ = win32process.GetWindowThreadProcessId(hwnd)
+        fg_thread, _ = input_window.thread_and_pid(hwnd)
         return hwnd if fg_thread == thread_id else None
     except Exception:
         return None
@@ -1300,10 +1300,10 @@ def _current_window_identity():
     """
     import psutil
     import win32gui
-    import win32process
+    import input_window
     hwnd = win32gui.GetForegroundWindow()
     title = win32gui.GetWindowText(hwnd)
-    thread_id, pid = win32process.GetWindowThreadProcessId(hwnd)
+    thread_id, pid = input_window.thread_and_pid(hwnd)  # a Store app's own typing thread
     if pid not in _exe_by_pid:  # one process lookup per program, not per key
         if len(_exe_by_pid) > 500:
             _exe_by_pid.clear()
