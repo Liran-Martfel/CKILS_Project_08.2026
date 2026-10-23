@@ -1032,6 +1032,41 @@ def _google_docs_title_text(title):
     return doc_title
 
 
+# Found live 2026-10-23 07:46-07:50: with Windows in Hebrew, File Explorer's
+# own interface is Hebrew — its column headers ("תאריך שינוי", "גודל") were
+# read as content and decided Hebrew in a folder of English files. Explorer
+# is judged by the names of the files it shows instead (its file list,
+# "UIItemsView"); extensions are dropped (".jpg" says nothing about language).
+# No names readable: no decision — never the headers.
+EXPLORER_WINDOW_CLASS = "CabinetWClass"
+EXPLORER_MAX_NAMES = 40
+
+
+def _is_file_explorer(hwnd):
+    try:
+        return win32gui.GetClassName(hwnd) == EXPLORER_WINDOW_CLASS
+    except Exception:
+        return False
+
+
+def _explorer_file_names(hwnd):
+    """The names shown in an Explorer window's file list, one per line,
+    without extensions; "" if there's no list to read."""
+    try:
+        items_view = auto.ControlFromHandle(hwnd).ListControl(searchDepth=12, ClassName="UIItemsView")
+        if not items_view.Exists(0, 0):
+            return ""
+        names = []
+        for item in items_view.GetChildren():
+            if item.ControlTypeName == "ListItemControl" and item.Name:
+                names.append(os.path.splitext(item.Name)[0])
+                if len(names) >= EXPLORER_MAX_NAMES:
+                    break
+        return "\n".join(names)
+    except Exception:
+        return ""
+
+
 def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     """
     Falls back to fallback_hkl (Tier 1/2's answer, possibly None) on an empty
@@ -1085,7 +1120,10 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     full_control_rect = (rect.left, rect.top, rect.right, rect.bottom)
     screenshot_rect = None
     accessible_text = (control.Name or "").strip()
-    if _looks_like_real_content(accessible_text, title):
+    if _is_file_explorer(hwnd):
+        text = _explorer_file_names(hwnd)
+        source = "explorer_file_names"
+    elif _looks_like_real_content(accessible_text, title):
         text = accessible_text
         source = "accessible_text"
         if _is_onscreen(rect):

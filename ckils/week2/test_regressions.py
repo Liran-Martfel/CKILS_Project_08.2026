@@ -3905,6 +3905,54 @@ class TypedLanguageTests(unittest.TestCase):
         self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_TYPED_RESPECTED)
 
 
+class ExplorerFileNamesTests(unittest.TestCase):
+    """Found live 2026-10-23 07:46-07:50: in File Explorer the screen read
+    took Explorer's own Hebrew column headers ("תאריך שינוי", "גודל") as
+    content and decided Hebrew in a folder of English files. Explorer is now
+    judged by the names of the files it shows; no names, no decision."""
+
+    HWND = 4321
+    TITLE = "Project Vision - CNN - סייר הקבצים"
+
+    def _decide(self, names):
+        header = _FakeControl(rect=_FakeRect(0, 243, 1620, 280), name="")
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
+             patch.object(rule_engine.auto, "GetFocusedControl", return_value=header), \
+             patch.object(rule_engine, "_is_file_explorer", return_value=True), \
+             patch.object(rule_engine, "_explorer_file_names", return_value=names), \
+             patch.object(rule_engine, "read_region") as ocr, \
+             patch.object(rule_engine.interface_text, "is_interface_text", return_value=False):
+            result = rule_engine.decide_with_content(self.HWND, None, self.TITLE, "explorer.exe", thread_id=55)
+        return result, ocr
+
+    def test_english_file_names_decide_english(self):
+        (hkl, reason), ocr = self._decide("train_images\ntest_images\nmodel weights\nconfusion matrix\nreport")
+        self.assertEqual(hkl, rule_engine.English_HKL)
+        self.assertEqual(reason["source"], "explorer_file_names")
+        ocr.assert_not_called()
+
+    def test_no_file_names_means_no_decision_and_no_header_read(self):
+        (hkl, reason), ocr = self._decide("")
+        self.assertIsNone(hkl)
+        self.assertIsNone(reason)
+        ocr.assert_not_called()
+
+    def test_names_are_read_from_the_file_list_without_extensions(self):
+        class Item:
+            def __init__(self, name, kind="ListItemControl"):
+                self.Name, self.ControlTypeName = name, kind
+        items_view = unittest.mock.MagicMock()
+        items_view.Exists.return_value = True
+        items_view.GetChildren.return_value = [Item("train.zip"), Item("notes.txt"), Item("Header", "HeaderControl"),
+                                               Item("סיכום.docx")]
+        window = unittest.mock.MagicMock()
+        window.ListControl.return_value = items_view
+        with patch.object(rule_engine.auto, "ControlFromHandle", return_value=window):
+            self.assertEqual(rule_engine._explorer_file_names(self.HWND), "train\nnotes\nסיכום")
+        window.ListControl.assert_called_once()
+        self.assertEqual(window.ListControl.call_args.kwargs.get("ClassName"), "UIItemsView")
+
+
 class StoreAppTests(unittest.TestCase):
     """Found live 2026-10-22/23 in Sticky Notes: a Store app's typing thread
     isn't the frame window's thread. CKILS must read and switch the app's
