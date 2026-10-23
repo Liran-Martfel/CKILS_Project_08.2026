@@ -3552,6 +3552,7 @@ class TypedLanguagePersistsTests(unittest.TestCase):
         keyboard_hook._TYPED_FILE = os.path.join(self.tmp, "typed_languages.json")
         keyboard_hook._typed_languages.clear()
         keyboard_hook._restored.clear()
+        keyboard_hook._typed_last.clear()
 
     def tearDown(self):
         keyboard_hook._TYPED_FILE = self._orig[0]
@@ -3564,6 +3565,7 @@ class TypedLanguagePersistsTests(unittest.TestCase):
         keyboard_hook._typed_dirty = True
         keyboard_hook._save_typed_languages(force=True)
         keyboard_hook._typed_languages.clear()  # "CKILS restarts"
+        keyboard_hook._typed_last.clear()
 
     def test_a_restart_keeps_what_was_typed_in_a_window(self):
         self._save_one(777, "רשימת קניות - Google Docs", ["hebrew"] * 4)
@@ -3835,6 +3837,7 @@ class TypedLanguageTests(unittest.TestCase):
     def setUp(self):
         """Clean record; real HKL constants for the hook."""
         keyboard_hook._typed_languages.clear()
+        keyboard_hook._typed_last.clear()
         self._orig = (keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE)
         keyboard_hook.ENGLISH_HKL_VALUE = rule_engine.English_HKL
         keyboard_hook.HEBREW_HKL_VALUE = rule_engine.Hebrew_HKL
@@ -3842,6 +3845,7 @@ class TypedLanguageTests(unittest.TestCase):
     def tearDown(self):
         """Restores module state."""
         keyboard_hook._typed_languages.clear()
+        keyboard_hook._typed_last.clear()
         keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE = self._orig
 
     def _record(self, *languages, hwnd=HWND, title=TITLE):
@@ -3899,6 +3903,91 @@ class TypedLanguageTests(unittest.TestCase):
         self.assertFalse(changed)
         post.assert_not_called()
         self.assertEqual(log_skip.call_args.args[3], skip_logger.REASON_TYPED_RESPECTED)
+
+
+class RecentTypingTests(unittest.TestCase):
+    """Found live 2026-10-23 08:24 on YouTube: Tier 4 switched to English,
+    the user looked at another window for 4 s, and coming back CKILS switched
+    to Hebrew — the window's long-run majority — over what had been typed
+    seconds before. What was typed in the last TYPED_RECENT_SECONDS wins."""
+
+    HWND, TITLE = 777, "YouTube - Google Chrome"
+
+    def setUp(self):
+        for record in (keyboard_hook._typed_languages, keyboard_hook._typed_last,
+                       keyboard_hook._recent_typed_words, keyboard_hook._last_enter,
+                       keyboard_hook._seen_title):
+            record.clear()
+
+    tearDown = setUp
+
+    def test_the_last_word_typed_moments_ago_beats_the_majority(self):
+        keyboard_hook._typed_languages[(self.HWND, self.TITLE)] = collections.deque(
+            ["hebrew"] * 8 + ["english"], maxlen=keyboard_hook.TYPED_WORDS_KEPT)
+        keyboard_hook._typed_last[(self.HWND, self.TITLE)] = (1000.0, "english")
+        self.assertEqual(keyboard_hook.typed_language(self.HWND, self.TITLE, now=1008.0), "english")
+        later = 1000.0 + keyboard_hook.TYPED_RECENT_SECONDS + 1
+        self.assertEqual(keyboard_hook.typed_language(self.HWND, self.TITLE, now=later), "hebrew")
+
+    def test_typing_records_when_and_what(self):
+        state = keyboard_hook._PerThreadState()
+        state.letter_count = 4
+        with patch.object(keyboard_hook, "_foreground_hwnd_for", return_value=self.HWND), \
+             patch.object(keyboard_hook, "_save_typed_languages"), \
+             patch.object(keyboard_hook.time, "time", return_value=500.0):
+            keyboard_hook._note_typed_word(state, 1, self.TITLE, rule_engine.Hebrew_HKL, fired=True)
+        self.assertEqual(keyboard_hook._typed_last[(self.HWND, self.TITLE)], (500.0, "english"))
+
+
+class PageOpenedByTypingTests(unittest.TestCase):
+    """Found live 2026-10-23 07:25: a Hebrew Google search typed in a new tab
+    opened the results page — a new title, so CKILS knew nothing about it and
+    left English from another tab. Words typed just before Enter now carry
+    over to the page that Enter opened (only if that page has no record)."""
+
+    HWND = 777
+    NEW_TAB, RESULTS = "כרטיסייה חדשה - Google Chrome", "אילו עוד פקודות - חיפוש ב-Google - Google Chrome"
+
+    setUp = RecentTypingTests.setUp
+    tearDown = RecentTypingTests.setUp
+
+    def _type_query(self, enter_at=105.0):
+        keyboard_hook.note_title(self.HWND, self.NEW_TAB, now=99.0)
+        for i in range(5):
+            keyboard_hook._recent_typed_words.setdefault(self.HWND, collections.deque(maxlen=30)).append(
+                (100.0 + i, keyboard_hook._title_key(self.NEW_TAB), "hebrew"))
+        if enter_at is not None:
+            keyboard_hook.note_enter(self.HWND, now=enter_at)
+
+    def test_the_page_opened_by_enter_inherits_the_typed_language(self):
+        self._type_query()
+        keyboard_hook.note_title(self.HWND, self.RESULTS, now=106.0)
+        self.assertEqual(keyboard_hook.typed_language(self.HWND, self.RESULTS, now=5000.0), "hebrew")
+
+    def test_without_enter_nothing_carries(self):
+        """A tab switched by mouse or Ctrl+Tab isn't a page your typing opened."""
+        self._type_query(enter_at=None)
+        keyboard_hook.note_title(self.HWND, self.RESULTS, now=106.0)
+        self.assertIsNone(keyboard_hook.typed_language(self.HWND, self.RESULTS, now=5000.0))
+
+    def test_too_long_after_enter_nothing_carries(self):
+        self._type_query()
+        keyboard_hook.note_title(self.HWND, self.RESULTS,
+                                 now=105.0 + keyboard_hook.PAGE_OPENED_BY_TYPING_SECONDS + 1)
+        self.assertIsNone(keyboard_hook.typed_language(self.HWND, self.RESULTS, now=5000.0))
+
+    def test_a_page_with_its_own_record_keeps_it(self):
+        key = (self.HWND, keyboard_hook._title_key(self.RESULTS))
+        keyboard_hook._typed_languages[key] = collections.deque(["english"] * 3, maxlen=20)
+        self._type_query()
+        keyboard_hook.note_title(self.HWND, self.RESULTS, now=106.0)
+        self.assertEqual(list(keyboard_hook._typed_languages[key]), ["english"] * 3)
+
+    def test_it_carries_once(self):
+        self._type_query()
+        keyboard_hook.note_title(self.HWND, self.RESULTS, now=106.0)
+        keyboard_hook.note_title(self.HWND, "Other - Google Chrome", now=107.0)
+        self.assertIsNone(keyboard_hook.typed_language(self.HWND, "Other - Google Chrome", now=5000.0))
 
 
 class LetterModelTests(unittest.TestCase):

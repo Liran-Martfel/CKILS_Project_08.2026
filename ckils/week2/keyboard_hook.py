@@ -773,6 +773,24 @@ TYPED_MIN_SHARE = 0.6   # the leading language must be at least this share
 _typed_languages = {}
 _typed_lock = threading.Lock()
 
+# Found live 2026-10-23 08:24 (YouTube): Tier 4 switched to English, the user
+# glanced at another window for 4 s, and coming back CKILS switched to the
+# window's long-run majority, Hebrew, over what was typed seconds before.
+# The language of the last word typed here, if that was this recent, wins.
+TYPED_RECENT_SECONDS = 120
+_typed_last = {}  # (hwnd, title) -> (time, language) of the last finished word
+
+# Found live 2026-10-23 07:25: a Hebrew Google search typed in a new tab
+# opened the results page — a new title, so nothing was known about it. Words
+# typed under the previous title in the window, just before an Enter, carry
+# over to the page that Enter opened (only to a page with no record of its
+# own). Language names and times only, memory only.
+PAGE_OPENED_BY_TYPING_SECONDS = 10   # the title must change this soon after Enter
+CARRIED_WORDS_SECONDS = 60           # the words typed this long before Enter
+_recent_typed_words = {}  # hwnd -> deque of (time, title, language)
+_last_enter = {}          # hwnd -> time of the last Enter typed there
+_seen_title = {}          # hwnd -> the title last seen by note_title
+
 # Found live 2026-10-18: WhatsApp's tab title carries an unread counter —
 # "(8) WhatsApp Business" became "(6) ..." while the user stayed in the same
 # chat. Both per-window records ignore that counter and the direction marks
@@ -904,7 +922,11 @@ def _note_typed_word(state, thread_id, title, current_hkl, fired):
             if claimed is not None:
                 _typed_languages[key] = claimed
         words = _typed_languages.setdefault(key, collections.deque(maxlen=TYPED_WORDS_KEPT))
-        words.append("hebrew" if meant_hebrew else "english")
+        language = "hebrew" if meant_hebrew else "english"
+        words.append(language)
+        now = time.time()
+        _typed_last[key] = (now, language)
+        _recent_typed_words.setdefault(hwnd, collections.deque(maxlen=30)).append((now, key[1], language))
         area = focus_area.get(hwnd)
         if area:
             _typed_by_area.setdefault((hwnd, _area_title_key(title), area),
@@ -914,14 +936,53 @@ def _note_typed_word(state, thread_id, title, current_hkl, fired):
     _save_typed_languages()
 
 
-def typed_language(hwnd, title):
-    """The language the user has mostly typed in this window, or None if
-    there's too little typing or no clear leader."""
+def typed_language(hwnd, title, now=None):
+    """The language of the last word typed in this window if that was within
+    TYPED_RECENT_SECONDS; otherwise the language the user has mostly typed
+    here; None if there's too little typing or no clear leader."""
+    now = time.time() if now is None else now
     with _typed_lock:
-        words = list(_typed_languages.get((hwnd, _title_key(title)), ()))
+        key = (hwnd, _title_key(title))
+        last = _typed_last.get(key)
+        if last is not None and now - last[0] < TYPED_RECENT_SECONDS:
+            return last[1]
+        words = list(_typed_languages.get(key, ()))
         if not words and _restored:
             words = list(_restored.get((hwnd, _title_fingerprint(title)), ()))
     return _leader(words)
+
+
+def note_enter(hwnd, now=None):
+    """Enter was typed in this window: a page it opens may inherit the typing."""
+    _last_enter[hwnd] = time.time() if now is None else now
+
+
+def note_title(hwnd, title, now=None):
+    """Called for the focused window on every poll. When its title changes
+    within PAGE_OPENED_BY_TYPING_SECONDS of an Enter, and the new page has no
+    record of its own, the words typed under the previous title just before
+    that Enter become the new page's record. Carried once per Enter."""
+    global _typed_dirty
+    now = time.time() if now is None else now
+    key = _title_key(title)
+    with _typed_lock:
+        previous = _seen_title.get(hwnd)
+        _seen_title[hwnd] = key
+        if previous is None or previous == key:
+            return
+        enter = _last_enter.pop(hwnd, None)
+        if enter is None or now - enter > PAGE_OPENED_BY_TYPING_SECONDS:
+            return
+        if (hwnd, key) in _typed_languages or (hwnd, _title_fingerprint(title)) in _restored:
+            return
+        carried = [(t, language) for t, k, language in _recent_typed_words.get(hwnd, ())
+                   if k == previous and 0 <= enter - t <= CARRIED_WORDS_SECONDS]
+        if not carried:
+            return
+        _typed_languages[(hwnd, key)] = collections.deque(
+            (language for _, language in carried), maxlen=TYPED_WORDS_KEPT)
+        _typed_last[(hwnd, key)] = carried[-1]
+        _typed_dirty = True
 
 
 def forget_closed_windows(is_window):
@@ -929,10 +990,13 @@ def forget_closed_windows(is_window):
     away never does this — only the window actually closing."""
     global _typed_dirty
     with _typed_lock:
-        for record in (_typed_languages, _restored, _typed_by_area):
+        for record in (_typed_languages, _restored, _typed_by_area, _typed_last):
             for key in [k for k in record if not is_window(k[0])]:
                 del record[key]
                 _typed_dirty = True
+        for record in (_recent_typed_words, _last_enter, _seen_title):
+            for hwnd in [h for h in record if not is_window(h)]:
+                del record[hwnd]
     _save_typed_languages()
 
 
@@ -1028,6 +1092,10 @@ def _consumer_loop():
             # process_key_event cancels everything for those.
             if not (ctrl_held or alt_held) and vk_code not in _MODIFIER_ONLY_VKS:
                 _handle_word_end(state, vk_code, shift_pressed, current_hkl, thread_id, exe_name, title)
+                if vk_code == win32con.VK_RETURN:
+                    enter_hwnd = _foreground_hwnd_for(thread_id)
+                    if enter_hwnd is not None:
+                        note_enter(enter_hwnd)
 
             result = process_key_event(vk_code, scan_code, state, current_hkl, ctrl_held, alt_held,
                                        shift_pressed, caps_lock_on)

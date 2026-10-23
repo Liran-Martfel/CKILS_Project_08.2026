@@ -2043,6 +2043,9 @@ def _poll_tick():
         exe_name = psutil.Process(pid).name()
     except Exception:
         return  # window vanished or info unavailable between calls — just skip this tick
+    # A page opened by the user's own Enter (a search, a sent message)
+    # inherits what was typed just before it (found live 2026-10-23 07:25).
+    keyboard_hook.note_title(hwnd, title)
 
     # Real bug found live, 2026-09-17: a manual Alt+Shift switch that doesn't
     # also change focus or title fires no Windows event at all, so this poll
