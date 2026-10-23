@@ -3403,6 +3403,41 @@ not pushed, until the user has tested them.
 
 21 new tests. 313 pass.
 
+**Then a startup crash, found by the user the same evening.** One of the robustness fixes made CKILS
+crash on start, every time (`NameError: _history_of`). Code that runs while rule_engine loads called a
+function defined further down. Only a memory file holding old-style entries reached that line, and the
+user's real one had 63; the test files had none. The function moved up. A new test reads the code
+itself: anything run at import may only call functions already defined. A lesson about checking too: a
+CKILS process seen right after a build was only PyInstaller's small launcher. "Running" now means the
+real program is alive after 30 seconds and writing its log. 2 new tests. 315 pass.
+
+**2026-10-23 — Six problems from two days of testing, each traced in the logs first.** The user kept
+notes with times; every one was found in the decision and skip logs before anything was changed.
+- *Shift words switched to English (20:02, 10:53, 14:42).* The 5-letter words just before each switch
+  matched בSHIFT, לIMAGES and לTRAIN: a Hebrew prefix letter typed straight onto the capitals. Replaying
+  those keys through the real detector gave the exact logged pattern. The prefix letter, typed without
+  Shift, made the word not "all capitals". Up to three prefix letters (ו ה ב כ ל מ ש) may now come first.
+- *Sticky Notes: a whole Hebrew line typed on English, never fixed (07:47).* Sticky Notes is a Store
+  app. Its window belongs to ApplicationFrameHost.exe, but typing goes to the app's own window, on
+  another thread. CKILS read the frame's layout, believed Hebrew, and judged the keys as correct Hebrew.
+  The day before, its switches there had bounced back within 0.7 s and were logged as manual switches.
+  CKILS now reads the hosted app's own thread (`input_window.py`) and switches Store apps with the
+  language hotkey.
+- *File Explorer read as Hebrew in an English folder (07:46).* With Windows in Hebrew, the screen read
+  took Explorer's own column headers ("תאריך שינוי", "גודל") as content, at 0.86-0.90. Explorer is now
+  judged by the file names in its list, without extensions. Its learned memory, built from the headers
+  (46 pages, 30 of them Hebrew), was reset at the user's call, with a backup kept.
+- *YouTube: a fix undone 8 seconds later (08:24).* Tier 4 switched to English. The user glanced at
+  another window, and on return CKILS switched back to the window's long-run Hebrew majority. The last
+  word typed in a window within 2 minutes now decides.
+- *Google AI answer: English after a Hebrew search (07:25).* The search opened a results page with a
+  new title, and nothing was known about it. Words typed just before an Enter now carry over to the page
+  that Enter opened, if that page has no record of its own.
+- *A new Claude chat stayed Hebrew (07:28).* As the user guessed: nothing readable, so CKILS kept the
+  keyboard it came with. The user chose to keep that rule.
+
+20 new tests. 335 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
