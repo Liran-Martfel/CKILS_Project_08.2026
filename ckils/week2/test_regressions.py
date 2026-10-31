@@ -4160,6 +4160,66 @@ class PageOpenedByTypingTests(unittest.TestCase):
         self.assertIsNone(keyboard_hook.typed_language(self.HWND, "Other - Google Chrome", now=5000.0))
 
 
+class FocusedBoxBeatsOldTypingTests(unittest.TestCase):
+    """Found live 2026-10-29 16:10 in WhatsApp: the message box the user
+    clicked was read as English at 0.94, but the window's older typing
+    (mostly Hebrew) blocked it, and the user had to switch by hand. A
+    confident read (0.9+) of the box itself now wins — unless the user
+    typed the other language there in the last 2 minutes."""
+
+    HWND, THREAD, TITLE = 888, 8888, "WhatsApp Business - Google Chrome"
+
+    def setUp(self):
+        for d in (rule_engine.last_set, rule_engine.content_decision, rule_engine.content_confidence,
+                  rule_engine.last_switch_time):
+            d.pop(self.THREAD, None)
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.tier4_corrected.discard(self.THREAD)
+
+    tearDown = setUp
+
+    def _apply(self, source, confidence, typed_recent=False):
+        reason = {"source": source, "confidence": confidence, "text": "Hi, sir. I would like to raise a concern"}
+        with patch.object(rule_engine, "decide_with_content", return_value=(rule_engine.English_HKL, reason)), \
+             patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
+             patch.object(rule_engine.win32gui, "GetWindowText", return_value=self.TITLE), \
+             patch.object(keyboard_hook, "typed_language", return_value="hebrew"), \
+             patch.object(keyboard_hook, "typed_language_is_recent", return_value=typed_recent), \
+             patch.object(keyboard_hook, "typed_recently", return_value=False), \
+             patch.object(rule_engine.win32api, "PostMessage") as post, \
+             patch.object(rule_engine.decision_logger, "log_auto_change"), \
+             patch.object(rule_engine.skip_logger, "log_skip") as skip:
+            applied = rule_engine.apply_content_correction(
+                self.HWND, self.THREAD, "chrome.exe", rule_engine.Hebrew_HKL, self.TITLE)
+        return applied, post, skip
+
+    def test_a_confident_read_of_the_box_beats_older_typing(self):
+        applied, post, _ = self._apply("accessible_text", 0.94)
+        self.assertTrue(applied)
+        post.assert_called_once()
+
+    def test_a_weaker_or_screen_read_still_respects_the_typing(self):
+        for source, confidence in (("accessible_text", 0.85), ("ocr", 0.97)):
+            self.setUp()
+            applied, post, skip = self._apply(source, confidence)
+            self.assertFalse(applied, (source, confidence))
+            self.assertEqual(skip.call_args.args[3], skip_logger.REASON_TYPED_RESPECTED)
+
+    def test_typing_in_the_last_two_minutes_still_wins(self):
+        applied, _, skip = self._apply("accessible_text", 0.94, typed_recent=True)
+        self.assertFalse(applied)
+        self.assertEqual(skip.call_args.args[3], skip_logger.REASON_TYPED_RESPECTED)
+
+    def test_recent_means_the_last_word_was_typed_in_the_last_two_minutes(self):
+        keyboard_hook._typed_last[(1, "T")] = (1000.0, "hebrew")
+        try:
+            self.assertTrue(keyboard_hook.typed_language_is_recent(1, "T", now=1060.0))
+            self.assertFalse(keyboard_hook.typed_language_is_recent(1, "T", now=1000.0 + 121))
+            self.assertFalse(keyboard_hook.typed_language_is_recent(2, "T", now=1001.0))
+        finally:
+            keyboard_hook._typed_last.pop((1, "T"), None)
+
+
 class ShortWordLetterModelTests(unittest.TestCase):
     """Found live 2026-10-26 12:42 (VS Code) and 2026-10-29 14:32 (PyCharm):
     the letter model switched to Hebrew by itself on a 3-letter code word,

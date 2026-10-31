@@ -1688,6 +1688,9 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
         ).start()
 
 
+FOCUSED_BOX_CONFIDENCE = 0.9
+
+
 def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
     """Runs Tier 3 (decide_with_content) in the calling thread and, if it
     confidently disagrees with fallback_hkl, applies the correction — but
@@ -1753,7 +1756,14 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
                                  f"{new_confidence:.2f} < {earlier_confidence:.2f}")
             return False
         typed_hkl = LANGUAGE_NAME_TO_HKL.get(keyboard_hook.typed_language(hwnd, title))
-        if typed_hkl is not None and typed_hkl != corrected_hkl:
+        # Found live 2026-10-29 16:10 in WhatsApp: the message box the user
+        # clicked read as English at 0.94, yet the window's older (Hebrew)
+        # typing blocked it. A confident read of the focused box itself wins
+        # over typing history — not over typing from the last 2 minutes.
+        focused_box_read = ((reason or {}).get("source") == "accessible_text"
+                            and (new_confidence or 0) >= FOCUSED_BOX_CONFIDENCE
+                            and not keyboard_hook.typed_language_is_recent(hwnd, title))
+        if typed_hkl is not None and typed_hkl != corrected_hkl and not focused_box_read:
             # What the user typed here outranks a screen read (2026-10-17).
             if DEBUG:
                 print(f"  [content] {exe_name}: you've mostly typed the other language here, leaving it alone ({elapsed_ms:.0f} ms)")

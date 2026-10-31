@@ -958,6 +958,14 @@ def typed_language(hwnd, title, now=None):
     return _leader(words)
 
 
+def typed_language_is_recent(hwnd, title, now=None):
+    """True if a word was typed in this window within TYPED_RECENT_SECONDS."""
+    now = time.time() if now is None else now
+    with _typed_lock:
+        last = _typed_last.get((hwnd, _title_key(title)))
+    return last is not None and now - last[0] < TYPED_RECENT_SECONDS
+
+
 def note_enter(hwnd, now=None):
     """Enter was typed in this window: a page it opens may inherit the typing."""
     _last_enter[hwnd] = time.time() if now is None else now
