@@ -1253,6 +1253,7 @@ class SkipWiringTests(unittest.TestCase):
 
     def _run(self, control, read_text="", foreground_matches=True, title="Some Page - Google Chrome"):
         """Runs decide_with_content on fakes and returns (result, reasons logged)."""
+        rule_engine._last_read.clear()  # each call is a fresh read, not a tab switch
         hwnd = 12345
         fg = hwnd if foreground_matches else 99999
         with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=fg), \
@@ -4158,6 +4159,60 @@ class PageOpenedByTypingTests(unittest.TestCase):
         keyboard_hook.note_title(self.HWND, self.RESULTS, now=106.0)
         keyboard_hook.note_title(self.HWND, "Other - Google Chrome", now=107.0)
         self.assertIsNone(keyboard_hook.typed_language(self.HWND, "Other - Google Chrome", now=5000.0))
+
+
+class PreviousTabReadTests(unittest.TestCase):
+    """Found live 2026-10-29 16:22 and 16:24: right after a tab switch, the
+    read caught the PREVIOUS tab's screen before Chrome repainted — LinkedIn
+    got drushim's Hebrew text word for word, AllJobs got LinkedIn's. A read
+    identical to the last read of another tab in the same window, within
+    STALE_READ_SECONDS, is thrown away."""
+
+    HWND = 2468
+    TEXT = "משרת טכנאי ציוד בחיפה, משרה מלאה, ניסיון של שנתיים לפחות"
+
+    def setUp(self):
+        rule_engine._last_read.clear()
+
+    tearDown = setUp
+
+    def _read(self, title, text, now):
+        control = _FakeControl(rect=_FakeRect(100, 100, 900, 700), name=text)
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
+             patch.object(rule_engine.auto, "GetFocusedControl", return_value=control), \
+             patch.object(rule_engine, "_is_file_explorer", return_value=False), \
+             patch.object(rule_engine.interface_text, "is_interface_text", return_value=False), \
+             patch.object(rule_engine.interface_text, "record"), \
+             patch.object(rule_engine.time, "time", return_value=now), \
+             patch.object(rule_engine.skip_logger, "log_skip") as skip:
+            hkl, reason = rule_engine.decide_with_content(self.HWND, None, title, "chrome.exe", thread_id=1)
+        return hkl, reason, skip
+
+    def test_the_previous_tabs_text_on_a_new_tab_is_thrown_away(self):
+        self.assertEqual(self._read("משרות | דרושים - Google Chrome", self.TEXT, 1000.0)[0], rule_engine.Hebrew_HKL)
+        hkl, reason, skip = self._read("Technician | LinkedIn - Google Chrome", self.TEXT, 1008.6)
+        self.assertIsNone(hkl)
+        self.assertIsNone(reason)
+        self.assertEqual(skip.call_args.args[3], skip_logger.REASON_STALE_DISCARDED)
+        # still the old picture a moment later: still thrown away
+        self.assertIsNone(self._read("Technician | LinkedIn - Google Chrome", self.TEXT, 1010.0)[0])
+
+    def test_the_new_tabs_own_text_is_used(self):
+        self._read("משרות | דרושים - Google Chrome", self.TEXT, 1000.0)
+        hkl, _, _ = self._read("Technician | LinkedIn - Google Chrome",
+                               "Semiconductor Equipment Technician, full time role in Haifa", 1010.0)
+        self.assertEqual(hkl, rule_engine.English_HKL)
+
+    def test_the_same_text_long_after_or_on_the_same_tab_is_fine(self):
+        self._read("משרות | דרושים - Google Chrome", self.TEXT, 1000.0)
+        self.assertEqual(self._read("Other | דרושים - Google Chrome", self.TEXT,
+                                    1000.0 + rule_engine.STALE_READ_SECONDS + 1)[0], rule_engine.Hebrew_HKL)
+        self.assertEqual(self._read("Other | דרושים - Google Chrome", self.TEXT, 1100.0)[0], rule_engine.Hebrew_HKL)
+
+    def test_an_unread_counter_change_is_the_same_tab(self):
+        self._read("(2) WhatsApp Business - Google Chrome", self.TEXT, 1000.0)
+        self.assertEqual(self._read("(1) WhatsApp Business - Google Chrome", self.TEXT, 1005.0)[0],
+                         rule_engine.Hebrew_HKL)
 
 
 class FocusedBoxBeatsOldTypingTests(unittest.TestCase):

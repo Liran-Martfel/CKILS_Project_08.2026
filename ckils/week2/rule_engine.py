@@ -1067,6 +1067,10 @@ def _explorer_file_names(hwnd):
         return ""
 
 
+STALE_READ_SECONDS = 30
+_last_read = {}  # hwnd -> (title key, text, time) of the last read used for that window
+
+
 def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     """
     Falls back to fallback_hkl (Tier 1/2's answer, possibly None) on an empty
@@ -1182,6 +1186,24 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
             print("  [content] empty field, nothing to read")
         skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_EMPTY_FIELD, source)
         return fallback_hkl, None
+
+    # Found live 2026-10-29 16:22 and 16:24: right after a tab switch the read
+    # caught the PREVIOUS tab's screen before Chrome repainted (LinkedIn got
+    # drushim's text word for word, AllJobs got LinkedIn's), and the weaker-
+    # read rule then kept that wrong answer. The same text as the last read of
+    # another tab in this window, that recently, is the old picture: thrown
+    # away, and not remembered as this tab's.
+    now = time.time()
+    previous_read = _last_read.get(hwnd)
+    if (source != "google_docs_title" and previous_read is not None
+            and previous_read[0] != _window_title_key(title) and previous_read[1] == text
+            and now - previous_read[2] < STALE_READ_SECONDS):
+        if DEBUG:
+            print(f"  [content] same text as the previous tab — the screen hasn't caught up, discarding")
+        skip_logger.log_skip(exe_name, title, thread_id, skip_logger.REASON_STALE_DISCARDED,
+                             "same text as the previous tab")
+        return fallback_hkl, None
+    _last_read[hwnd] = (_window_title_key(title), text, now)
 
     stripped_text = _strip_message_metadata(text)
     stripped_text = _strip_calendar_metadata(stripped_text)
