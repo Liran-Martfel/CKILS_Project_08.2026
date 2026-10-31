@@ -4160,6 +4160,34 @@ class PageOpenedByTypingTests(unittest.TestCase):
         self.assertIsNone(keyboard_hook.typed_language(self.HWND, "Other - Google Chrome", now=5000.0))
 
 
+class ShortWordLetterModelTests(unittest.TestCase):
+    """Found live 2026-10-26 12:42 (VS Code) and 2026-10-29 14:32 (PyCharm):
+    the letter model switched to Hebrew by itself on a 3-letter code word,
+    and switched back a moment later. A 3-letter word now only marks; a
+    second suspicious word (the second-word rule) is needed to switch."""
+
+    def _check(self, keys):
+        orig = (keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE)
+        keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE = rule_engine.English_HKL, rule_engine.Hebrew_HKL
+        try:
+            state = keyboard_hook._PerThreadState()
+            for vk in keys:
+                keyboard_hook.process_key_event(vk, 0, state, rule_engine.English_HKL, False, False)
+            with patch.object(keyboard_hook.letter_model, "other_reading_margin", return_value=5.0), \
+                 patch.object(keyboard_hook, "_letter_model_disabled", return_value=False):
+                return keyboard_hook.letter_model_check(state, rule_engine.English_HKL)
+        finally:
+            keyboard_hook.ENGLISH_HKL_VALUE, keyboard_hook.HEBREW_HKL_VALUE = orig
+
+    def test_a_three_letter_word_only_marks(self):
+        result = self._check([0x50, 0x4E, 0x54])        # "pnt"
+        self.assertIsNotNone(result)
+        self.assertFalse(result["switch"])
+
+    def test_a_four_letter_word_can_still_switch_alone(self):
+        self.assertTrue(self._check([0x50, 0x4E, 0x54, 0x4B])["switch"])
+
+
 class LetterModelTests(unittest.TestCase):
     """The letter model (2026-10-15): compares how typical the English and
     Hebrew readings of the same keys are. Built from public word lists only.
@@ -4247,8 +4275,9 @@ class LetterModelTests(unittest.TestCase):
 
     def test_a_word_ending_in_w_on_the_hebrew_layout_is_judged_whole(self):
         """"few" on Hebrew is כק plus an apostrophe — the W key is a letter
-        in the English reading and must stay in it."""
-        self._run([0x46, 0x45, 0x57, 0x20])
+        in the English reading and must stay in it. Since 2026-10-31 a 3-letter
+        word only marks; the next English word ("you") then switches."""
+        self._run([0x46, 0x45, 0x57, 0x20, 0x59, 0x4F, 0x55, 0x20])
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.calls[0][5], rule_engine.English_HKL)
 

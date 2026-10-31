@@ -736,7 +736,13 @@ def letter_model_check(state, current_hkl):
     if margin is None or margin <= letter_model.MARK_THRESHOLD or _letter_model_disabled():
         return None
     return {"current_language": typed, "other_language": "hebrew" if typed == "english" else "english",
-            "length": len(state.word_keys), "switch": margin > letter_model.SWITCH_THRESHOLD}
+            "length": len(state.word_keys),
+            # A 3-letter word only marks (found live 2026-10-26 VS Code, 2026-10-29
+            # PyCharm: short code names switched to Hebrew on the model alone).
+            "switch": margin > letter_model.SWITCH_THRESHOLD and typed_length >= MIN_LETTERS_TO_SWITCH_ALONE}
+
+
+MIN_LETTERS_TO_SWITCH_ALONE = 4
 
 
 def _autocorrect_enabled():
