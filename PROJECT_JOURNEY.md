@@ -3438,6 +3438,25 @@ notes with times; every one was found in the decision and skip logs before anyth
 
 20 new tests. 335 pass.
 
+**2026-10-31 — Five more notes from a week of testing; one was a bug from the last round.** The user
+asked whether GitHub held the latest version, ready to submit. It didn't: the last week's work was only
+in local commits, held back for testing. The new notes were traced first.
+- *Sticky Notes: the keyboard flipped mid-sentence (26.10 12:45).* This was last round's own change.
+  Store apps are now switched with Alt+Shift, a toggle. Arriving pressed it, and 0.3 s later the
+  typing-area watcher, still seeing the old layout, pressed it again; the two presses cancelled out.
+  Every press is now recorded per window, and nothing presses there again for 1.5 s.
+- *PyCharm and VS Code: Hebrew while writing code (29.10 14:33, 26.10 12:42).* The letter model switched
+  by itself on a 3-letter code name. A 3-letter word now only marks; a second suspicious word is needed.
+- *WhatsApp: the English message box was ignored (29.10 16:10).* It was read at 0.94, but the window's
+  older Hebrew typing blocked it. A 0.9+ read of the focused box now beats typing history, but not
+  typing from the last 2 minutes.
+- *LinkedIn and AllJobs: the wrong language on arrival (29.10 16:23, 16:25).* The first read after a tab
+  switch caught the previous tab's screen before Chrome repainted: LinkedIn got drushim's Hebrew text
+  word for word, AllJobs got LinkedIn's. The weaker-read rule then kept that wrong answer. A read
+  identical to another tab's last read in the same window, within 30 seconds, is now thrown away.
+
+13 new tests, 1 updated (a lone 3-letter word like "few" on Hebrew now waits for the next word). 348 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
