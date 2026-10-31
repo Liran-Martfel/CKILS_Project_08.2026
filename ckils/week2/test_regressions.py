@@ -3742,7 +3742,8 @@ class BrowserUiHotkeyTests(unittest.TestCase):
     HWND, THREAD = 559, 8084
 
     def setUp(self):
-        for d in (rule_engine.last_set, rule_engine.last_switch_time, rule_engine.content_decision):
+        for d in (rule_engine.last_set, rule_engine.last_switch_time, rule_engine.content_decision,
+                  rule_engine._hotkey_pressed):
             d.pop(self.THREAD, None)
         rule_engine.overridden.discard(self.THREAD)
         rule_engine.tier4_corrected.discard(self.THREAD)
@@ -4009,6 +4010,53 @@ class StoreAppTests(unittest.TestCase):
                 self.assertEqual(rule_engine._post_switch(self.FRAME, 77, rule_engine.Hebrew_HKL), "none")
             self.assertEqual(press.call_count, 1)
             post.assert_not_called()
+
+    def test_no_second_press_while_the_first_is_settling(self):
+        """Found live 2026-10-26 12:46 in Sticky Notes: arriving pressed
+        Alt+Shift, and 0.3 s later the typing-area watcher — still seeing
+        the old layout — pressed it again. Two toggles cancel out."""
+        rule_engine._hotkey_pressed.clear()
+        rule_engine._hotkey_pressed[77] = time.time()
+        with patch.object(rule_engine.input_window, "is_store_frame", return_value=True), \
+             patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=rule_engine.English_HKL), \
+             patch.object(rule_engine, "_press_language_hotkey") as press, \
+             patch.object(rule_engine.win32api, "PostMessage") as post:
+            # a different target, too: any press within the settle time waits
+            self.assertEqual(rule_engine._post_switch(self.FRAME, 77, rule_engine.Hebrew_HKL), "none")
+        press.assert_not_called()
+        post.assert_not_called()
+        self.assertTrue(rule_engine._hotkey_settling(77))
+        rule_engine._hotkey_pressed[77] = time.time() - rule_engine.HOTKEY_SETTLE_SECONDS - 0.1
+        self.assertFalse(rule_engine._hotkey_settling(77))
+
+    def test_every_press_is_recorded_for_its_window(self):
+        rule_engine._hotkey_pressed.clear()
+        with patch.object(rule_engine.input_window, "is_store_frame", return_value=True), \
+             patch.object(rule_engine, "_language_hotkey_modifier", return_value=0x12), \
+             patch.object(rule_engine.win32api, "GetKeyboardLayoutList", return_value=[1, 2]), \
+             patch.object(rule_engine, "_press_language_hotkey"):
+            rule_engine._switch_by_hotkey("ApplicationFrameHost.exe", self.FRAME, thread_id=77)
+        self.assertTrue(rule_engine._hotkey_settling(77))
+
+    def test_the_area_watcher_waits_while_a_press_settles(self):
+        rule_engine._hotkey_pressed.clear()
+        rule_engine._hotkey_pressed[77] = time.time()
+        rule_engine.last_area.clear()
+        control = unittest.mock.MagicMock(ControlTypeName="EditControl", ClassName="RichEditBox")
+        with patch.object(keyboard_hook, "active", return_value=True), \
+             patch.object(keyboard_hook, "_autocorrect_enabled", return_value=True), \
+             patch.object(keyboard_hook, "typed_language_in_area", return_value="hebrew"), \
+             patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=rule_engine.English_HKL), \
+             patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.FRAME), \
+             patch.object(keyboard_hook, "typed_recently", return_value=False), \
+             patch.object(rule_engine.decision_logger, "log_auto_change"), \
+             patch.object(rule_engine, "_switch_by_hotkey", return_value=True) as hotkey, \
+             patch.object(rule_engine.win32api, "PostMessage") as post:
+            rule_engine.overridden.discard(77)
+            rule_engine.last_area[self.FRAME] = "EditControl:Other"
+            self.assertIsNone(rule_engine.check_typing_area(self.FRAME, 77, "ApplicationFrameHost.exe", "t", control))
+        hotkey.assert_not_called()
+        post.assert_not_called()
 
     def test_an_ordinary_window_still_gets_the_message(self):
         with patch.object(rule_engine.input_window, "is_store_frame", return_value=False), \
