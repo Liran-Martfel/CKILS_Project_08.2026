@@ -4017,18 +4017,20 @@ class StoreAppTests(unittest.TestCase):
         Alt+Shift, and 0.3 s later the typing-area watcher — still seeing
         the old layout — pressed it again. Two toggles cancel out."""
         rule_engine._hotkey_pressed.clear()
-        rule_engine._hotkey_pressed[77] = time.time()
+        # pressed toward Hebrew a moment ago; the layout still shows English
+        rule_engine._hotkey_pressed[77] = (time.time(), rule_engine.Hebrew_HKL)
         with patch.object(rule_engine.input_window, "is_store_frame", return_value=True), \
              patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=rule_engine.English_HKL), \
              patch.object(rule_engine, "_press_language_hotkey") as press, \
              patch.object(rule_engine.win32api, "PostMessage") as post:
-            # a different target, too: any press within the settle time waits
             self.assertEqual(rule_engine._post_switch(self.FRAME, 77, rule_engine.Hebrew_HKL), "none")
         press.assert_not_called()
         post.assert_not_called()
-        self.assertTrue(rule_engine._hotkey_settling(77))
-        rule_engine._hotkey_pressed[77] = time.time() - rule_engine.HOTKEY_SETTLE_SECONDS - 0.1
-        self.assertFalse(rule_engine._hotkey_settling(77))
+        self.assertTrue(rule_engine._hotkey_pending(77, layout=rule_engine.English_HKL))
+        self.assertFalse(rule_engine._hotkey_pending(77, layout=rule_engine.Hebrew_HKL))  # it shows now
+        rule_engine._hotkey_pressed[77] = (time.time() - rule_engine.HOTKEY_SETTLE_SECONDS - 0.1,
+                                           rule_engine.Hebrew_HKL)
+        self.assertFalse(rule_engine._hotkey_pending(77, layout=rule_engine.English_HKL))
 
     def test_every_press_is_recorded_for_its_window(self):
         rule_engine._hotkey_pressed.clear()
@@ -4036,12 +4038,14 @@ class StoreAppTests(unittest.TestCase):
              patch.object(rule_engine, "_language_hotkey_modifier", return_value=0x12), \
              patch.object(rule_engine.win32api, "GetKeyboardLayoutList", return_value=[1, 2]), \
              patch.object(rule_engine, "_press_language_hotkey"):
-            rule_engine._switch_by_hotkey("ApplicationFrameHost.exe", self.FRAME, thread_id=77)
-        self.assertTrue(rule_engine._hotkey_settling(77))
+            rule_engine._switch_by_hotkey("ApplicationFrameHost.exe", self.FRAME, thread_id=77,
+                                          target_hkl=rule_engine.Hebrew_HKL)
+        self.assertEqual(rule_engine._hotkey_pressed[77][1], rule_engine.Hebrew_HKL)
+        self.assertTrue(rule_engine._hotkey_pending(77, layout=rule_engine.English_HKL))
 
     def test_the_area_watcher_waits_while_a_press_settles(self):
         rule_engine._hotkey_pressed.clear()
-        rule_engine._hotkey_pressed[77] = time.time()
+        rule_engine._hotkey_pressed[77] = (time.time(), rule_engine.Hebrew_HKL)
         rule_engine.last_area.clear()
         control = unittest.mock.MagicMock(ControlTypeName="EditControl", ClassName="RichEditBox")
         with patch.object(keyboard_hook, "active", return_value=True), \
@@ -4159,6 +4163,42 @@ class PageOpenedByTypingTests(unittest.TestCase):
         keyboard_hook.note_title(self.HWND, self.RESULTS, now=106.0)
         keyboard_hook.note_title(self.HWND, "Other - Google Chrome", now=107.0)
         self.assertIsNone(keyboard_hook.typed_language(self.HWND, "Other - Google Chrome", now=5000.0))
+
+
+class HotkeyCorrectionAfterSettleTests(unittest.TestCase):
+    """Found live 2026-11-01 22:06 (Google's answer box): a typo made Tier 4
+    switch to English by mistake; 1.3 s later "מילואים" typed on English was
+    a clear switch back, but the 1.5 s settle guard blocked it, so a second
+    word came out wrong. The guard now only waits while the layout hasn't
+    shown the last press yet — once it has, a new press is a real correction."""
+
+    HWND, THREAD = 777, 4243
+
+    def setUp(self):
+        for d in (rule_engine.last_set, rule_engine.last_switch_time, rule_engine.content_decision,
+                  rule_engine._hotkey_pressed):
+            d.pop(self.THREAD, None)
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.tier4_corrected.discard(self.THREAD)
+
+    tearDown = setUp
+
+    def _correct(self, layout_now):
+        rule_engine._hotkey_pressed[self.THREAD] = (time.time() - 1.3, rule_engine.English_HKL)
+        with patch.object(rule_engine.win32api, "GetKeyboardLayoutList", return_value=[1, 2]),              patch.object(rule_engine, "_language_hotkey_modifier", return_value=rule_engine.win32con.VK_MENU),              patch.object(rule_engine.win32api, "GetKeyboardLayout", return_value=layout_now),              patch.object(rule_engine, "_press_language_hotkey") as press,              patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND),              patch.object(rule_engine.win32api, "PostMessage"),              patch.object(rule_engine.decision_logger, "log_auto_change"),              patch.object(rule_engine.skip_logger, "log_skip"):
+            applied = rule_engine.apply_tier4_correction(self.HWND, self.THREAD, "chrome.exe", "Page",
+                                                         rule_engine.English_HKL, rule_engine.Hebrew_HKL, 7)
+        return applied, press
+
+    def test_once_the_layout_shows_the_press_a_correction_goes_through(self):
+        applied, press = self._correct(layout_now=rule_engine.English_HKL)
+        self.assertTrue(applied)
+        press.assert_called_once()
+
+    def test_while_the_layout_hasnt_shown_the_press_it_waits(self):
+        applied, press = self._correct(layout_now=rule_engine.Hebrew_HKL - 1)  # still the old, a third value
+        self.assertFalse(applied)
+        press.assert_not_called()
 
 
 class PreviousTabReadTests(unittest.TestCase):

@@ -1887,14 +1887,29 @@ def _press_language_hotkey(modifier):
 # press. Found live 2026-10-26 12:46 in Sticky Notes: arriving pressed it,
 # and 0.3 s later the typing-area watcher, still seeing the old layout,
 # pressed it again — the two presses cancelled out. Every press is recorded
-# per window, and nothing presses again there until it has settled.
+# per window with its target, and nothing presses again there while the
+# layout hasn't shown it yet. Only then (found live 2026-11-01 22:06: a
+# flat 1.5 s wait blocked a correct switch back after a mistaken one,
+# though the layout already showed the first press).
 HOTKEY_SETTLE_SECONDS = 1.5
-_hotkey_pressed = {}  # thread -> time of the last language-hotkey press for that window
+_hotkey_pressed = {}  # thread -> (time, target) of the last language-hotkey press for that window
 
 
-def _hotkey_settling(thread_id):
-    """True while a hotkey press for this window may not show in its layout yet."""
-    return time.time() - _hotkey_pressed.get(thread_id, 0.0) < HOTKEY_SETTLE_SECONDS
+def _hotkey_pending(thread_id, layout=None):
+    """True while the last hotkey press for this window may not show in its
+    layout yet: made under HOTKEY_SETTLE_SECONDS ago, and the layout isn't
+    its target."""
+    pressed = _hotkey_pressed.get(thread_id)
+    if pressed is None or time.time() - pressed[0] >= HOTKEY_SETTLE_SECONDS:
+        return False
+    if pressed[1] is None:
+        return True
+    if layout is None:
+        try:
+            layout = win32api.GetKeyboardLayout(thread_id)
+        except Exception:
+            return True
+    return layout != pressed[1]
 
 
 def _post_switch(hwnd, thread_id, target_hkl):
@@ -1911,15 +1926,15 @@ def _post_switch(hwnd, thread_id, target_hkl):
                 return "none"
         except Exception:
             pass
-        if _hotkey_settling(thread_id):
+        if _hotkey_pending(thread_id):
             return "none"
-        if _switch_by_hotkey("", hwnd, thread_id):
+        if _switch_by_hotkey("", hwnd, thread_id, target_hkl):
             return "hotkey"
     win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
     return "message"
 
 
-def _switch_by_hotkey(exe_name, hwnd=None, thread_id=None):
+def _switch_by_hotkey(exe_name, hwnd=None, thread_id=None, target_hkl=None):
     """Switches by the hotkey if it's safe here; returns True if it did.
     Chrome/Edge (their text fields keep their own typing layer), and Store
     apps, whose frame never passes a posted request on to the app (found
@@ -1936,7 +1951,7 @@ def _switch_by_hotkey(exe_name, hwnd=None, thread_id=None):
         return False
     _press_language_hotkey(modifier)
     if thread_id is not None:
-        _hotkey_pressed[thread_id] = time.time()
+        _hotkey_pressed[thread_id] = (time.time(), target_hkl)
     return True
 
 
@@ -1988,7 +2003,7 @@ def check_typing_area(hwnd, thread_id, exe_name, title, control):
         return None
     if keyboard_hook.typed_recently(thread_id, title, AREA_TYPING_HOLD_SECONDS):
         return None  # mid-typing: the typing safety net handles it
-    if _hotkey_settling(thread_id):
+    if _hotkey_pending(thread_id):
         return None  # the layout read below may not show a press made a moment ago
     actual_hkl = win32api.GetKeyboardLayout(thread_id)
     if actual_hkl == target_hkl:
@@ -1996,7 +2011,7 @@ def check_typing_area(hwnd, thread_id, exe_name, title, control):
         return None
     if win32gui.GetForegroundWindow() != hwnd:
         return None
-    by_hotkey = _switch_by_hotkey(exe_name, hwnd, thread_id)
+    by_hotkey = _switch_by_hotkey(exe_name, hwnd, thread_id, target_hkl)
     if not by_hotkey:
         win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
     last_set[thread_id] = target_hkl
@@ -2092,9 +2107,9 @@ def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hk
         pass
     if last_set.get(thread_id) == target_hkl and time.time() - last_switch_time.get(thread_id, 0) < 1.0:
         return False
-    if _hotkey_settling(thread_id):
-        return False  # a toggle pressed a moment ago may not show yet: a second press could undo it
-    by_hotkey = _switch_by_hotkey(exe_name, hwnd, thread_id)
+    if _hotkey_pending(thread_id):
+        return False  # a toggle pressed a moment ago doesn't show yet: a second press could undo it
+    by_hotkey = _switch_by_hotkey(exe_name, hwnd, thread_id, target_hkl)
     if not by_hotkey:
         win32api.PostMessage(hwnd, win32con.WM_INPUTLANGCHANGEREQUEST, 0, target_hkl)
     last_set[thread_id] = target_hkl

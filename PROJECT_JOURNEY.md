@@ -3457,6 +3457,14 @@ in local commits, held back for testing. The new notes were traced first.
 
 13 new tests, 1 updated (a lone 3-letter word like "few" on Hebrew now waits for the next word). 348 pass.
 
+**2026-11-01 — The new guard blocked a correct switch back.** In Google's answer box a typo (a Hebrew
+word ending in a regular מ) made Tier 4 switch to English by mistake. 1.3 s later "מילואים", typed on
+English, was a clear switch back, but the 1.5 s hotkey guard added the day before blocked it, so one
+more word came out wrong before "למי" got through. The first idea ("undo your own switch at once") was
+dropped when a replay showed the switch back had already been decided; the guard was the cause. It now
+waits only while the layout hasn't shown the last press yet (each press is recorded with its target).
+Once it has, a new press is a real correction. 2 new tests. 350 pass.
+
 ---
 
 ## Future ideas (not yet implemented)
