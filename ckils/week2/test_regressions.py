@@ -4216,17 +4216,30 @@ class PreviousTabReadTests(unittest.TestCase):
 
     tearDown = setUp
 
-    def _read(self, title, text, now):
-        control = _FakeControl(rect=_FakeRect(100, 100, 900, 700), name=text)
+    def _read(self, title, text, now, exe="chrome.exe", picture=True):
+        # A screen picture (OCR) by default — the only kind that can lag behind
+        control = _FakeControl(rect=_FakeRect(100, 100, 900, 700), name="" if picture else text)
         with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
              patch.object(rule_engine.auto, "GetFocusedControl", return_value=control), \
              patch.object(rule_engine, "_is_file_explorer", return_value=False), \
+             patch.object(rule_engine, "read_region", return_value=text), \
              patch.object(rule_engine.interface_text, "is_interface_text", return_value=False), \
              patch.object(rule_engine.interface_text, "record"), \
              patch.object(rule_engine.time, "time", return_value=now), \
              patch.object(rule_engine.skip_logger, "log_skip") as skip:
-            hkl, reason = rule_engine.decide_with_content(self.HWND, None, title, "chrome.exe", thread_id=1)
+            hkl, reason = rule_engine.decide_with_content(self.HWND, None, title, exe, thread_id=1)
         return hkl, reason, skip
+
+    def test_only_a_browser_screen_picture_can_be_the_previous_tabs(self):
+        """2026-11-02: the rule also threw away good reads in PyCharm, Zoom and
+        WhatsApp, where the same text under two titles is simply true."""
+        self._read("OOP – rectangle.py", self.TEXT, 1000.0, exe="pycharm64.exe")
+        self.assertEqual(self._read("OOP – square.py", self.TEXT, 1005.0, exe="pycharm64.exe")[0],
+                         rule_engine.Hebrew_HKL)
+        rule_engine._last_read.clear()
+        self._read("משרות | דרושים - Google Chrome", self.TEXT, 1000.0, picture=False)
+        self.assertEqual(self._read("Technician | LinkedIn - Google Chrome", self.TEXT, 1005.0, picture=False)[0],
+                         rule_engine.Hebrew_HKL)
 
     def test_the_previous_tabs_text_on_a_new_tab_is_thrown_away(self):
         self.assertEqual(self._read("משרות | דרושים - Google Chrome", self.TEXT, 1000.0)[0], rule_engine.Hebrew_HKL)
@@ -4253,6 +4266,155 @@ class PreviousTabReadTests(unittest.TestCase):
         self._read("(2) WhatsApp Business - Google Chrome", self.TEXT, 1000.0)
         self.assertEqual(self._read("(1) WhatsApp Business - Google Chrome", self.TEXT, 1005.0)[0],
                          rule_engine.Hebrew_HKL)
+
+
+class BoxOverPictureTests(unittest.TestCase):
+    """Found live 2026-11-02 07:43 on Intel's English job form: a screen
+    picture caught Chrome's translate bubble (Hebrew, 0.98), and the English
+    fields read after it closed ("School or University", 0.82) were blocked
+    as weaker reads. A read of the box itself at 0.8+ beats an earlier
+    picture; it still can't beat an earlier read of a box."""
+
+    HWND, THREAD, TITLE = 889, 8889, "Software Development student - Google Chrome"
+
+    def setUp(self):
+        for d in (rule_engine.last_set, rule_engine.content_decision, rule_engine.content_confidence,
+                  rule_engine.content_source, rule_engine.last_switch_time):
+            d.pop(self.THREAD, None)
+        rule_engine.overridden.discard(self.THREAD)
+        rule_engine.tier4_corrected.discard(self.THREAD)
+
+    tearDown = setUp
+
+    def _apply(self, earlier_source, confidence):
+        rule_engine.content_decision[self.THREAD] = rule_engine.Hebrew_HKL
+        rule_engine.content_confidence[self.THREAD] = 0.98
+        rule_engine.content_source[self.THREAD] = earlier_source
+        reason = {"source": "accessible_text", "confidence": confidence, "text": "School or University"}
+        with patch.object(rule_engine, "decide_with_content", return_value=(rule_engine.English_HKL, reason)), \
+             patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=self.HWND), \
+             patch.object(rule_engine.win32gui, "GetWindowText", return_value=self.TITLE), \
+             patch.object(keyboard_hook, "typed_language", return_value=None), \
+             patch.object(keyboard_hook, "typed_recently", return_value=False), \
+             patch.object(rule_engine, "_post_switch") as post, \
+             patch.object(rule_engine.decision_logger, "log_auto_change"), \
+             patch.object(rule_engine, "save_learned_default"), \
+             patch.object(rule_engine, "save_page_learned_default"), \
+             patch.object(rule_engine.skip_logger, "log_skip") as skip:
+            applied = rule_engine.apply_content_correction(
+                self.HWND, self.THREAD, "chrome.exe", rule_engine.Hebrew_HKL, self.TITLE)
+        return applied, post, skip
+
+    def test_a_confident_box_read_beats_an_earlier_picture(self):
+        applied, post, _ = self._apply("ocr", 0.82)
+        self.assertTrue(applied)
+        post.assert_called_once()
+        self.assertEqual(rule_engine.content_source[self.THREAD], "accessible_text")
+        self.assertEqual(rule_engine.content_confidence[self.THREAD], 0.82)
+
+    def test_a_weak_box_read_or_an_earlier_box_read_still_holds(self):
+        for earlier, confidence in (("ocr", 0.65), ("accessible_text", 0.82)):
+            self.setUp()
+            applied, _, skip = self._apply(earlier, confidence)
+            self.assertFalse(applied, (earlier, confidence))
+            self.assertEqual(skip.call_args.args[3], skip_logger.REASON_WEAKER_READ)
+
+
+class TranslateBubbleTests(unittest.TestCase):
+    """Found live 2026-11-02 07:43: Chrome's translate popup ("מתורגם") was
+    switched to Hebrew by the fast path, and its Hebrew preview ("תרגום הדף
+    המלא") was read as the page's content."""
+
+    def test_the_bubbles_text_is_chrome_interface(self):
+        self.assertEqual(rule_engine._rejected_as_ui_noise(
+            "כעת או היית מועסק בעבר באופן\nעם חברת בת של אינטל\n\nתרגום הדף המלא"), "app UI chrome")
+
+    def test_the_popup_switches_nothing_and_keeps_the_page_visit(self):
+        thread = 7071
+        rule_engine.content_decision[thread] = rule_engine.English_HKL
+        try:
+            with patch.object(rule_engine.win32gui, "GetWindowText", return_value="‫מתורגם‬"), \
+                 patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=70), \
+                 patch.object(rule_engine, "_post_switch") as post, \
+                 patch.object(rule_engine.threading, "Thread") as thread_cls:
+                rule_engine.on_focus_change(None, rule_engine.win32con.EVENT_SYSTEM_FOREGROUND, 70, 0, 0, thread, 0)
+            post.assert_not_called()
+            thread_cls.assert_not_called()
+            self.assertEqual(rule_engine.content_decision[thread], rule_engine.English_HKL)
+        finally:
+            rule_engine.content_decision.pop(thread, None)
+
+
+class DialogFileNamesTests(unittest.TestCase):
+    """Found live 2026-11-01 22:19: a file "Open" dialog flipped six times in
+    13 seconds between its Hebrew file names and the English shortcuts in its
+    side panel. A dialog showing a file list is judged by its file names."""
+
+    def _decide(self, names):
+        control = _FakeControl(rect=_FakeRect(100, 100, 900, 700), name="")
+        with patch.object(rule_engine.win32gui, "GetForegroundWindow", return_value=5), \
+             patch.object(rule_engine.auto, "GetFocusedControl", return_value=control), \
+             patch.object(rule_engine, "_is_file_explorer", return_value=False), \
+             patch.object(rule_engine, "_is_dialog", return_value=True), \
+             patch.object(rule_engine, "_explorer_file_names", return_value=names), \
+             patch.object(rule_engine, "read_region", return_value="DB Browser Visual Studio (SQLite) Code") as ocr, \
+             patch.object(rule_engine.interface_text, "is_interface_text", return_value=False), \
+             patch.object(rule_engine.interface_text, "record"):
+            rule_engine._last_read.clear()
+            result = rule_engine.decide_with_content(5, None, "Open", "chrome.exe", thread_id=6)
+        return result, ocr
+
+    def test_file_names_decide(self):
+        (hkl, reason), ocr = self._decide("אישור תקופות ביטוח ומעסיקים\nאישור זכאות שנתי\nריכוז מידע ביטוח וגבייה")
+        self.assertEqual(hkl, rule_engine.Hebrew_HKL)
+        self.assertEqual(reason["source"], "dialog_file_names")
+        ocr.assert_not_called()
+
+    def test_a_dialog_without_a_file_list_is_read_as_before(self):
+        (hkl, reason), ocr = self._decide("")
+        ocr.assert_called()
+        self.assertNotEqual((reason or {}).get("source"), "dialog_file_names")
+
+
+class ManualSwitchCounterTests(unittest.TestCase):
+    """The user's question, 2026-11-02: "I switch by hand a lot more than
+    before." Every Alt+Shift the user presses is counted per day and app —
+    a number only, nothing typed."""
+
+    def setUp(self):
+        self._saved = (dict(keyboard_hook._manual_switches), keyboard_hook._manual_switch_file)
+        keyboard_hook._manual_switches.clear()
+
+    def tearDown(self):
+        keyboard_hook._manual_switches.clear()
+        keyboard_hook._manual_switches.update(self._saved[0])
+        keyboard_hook._manual_switch_file = self._saved[1]
+
+    def test_alt_then_shift_or_shift_then_alt_is_the_hotkey(self):
+        hot = keyboard_hook.is_language_hotkey
+        self.assertTrue(hot(0xA0, True, True, 0xA4))    # Shift pressed while Alt held
+        self.assertTrue(hot(0xA4, True, True, 0xA0))    # Alt pressed while Shift held
+        self.assertFalse(hot(0xA0, True, True, 0xA0))   # Shift held down, repeating
+        self.assertFalse(hot(0xA0, True, False, None))  # Shift alone (a capital letter)
+        self.assertFalse(hot(0x41, True, True, 0xA4))   # Alt+Shift+A
+
+    def test_counts_per_day_and_app_and_saves_only_numbers(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            keyboard_hook._manual_switch_file = os.path.join(tmp, "manual_switches.json")
+            for _ in range(3):
+                keyboard_hook.note_manual_switch("chrome.exe", day="2026-11-02")
+            keyboard_hook.note_manual_switch("Code.exe", day="2026-11-02")
+            with open(keyboard_hook._manual_switch_file, encoding="utf-8") as f:
+                self.assertEqual(json.load(f), {"2026-11-02": {"chrome.exe": 3, "Code.exe": 1}})
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_keeps_only_the_last_60_days(self):
+        keyboard_hook._manual_switch_file = None
+        for n in range(70):
+            keyboard_hook.note_manual_switch("chrome.exe", day=f"2026-{9 + n // 28:02d}-{n % 28 + 1:02d}")
+        self.assertEqual(len(keyboard_hook._manual_switches), keyboard_hook.MANUAL_SWITCH_DAYS_KEPT)
 
 
 class FocusedBoxBeatsOldTypingTests(unittest.TestCase):

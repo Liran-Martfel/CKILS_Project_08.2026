@@ -3465,6 +3465,29 @@ dropped when a replay showed the switch back had already been decided; the guard
 waits only while the layout hasn't shown the last press yet (each press is recorded with its target).
 Once it has, a new press is a real correction. 2 new tests. 350 pass.
 
+**2026-11-02 — "I switch by hand a lot more than before."** The user felt they were switching by hand
+about three times as often. The overrides table showed no rise (2–9 a day since 23.10, against 10–54 in
+the first week), but it can't answer the question: a switch made right after arriving counts as
+carry-over and is never recorded there, and the skip log keeps one row per window and reason per 10
+minutes. What the logs did show: CKILS's own switches fell from about 450 a day (23–25.10) to 88–190,
+almost all in "typed in this window", which forgets everything when Chrome restarts. They also showed four concrete problems:
+- *Intel's English form stayed Hebrew (02.11 07:43).* Chrome's translate bubble (titled "מתורגם")
+  got a fast-path switch to Hebrew from its learned history, and a screen picture caught its Hebrew
+  preview at 0.98. The English fields read after it closed (0.82) were blocked as weaker reads. Now the
+  popup changes nothing, its "תרגום הדף המלא" text counts as Chrome's interface, and a 0.8+ read of the
+  focused box beats an earlier screen picture (not an earlier box read).
+- *The "previous tab" rule was too broad.* Since 31.10 it threw away 30–40 reads a day, mostly true
+  repeats: PyCharm files in one project, Zoom windows, WhatsApp's unread counter. It now applies only to
+  screen pictures in a browser, where the 29.10 cases happened.
+- *A file "Open" dialog flipped six times in 13 s (01.11 22:19)*, between its Hebrew file names and the
+  English shortcuts in its side panel. A dialog with a file list is now judged by its file names, like
+  Explorer.
+- *No real number.* Every Alt+Shift the user presses is now counted per day and app in
+  `manual_switches.json` (a number only; CKILS's own presses are injected and not counted), so the next
+  answer is measured, not estimated.
+
+10 new tests, 1 test class moved to screen-picture reads. 360 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

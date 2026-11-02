@@ -443,6 +443,7 @@ content_decision = {}  # thread_id -> the last confident Tier 3 decision, if any
 # overturned Hebrew sentences read at 0.99. Absent (no number to compare) =
 # no limit. Same lifetime as content_decision.
 content_confidence = {}  # thread_id -> confidence of that decision
+content_source = {}  # thread_id -> where that read came from ("accessible_text", "ocr", ...)
 
 # Real bug found live: Google Docs' body text is a confirmed dead end to read
 # (see _google_docs_title_text below) — the ONLY signal decide_with_content can
@@ -672,7 +673,10 @@ PLACEHOLDER_TEXT_PREFIXES = ["Type a message", "Write your prompt to Claude", "W
 # to the translation POPUP this menu item opens, a related but separate gap.
 UI_CHROME_MARKERS = ["Workplace", "וביטקוין בזמן-אמת ב-TradingView",
                       "esc to focus or unfocus Claude", "File Edit Selection View Go",
-                      "Claude Code conversation", "תרגום הטקסט שנבחר ל"]
+                      "Claude Code conversation", "תרגום הטקסט שנבחר ל",
+                      # Found live 2026-11-02 07:43: Chrome's translate bubble over
+                      # an English Intel form, its Hebrew preview read at 0.98.
+                      "תרגום הדף המלא"]
 
 # Real finding, 2026-10-12, same investigation as the UI_CHROME_MARKERS entry
 # above: choosing "Translate selected text to..." doesn't just show a menu
@@ -1049,6 +1053,20 @@ def _is_file_explorer(hwnd):
         return False
 
 
+# Found live 2026-11-01 22:19: a file "Open" dialog flipped six times in 13
+# seconds — Hebrew file names, then the English shortcuts in its side panel.
+# A dialog that shows a file list is judged by its file names, like Explorer;
+# any other dialog (no list) is read as before.
+DIALOG_WINDOW_CLASS = "#32770"
+
+
+def _is_dialog(hwnd):
+    try:
+        return win32gui.GetClassName(hwnd) == DIALOG_WINDOW_CLASS
+    except Exception:
+        return False
+
+
 def _explorer_file_names(hwnd):
     """The names shown in an Explorer window's file list, one per line,
     without extensions; "" if there's no list to read."""
@@ -1124,9 +1142,13 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     full_control_rect = (rect.left, rect.top, rect.right, rect.bottom)
     screenshot_rect = None
     accessible_text = (control.Name or "").strip()
+    dialog_file_names = _explorer_file_names(hwnd) if _is_dialog(hwnd) else ""
     if _is_file_explorer(hwnd):
         text = _explorer_file_names(hwnd)
         source = "explorer_file_names"
+    elif dialog_file_names:
+        text = dialog_file_names
+        source = "dialog_file_names"
     elif _looks_like_real_content(accessible_text, title):
         text = accessible_text
         source = "accessible_text"
@@ -1192,10 +1214,12 @@ def decide_with_content(hwnd, fallback_hkl, title, exe_name, thread_id):
     # drushim's text word for word, AllJobs got LinkedIn's), and the weaker-
     # read rule then kept that wrong answer. The same text as the last read of
     # another tab in this window, that recently, is the old picture: thrown
-    # away, and not remembered as this tab's.
+    # away, and not remembered as this tab's. Only a screen picture in a
+    # browser (2026-11-02: it also threw away good reads in PyCharm, Zoom and
+    # WhatsApp, where the same text on two titles is simply true).
     now = time.time()
     previous_read = _last_read.get(hwnd)
-    if (source != "google_docs_title" and previous_read is not None
+    if (source.startswith("ocr") and _is_chromium_browser(exe_name) and previous_read is not None
             and previous_read[0] != _window_title_key(title) and previous_read[1] == text
             and now - previous_read[2] < STALE_READ_SECONDS):
         if DEBUG:
@@ -1536,6 +1560,15 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             return
         if hwnd != win32gui.GetForegroundWindow():
             return
+    # Found live 2026-11-02 07:43: Chrome's translate popup ("מתורגם") was
+    # skipped for reading, yet the fast path still switched it to Hebrew from
+    # its learned history, and its new title ended the real page's visit.
+    # A disposable popup changes nothing: no switch, no new visit.
+    try:
+        if DIRECTION_MARKS_PATTERN.sub("", win32gui.GetWindowText(hwnd) or "").strip() in EXCLUDED_WINDOW_TITLES:
+            return
+    except Exception:
+        pass
     if input_window.is_store_frame(hwnd):
         try:
             thread_id = input_window.thread_and_pid(hwnd)[0]  # the app's own typing thread
@@ -1550,6 +1583,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             last_set.pop(previous_thread, None)
         content_decision.pop(previous_thread, None)  # fresh window = learned default first, again
         content_confidence.pop(previous_thread, None)
+        content_source.pop(previous_thread, None)
         google_docs_title_already_applied.discard(previous_thread)
         _reset_visit_state(previous_thread)  # matched-state, re-asserts, unconfirmed mismatches: all end with the visit
         # Real bug found live: unlike content_decision (a per-visit "sticky"
@@ -1605,6 +1639,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
             last_set.pop(thread_id, None)
         content_decision.pop(thread_id, None)
         content_confidence.pop(thread_id, None)
+        content_source.pop(thread_id, None)
         visit_started[thread_id] = time.time()  # a new page is a new visit
         google_docs_title_already_applied.discard(thread_id)
         _reset_visit_state(thread_id)
@@ -1711,6 +1746,7 @@ def on_focus_change(hook, event, hwnd, id_object, id_child, thread_id, timestamp
 
 
 FOCUSED_BOX_CONFIDENCE = 0.9
+BOX_OVER_PICTURE_CONFIDENCE = 0.8
 
 
 def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
@@ -1768,9 +1804,17 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
             return False
         new_confidence = (reason or {}).get("confidence")
         earlier_confidence = content_confidence.get(thread_id)
+        # Found live 2026-11-02 07:43: a screen picture caught Chrome's translate
+        # bubble (Hebrew, 0.98); the English form fields read after it closed
+        # (0.82) were "weaker" and the layout stayed Hebrew. A picture can hold
+        # things that are gone a second later; the box you're in, read from the
+        # app itself, is what you're about to type into.
+        box_over_picture = ((reason or {}).get("source") == "accessible_text"
+                            and (new_confidence or 0) >= BOX_OVER_PICTURE_CONFIDENCE
+                            and content_source.get(thread_id, "accessible_text") != "accessible_text")
         if (thread_id in content_decision and content_decision[thread_id] != corrected_hkl
                 and new_confidence is not None and earlier_confidence is not None
-                and new_confidence < earlier_confidence):
+                and new_confidence < earlier_confidence and not box_over_picture):
             if DEBUG:
                 print(f"  [content] {exe_name}: weaker read ({new_confidence:.2f}) than this visit's "
                       f"({earlier_confidence:.2f}), leaving it alone ({elapsed_ms:.0f} ms)")
@@ -1807,8 +1851,10 @@ def apply_content_correction(hwnd, thread_id, exe_name, fallback_hkl, title):
         content_decision[thread_id] = corrected_hkl  # sticks for the rest of this visit
         if new_confidence is not None:
             content_confidence[thread_id] = new_confidence
+            content_source[thread_id] = (reason or {}).get("source")
         else:
             content_confidence.pop(thread_id, None)
+            content_source.pop(thread_id, None)
         language_name = HKL_TO_LANGUAGE_NAME[corrected_hkl]
         # How long the read took (2026-10-21): on a busy laptop OCR slows down
         # and reads arrive too late; this is the data to see when and by how much.
@@ -2018,6 +2064,7 @@ def check_typing_area(hwnd, thread_id, exe_name, title, control):
     last_switch_time[thread_id] = time.time()
     content_decision[thread_id] = target_hkl
     content_confidence.pop(thread_id, None)
+    content_source.pop(thread_id, None)
     decision_logger.log_auto_change(
         exe_name, title, thread_id, HKL_TO_LANGUAGE_NAME.get(actual_hkl), language,
         {"mechanism": "typing_area", "area": area, "switched_by": "hotkey" if by_hotkey else "message"},
@@ -2116,6 +2163,7 @@ def apply_tier4_correction(hwnd, thread_id, exe_name, title, from_hkl, target_hk
     last_switch_time[thread_id] = time.time()
     content_decision[thread_id] = target_hkl
     content_confidence.pop(thread_id, None)  # typing evidence, not a read: no number to compare
+    content_source.pop(thread_id, None)
     tier4_corrected.add(thread_id)
     decision_logger.log_auto_change(
         exe_name, title, thread_id,
