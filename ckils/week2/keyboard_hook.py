@@ -789,13 +789,14 @@ TYPED_RECENT_SECONDS = 120
 # before." The overrides table can't answer it — a switch right after arriving
 # counts as carry-over and is never recorded there. This counts every
 # Alt+Shift the user presses (CKILS's own presses are injected and never reach
-# here), per day and app. PRIVACY: a number per app, nothing typed.
-MANUAL_SWITCH_DAYS_KEPT = 60
+# here), per hour and app — by the hour, so two versions run on the same day
+# can be told apart (2026-11-02). PRIVACY: a number per app, nothing typed.
+MANUAL_SWITCH_HOURS_KEPT = 60 * 24
 _ALT_VKS = {VK_MENU, 0xA4, 0xA5}  # Alt, left Alt, right Alt
 _SHIFT_VKS = {win32con.VK_SHIFT, win32con.VK_LSHIFT, win32con.VK_RSHIFT}
 _manual_switch_lock = threading.Lock()
 _manual_switch_file = None  # set at start; None = counting only in memory (tests)
-_manual_switches = {}  # "YYYY-MM-DD" -> {exe name -> presses}
+_manual_switches = {}  # "YYYY-MM-DD HH" -> {exe name -> presses}
 _previous_vk = None
 
 
@@ -806,12 +807,12 @@ def is_language_hotkey(vk_code, shift_pressed, alt_held, previous_vk):
     return (vk_code in _SHIFT_VKS and alt_held) or (vk_code in _ALT_VKS and shift_pressed)
 
 
-def note_manual_switch(exe_name, day=None):
-    day = day or time.strftime("%Y-%m-%d")
+def note_manual_switch(exe_name, hour=None):
+    hour = hour or time.strftime("%Y-%m-%d %H")
     with _manual_switch_lock:
-        counts = _manual_switches.setdefault(day, {})
+        counts = _manual_switches.setdefault(hour, {})
         counts[exe_name] = counts.get(exe_name, 0) + 1
-        for old in sorted(_manual_switches)[:-MANUAL_SWITCH_DAYS_KEPT]:
+        for old in sorted(_manual_switches)[:-MANUAL_SWITCH_HOURS_KEPT]:
             del _manual_switches[old]
         if _manual_switch_file is None:
             return

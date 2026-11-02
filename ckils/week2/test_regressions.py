@@ -4398,23 +4398,27 @@ class ManualSwitchCounterTests(unittest.TestCase):
         self.assertFalse(hot(0xA0, True, False, None))  # Shift alone (a capital letter)
         self.assertFalse(hot(0x41, True, True, 0xA4))   # Alt+Shift+A
 
-    def test_counts_per_day_and_app_and_saves_only_numbers(self):
+    def test_counts_per_hour_and_app_and_saves_only_numbers(self):
         tmp = tempfile.mkdtemp()
         try:
             keyboard_hook._manual_switch_file = os.path.join(tmp, "manual_switches.json")
             for _ in range(3):
-                keyboard_hook.note_manual_switch("chrome.exe", day="2026-11-02")
-            keyboard_hook.note_manual_switch("Code.exe", day="2026-11-02")
+                keyboard_hook.note_manual_switch("chrome.exe", hour="2026-11-02 09")
+            keyboard_hook.note_manual_switch("Code.exe", hour="2026-11-02 09")
+            keyboard_hook.note_manual_switch("Code.exe", hour="2026-11-02 10")
             with open(keyboard_hook._manual_switch_file, encoding="utf-8") as f:
-                self.assertEqual(json.load(f), {"2026-11-02": {"chrome.exe": 3, "Code.exe": 1}})
+                self.assertEqual(json.load(f), {"2026-11-02 09": {"chrome.exe": 3, "Code.exe": 1},
+                                                "2026-11-02 10": {"Code.exe": 1}})
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_keeps_only_the_last_60_days(self):
         keyboard_hook._manual_switch_file = None
-        for n in range(70):
-            keyboard_hook.note_manual_switch("chrome.exe", day=f"2026-{9 + n // 28:02d}-{n % 28 + 1:02d}")
-        self.assertEqual(len(keyboard_hook._manual_switches), keyboard_hook.MANUAL_SWITCH_DAYS_KEPT)
+        with patch.object(keyboard_hook, "MANUAL_SWITCH_HOURS_KEPT", 5):
+            for n in range(8):
+                keyboard_hook.note_manual_switch("chrome.exe", hour=f"2026-11-02 {n:02d}")
+        self.assertEqual(sorted(keyboard_hook._manual_switches), [f"2026-11-02 {n:02d}" for n in range(3, 8)])
+        self.assertEqual(keyboard_hook.MANUAL_SWITCH_HOURS_KEPT, 60 * 24)
 
 
 class FocusedBoxBeatsOldTypingTests(unittest.TestCase):
