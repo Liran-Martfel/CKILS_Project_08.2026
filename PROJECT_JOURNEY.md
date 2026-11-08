@@ -3488,6 +3488,21 @@ almost all in "typed in this window", which forgets everything when Chrome resta
 
 10 new tests, 1 test class moved to screen-picture reads. 360 pass.
 
+**2026-11-08 — A measured comparison: the newest version was worse, and why.** With the Alt+Shift
+counter in both, the GitHub version (823f6f3, 2.11–6.11, 36 hours of use) needed 9.8 presses per 100
+automatic switches; the newest (de79061, 6.11–8.11, 21 hours) needed 12.5, and 2.9 presses an hour
+against 1.6. The user had said "it can't detect the focused screen as well as it did." Reading was
+not the cause (median read 465 ms against 535; fewer Chrome reads only because the GitHub period had
+long sessions on one page). The cause was the typing-area switch: 19 switches against 2. Three changes
+from the 21.10 code review made it fire too often and wrongly: coming back to a window counted as
+entering its box again (VS Code, 7.11 14:57: three fights in a row with the window's own language),
+an area's learning was shared by the whole site (every claude.ai chat, every Wix page), and box names
+lost their endings so different boxes merged (every Wix box became "input": switched to Hebrew and
+corrected back to English 5 times in half an hour on 8.11). All three were put back exactly as in the
+GitHub version; only the safety guards stay (panic switch, never pressing Alt+Shift twice, Store apps).
+A lesson: a code-review fix that sounds right is still a change to behaviour, and needs measuring.
+3 tests replaced, 2 new. 362 pass.
+
 ---
 
 ## Future ideas (not yet implemented)

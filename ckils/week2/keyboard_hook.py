@@ -892,19 +892,13 @@ def _leader(words):
     return leader if count / len(words) >= TYPED_MIN_SHARE else None
 
 
-def _area_title_key(title):
-    """The app/site part of a title ("b.py - proj - Visual Studio Code" ->
-    "proj - Visual Studio Code"). Found by /code-review 2026-10-21: keyed by
-    the full title, an area's learning was lost every time VS Code's title
-    changed with the open file."""
-    parts = [p.strip() for p in _title_key(title).split(" - ") if p.strip()]
-    return " - ".join(parts[-2:]) if len(parts) >= 2 else _title_key(title)
-
-
 def typed_language_in_area(hwnd, title, area):
     """The language the user has mostly typed in this area of this window."""
     with _typed_lock:
-        words = list(_typed_by_area.get((hwnd, _area_title_key(title), area), ()))
+        # Keyed by the full title, as in the GitHub version. Measured 2026-11-08:
+        # keying by the site ("Claude - Google Chrome") shared one area's
+        # language across every chat and page of a site, and it switched wrongly.
+        words = list(_typed_by_area.get((hwnd, _title_key(title), area), ()))
     return _leader(words)
 
 
@@ -984,7 +978,7 @@ def _note_typed_word(state, thread_id, title, current_hkl, fired):
         _recent_typed_words.setdefault(hwnd, collections.deque(maxlen=30)).append((now, key[1], language))
         area = focus_area.get(hwnd)
         if area:
-            _typed_by_area.setdefault((hwnd, _area_title_key(title), area),
+            _typed_by_area.setdefault((hwnd, _title_key(title), area),
                                       collections.deque(maxlen=TYPED_WORDS_KEPT)).append(
                 "hebrew" if meant_hebrew else "english")
         _typed_dirty = True

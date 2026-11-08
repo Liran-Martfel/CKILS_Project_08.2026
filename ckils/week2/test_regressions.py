@@ -3453,7 +3453,7 @@ class TypingAreaTests(unittest.TestCase):
     messageInput_*). Each typing area learns its own language from typing."""
 
     HWND, THREAD = 760, 8095
-    CODE, CHAT = "EditControl:native-edit-context", "EditControl:messageInput"  # generated suffix dropped
+    CODE, CHAT = "EditControl:native-edit-context", "EditControl:messageInput_cKsPxg"
 
     class _Control:
         def __init__(self, control_type, class_name):
@@ -3471,7 +3471,7 @@ class TypingAreaTests(unittest.TestCase):
     tearDown = setUp
 
     def _learn(self, area, language, n=4):
-        keyboard_hook._typed_by_area[(self.HWND, keyboard_hook._area_title_key("proj - Visual Studio Code"), area)] = \
+        keyboard_hook._typed_by_area[(self.HWND, keyboard_hook._title_key("proj - Visual Studio Code"), area)] = \
             collections.deque([language] * n)
 
     def _tick(self, class_name, layout):
@@ -3492,12 +3492,27 @@ class TypingAreaTests(unittest.TestCase):
         self.tier4_on = False
         self.assertIsNone(self._tick("native-edit-context", rule_engine.Hebrew_HKL)[0])
 
-    def test_learning_survives_switching_files(self):
-        """VS Code's title changes with the open file; the area keeps its learning."""
-        keyboard_hook._typed_by_area[(self.HWND, keyboard_hook._area_title_key("a.py - proj - Visual Studio Code"),
-                                      self.CODE)] = collections.deque(["english"] * 4)
+    def test_an_area_learns_per_page_not_per_site(self):
+        """Measured 2026-11-08: shared across a site, one claude.ai chat's or
+        Wix page's box language switched every other page's box wrongly."""
+        keyboard_hook._typed_by_area[(self.HWND, keyboard_hook._title_key("Chat A - Claude - Google Chrome"),
+                                      "EditControl:tiptap")] = collections.deque(["english"] * 4)
         self.assertEqual(keyboard_hook.typed_language_in_area(
-            self.HWND, "b.py - proj - Visual Studio Code", self.CODE), "english")
+            self.HWND, "Chat A - Claude - Google Chrome", "EditControl:tiptap"), "english")
+        self.assertIsNone(keyboard_hook.typed_language_in_area(
+            self.HWND, "Chat B - Claude - Google Chrome", "EditControl:tiptap"))
+
+    def test_boxes_keep_their_full_names(self):
+        """Measured 2026-11-08: with the ending dropped, different boxes merged."""
+        self.assertEqual(rule_engine.typing_area(self._Control("EditControl", "messageInput_cKsPxg")), self.CHAT)
+        self.assertNotEqual(rule_engine.typing_area(self._Control("EditControl", "input_aB12cd")),
+                            rule_engine.typing_area(self._Control("EditControl", "input_Zz98yx")))
+
+    def test_coming_back_to_a_window_does_not_reenter_its_area(self):
+        """Measured 2026-11-08 in VS Code: re-entering on return fought the
+        window's own language three times in a row."""
+        import inspect
+        self.assertNotIn("last_area.pop", inspect.getsource(rule_engine._area_watch_loop))
 
     def test_only_text_fields_are_typing_areas(self):
         self.assertEqual(rule_engine.typing_area(self._Control("EditControl", "native-edit-context")), self.CODE)

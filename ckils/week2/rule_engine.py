@@ -2013,18 +2013,15 @@ AREA_TYPING_HOLD_SECONDS = 1.0
 last_area = {}  # hwnd -> the typing area seen last time
 
 
-_GENERATED_SUFFIX = re.compile(r"_[A-Za-z0-9]{5,8}$")
-
-
 def typing_area(control):
-    """A stable name for the focused typing area, or None if focus isn't in
-    a text field (a list, a button, a page body). A generated suffix on the
-    class ("messageInput_cKsPxg") is dropped, so the name survives an app
-    update that regenerates it."""
+    """A name for the focused typing area, or None if focus isn't in a text
+    field (a list, a button, a page body). The full class name, as in the
+    GitHub version: measured 2026-11-08, dropping its ending merged different
+    boxes into one (every Wix box became "input") and switched them wrongly."""
     try:
         if control.ControlTypeName != "EditControl":
             return None
-        return f"EditControl:{_GENERATED_SUFFIX.sub('', control.ClassName or '')}"
+        return f"EditControl:{control.ClassName}"
     except Exception:
         return None
 
@@ -2078,17 +2075,13 @@ def _area_watch_loop():
     typing area of the front window has focus. Never raises."""
     auto.InitializeUIAutomationInCurrentThread()
     exe_of = {}
-    previous_hwnd = None
     while True:
         time.sleep(AREA_WATCH_SECONDS)
         try:
             hwnd = win32gui.GetForegroundWindow()
-            if hwnd != previous_hwnd:
-                # Back in a window: its area counts as newly entered, so the
-                # area's own language applies over the window-wide one that
-                # arriving set (found by /code-review 2026-10-21).
-                last_area.pop(hwnd, None)
-                previous_hwnd = hwnd
+            # Coming back to a window is NOT entering its area again (as in the
+            # GitHub version). Measured 2026-11-08 in VS Code: that re-entry made
+            # the area switch fight the window's own language three times in a row.
             title = win32gui.GetWindowText(hwnd)
             thread_id, pid = input_window.thread_and_pid(hwnd)
             if pid not in exe_of:
