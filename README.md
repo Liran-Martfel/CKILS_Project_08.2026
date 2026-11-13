@@ -46,6 +46,18 @@ only 5 days of data so far — a promising sign, not proof. It comes from
 `measure_corrections.py`, which separates real corrections from CKILS's own lag, carry-over between
 windows and deliberate tests.
 
+**v2.1 against the previous version, measured the same way on both (November 2026).** Each version ran
+on the same computer with one addition: a counter of every Alt+Shift the user pressed (a number per hour
+and app — nothing typed). The old way of recording manual switches missed a third of them.
+
+| Version | Hours of use | Manual Alt+Shift presses per 100 automatic switches |
+|---|---|---|
+| Previous version on GitHub (Nov 2–6) | 36 | 9.8 |
+| A first v2.1 candidate (Nov 6–8) | 20 | 13.2 — worse: its typing-area switch fired wrongly |
+| v2.1, that switch restored (Nov 8–13) | 47 | 8.6 |
+
+A few days per version, so a modest difference — but measured, not guessed.
+
 ## Privacy
 
 - Everything about you stays on your computer. Nothing is uploaded. The one connection: once a day the
@@ -88,7 +100,7 @@ Windows 10/11, Python 3.10+ (developed on 3.14), with `pywin32`, `psutil`, `uiau
 
 ```
 python ckils/week2/rule_engine.py          # run CKILS
-python ckils/week2/test_regressions.py     # 273 tests, one per real bug found
+python ckils/week2/test_regressions.py     # 362 tests, one per real bug found
 python ckils/week2/measure_corrections.py  # real corrections, read from your own logs
 python ckils/week2/summarize_skips.py      # why CKILS did nothing, when it did nothing
 ```
